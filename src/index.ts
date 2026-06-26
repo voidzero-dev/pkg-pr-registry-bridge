@@ -4,7 +4,12 @@ import type { Env } from './config'
 import { HttpError } from './httpError'
 import { isPreviewPackage } from './preview/packages'
 import { parsePreviewVersion } from './preview/parsePreviewVersion'
-import { parseConfiguredPreviewRefsSafe } from './preview/parseConfiguredPreviewRefs'
+import { parseConfiguredPreviewRefs } from './preview/parseConfiguredPreviewRefs'
+import {
+  getConfiguredRefs,
+  registerRef,
+  unregisterRef,
+} from './preview/getConfiguredRefs'
 import {
   parsePackagePath,
   parseTarballPath,
@@ -13,6 +18,9 @@ import { fetchNpmPackument } from './registry/fetchNpmPackument'
 import { buildVersionMetadata } from './registry/buildVersionMetadata'
 import { redirectToNpm } from './registry/redirectToNpm'
 import { getPreviewMeta, getPreviewTarball } from './tarball/getPreviewBuild'
+import { metaKey, tarballKey } from './cache/r2Cache'
+import { requireAdmin } from './security/auth'
+import { verifyRefExists } from './github/verifyRef'
 import {
   packumentCacheControl,
   tarballCacheControl,
@@ -23,6 +31,9 @@ type HonoEnv = { Bindings: Env }
 const app = new Hono<HonoEnv>()
 
 app.get('/_health', (c) => c.json({ status: 'ok' }))
+
+const admin = (c: { req: { header: (k: string) => string | undefined }; env: Env }) =>
+  requireAdmin({ env: c.env, authorization: c.req.header('authorization') })
 
 /**
  * Preview tarball endpoint. Serves a generated tarball from the edge cache,
@@ -56,8 +67,101 @@ app.get('/tarballs/*', async (c) => {
   return res
 })
 
-/** Cache purge endpoint (MVP2). */
-app.post('/-/purge', (c) => c.json({ error: 'Not implemented' }, 501))
+/** List the configured preview refs (static env + runtime KV). */
+app.get('/-/refs', async (c) => {
+  admin(c)
+  const refs = await getConfiguredRefs(c.env)
+  return c.json({
+    refs: refs.map((r) => ({
+      ref: `${r.type}.${r.ref}`,
+      version: r.version,
+      tag: r.tag,
+    })),
+  })
+})
+
+/**
+ * Register a preview ref at runtime (no redeploy). Body: `{ "ref": "pr.1891" }`
+ * or `{ "ref": "commit.<sha>" }`. When `GITHUB_TOKEN` is set, the ref is
+ * verified to exist in the repo before being accepted.
+ */
+app.post('/-/refs', async (c) => {
+  admin(c)
+  const body = (await c.req.json().catch(() => ({}))) as { ref?: string }
+  const ref = (body.ref ?? '').trim()
+
+  let parsed
+  try {
+    ;[parsed] = parseConfiguredPreviewRefs(ref)
+  } catch {
+    throw new HttpError(400, `Invalid ref: ${ref || '(empty)'}`)
+  }
+
+  if (c.env.GITHUB_TOKEN) {
+    let exists: boolean
+    try {
+      exists = await verifyRefExists(c.env, parsed)
+    } catch (err) {
+      throw new HttpError(502, `Could not verify ref with GitHub: ${err}`)
+    }
+    if (!exists) {
+      throw new HttpError(
+        404,
+        `Ref not found in ${c.env.PREVIEW_OWNER}/${c.env.PREVIEW_REPO}: ${ref}`,
+      )
+    }
+  }
+
+  try {
+    await registerRef(c.env, ref)
+  } catch (err) {
+    throw new HttpError(503, String(err))
+  }
+  return c.json({ added: ref, version: parsed.version, tag: parsed.tag }, 201)
+})
+
+/** Unregister a runtime preview ref. Body: `{ "ref": "pr.1891" }`. */
+app.delete('/-/refs', async (c) => {
+  admin(c)
+  const body = (await c.req.json().catch(() => ({}))) as { ref?: string }
+  const ref = (body.ref ?? '').trim()
+  try {
+    await unregisterRef(c.env, ref)
+  } catch (err) {
+    throw new HttpError(400, String(err))
+  }
+  return c.json({ removed: ref })
+})
+
+/**
+ * Purge a generated build from the caches. Body:
+ * `{ "package": "vite-plus", "version": "0.0.0-pr.1891" }`.
+ */
+app.post('/-/purge', async (c) => {
+  admin(c)
+  const body = (await c.req.json().catch(() => ({}))) as {
+    package?: string
+    version?: string
+  }
+  const name = body.package ?? ''
+  const version = body.version ?? ''
+
+  if (!isPreviewPackage(name)) {
+    throw new HttpError(400, `Unknown preview package: ${name || '(empty)'}`)
+  }
+  if (!parsePreviewVersion(version)) {
+    throw new HttpError(400, `Invalid preview version: ${version || '(empty)'}`)
+  }
+
+  await Promise.all([
+    c.env.TARBALL_CACHE.delete(tarballKey(name, version)),
+    c.env.TARBALL_CACHE.delete(metaKey(name, version)),
+    caches.default.delete(
+      new Request(`${c.env.PUBLIC_BASE_URL}/tarballs/${name}/${version}.tgz`),
+    ),
+  ])
+  return c.json({ purged: { package: name, version } })
+})
 
 /**
  * Packument endpoint and default-registry fallback.
@@ -84,15 +188,15 @@ app.get('*', async (c) => {
   packument['dist-tags'] ??= {}
   packument.versions ??= {}
 
-  const refs = parseConfiguredPreviewRefsSafe(c.env.VITE_PLUS_PREVIEW_REFS)
+  const refs = await getConfiguredRefs(c.env)
   for (const ref of refs) {
     try {
-      const packageJson = await getPreviewMeta(c.env, name, ref.version)
+      const preview = await getPreviewMeta(c.env, name, ref.version)
       packument.versions[ref.version] = buildVersionMetadata(
         c.env,
         name,
         ref.version,
-        packageJson,
+        preview,
       )
       packument['dist-tags'][ref.tag] = ref.version
     } catch (err) {

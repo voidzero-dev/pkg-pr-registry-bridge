@@ -1,6 +1,6 @@
 # RFC 0001: pkg.pr.new Registry Bridge on Cloudflare Workers
 
-- Status: Draft
+- Status: Implemented (MVP1 + MVP2)
 - Author: fengmk2
 - Created: 2026-06-26
 - Source design: `pkg-pr-new-registry-bridge-version-gated-design.md`

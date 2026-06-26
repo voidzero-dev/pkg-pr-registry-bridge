@@ -96,9 +96,36 @@ semver versions, so the set is configured explicitly.
 The tarball endpoint, by contrast, accepts any valid preview version without
 configuration; only packument-based discovery needs the list.
 
-In this MVP the list is the `VITE_PLUS_PREVIEW_REFS` var, so adding a ref means a
-redeploy. The RFC's MVP2 moves it to a KV namespace so refs can be added at
-runtime (via an admin endpoint or a pkg.pr.new webhook) with no redeploy.
+The static `VITE_PLUS_PREVIEW_REFS` var is one source; refs can also be added at
+runtime via the admin endpoint below (stored in KV), with no redeploy. Both
+sources are merged.
+
+## Admin endpoints
+
+Guarded by `Authorization: Bearer <ADMIN_TOKEN>` (set `ADMIN_TOKEN` with
+`wrangler secret put`). Without it configured the endpoints return 503.
+
+```bash
+# List configured refs (static env + runtime KV)
+curl -H "authorization: Bearer $ADMIN_TOKEN" https://.../-/refs
+
+# Register a ref at runtime (no redeploy). If GITHUB_TOKEN is set, the ref is
+# verified to exist in voidzero-dev/vite-plus first.
+curl -X POST -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \
+  -d '{"ref":"commit.a832a55"}' https://.../-/refs
+
+# Unregister a ref
+curl -X DELETE -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \
+  -d '{"ref":"commit.a832a55"}' https://.../-/refs
+
+# Purge a generated build from the caches (R2 + edge)
+curl -X POST -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \
+  -d '{"package":"vite-plus","version":"0.0.0-pr.1891"}' https://.../-/purge
+```
+
+A registered ref is reflected immediately and built into the packument on the
+next request (and into R2 on first fetch). This is the no-redeploy path for
+exposing new pkg.pr.new builds.
 
 ## Configuration
 
@@ -113,8 +140,12 @@ Set via `wrangler.toml` `[vars]` (tokens via `wrangler secret`):
 | `VITE_PLUS_PREVIEW_REFS` | Comma-separated refs to inject: `pr.<n>` / `commit.<sha>`. |
 | `MAX_TARBALL_BYTES` | Max upstream tarball size (default 64 MiB). |
 
-The `TARBALL_CACHE` R2 bucket binding stores generated tarballs and rewritten
-metadata.
+Bindings/secrets:
+
+- `TARBALL_CACHE` (R2) - generated tarballs + rewritten metadata (incl. integrity).
+- `PREVIEW_REFS` (KV) - runtime-registered refs.
+- `ADMIN_TOKEN` (secret) - guards the admin endpoints.
+- `GITHUB_TOKEN` (secret, optional) - enables PR/commit existence checks on `/-/refs`.
 
 ## Develop
 
@@ -144,8 +175,9 @@ deploy without the post-deploy checks.
 
 ## Status
 
-MVP1 of the RFC, deployed: default-registry bridge with npm redirect fallback,
-`pr.<n>`/`commit.<sha>` preview injection, tarball rewrite, R2 + edge caching,
-deploy-time warm, and a bun end-to-end check. Integrity fields are omitted
-(npm/bun compute them). MVP2 items (KV-backed dynamic refs, authenticated purge,
-GitHub existence checks, computed integrity) are scoped in the RFC but not built.
+MVP1 + MVP2 of the RFC, deployed: default-registry bridge with npm redirect
+fallback, `pr.<n>`/`commit.<sha>` preview injection, tarball rewrite, R2 + edge
+caching, deploy-time warm, computed SHA-512/SHA-1 integrity, KV-backed dynamic
+refs, authenticated admin endpoints (`/-/refs`, `/-/purge`), optional GitHub
+existence checks, and a bun end-to-end check. Remaining (MVP3): a pkg.pr.new
+webhook to auto-register refs, more workspace packages via config, and metrics.

@@ -60,6 +60,11 @@ beforeAll(async () => {
     version: 'a832a55',
     dependencies: { '@voidzero-dev/vite-plus-core': 'a832a55' },
   })
+  const coreCommit = await makeTarball({
+    name: '@voidzero-dev/vite-plus-core',
+    version: 'a832a55',
+    dependencies: { 'vite-plus': 'a832a55' },
+  })
 
   const mockFetch = (input: RequestInfo | URL): Promise<Response> => {
     const url = typeof input === 'string' ? input : input.toString()
@@ -79,6 +84,9 @@ beforeAll(async () => {
     }
     if (url.endsWith('/vite-plus@a832a55')) {
       return Promise.resolve(gzip(vitePlusCommit))
+    }
+    if (url.endsWith('/@voidzero-dev/vite-plus-core@a832a55')) {
+      return Promise.resolve(gzip(coreCommit))
     }
     return Promise.reject(new Error(`unexpected fetch: ${url}`))
   }
@@ -181,6 +189,113 @@ describe('tarball endpoint', () => {
   it('rejects invalid preview versions', async () => {
     const res = await SELF.fetch(`${BASE}/tarballs/vite-plus/0.2.1.tgz`)
     expect(res.status).toBe(400)
+  })
+})
+
+describe('integrity', () => {
+  it('advertises computed integrity/shasum in the injected version', async () => {
+    const res = await SELF.fetch(`${BASE}/vite-plus`, {
+      headers: { accept: 'application/json' },
+    })
+    const body = (await res.json()) as Record<string, any>
+    const dist = body.versions['0.0.0-pr.1891'].dist
+    expect(dist.integrity).toMatch(/^sha512-[A-Za-z0-9+/]+=*$/)
+    expect(dist.shasum).toMatch(/^[0-9a-f]{40}$/)
+  })
+})
+
+const AUTH = { authorization: 'Bearer test-admin-token' }
+
+describe('admin: refs', () => {
+  it('requires auth', async () => {
+    expect((await SELF.fetch(`${BASE}/-/refs`)).status).toBe(401)
+    expect(
+      (await SELF.fetch(`${BASE}/-/refs`, {
+        headers: { authorization: 'Bearer wrong' },
+      })).status,
+    ).toBe(401)
+  })
+
+  it('lists the env-configured refs', async () => {
+    const res = await SELF.fetch(`${BASE}/-/refs`, { headers: AUTH })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { refs: Array<{ ref: string }> }
+    expect(body.refs.some((r) => r.ref === 'pr.1891')).toBe(true)
+  })
+
+  it('registers a ref in KV and injects it into the packument', async () => {
+    const add = await SELF.fetch(`${BASE}/-/refs`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({ ref: 'commit.a832a55' }),
+    })
+    expect(add.status).toBe(201)
+    expect((await add.json()) as any).toMatchObject({
+      version: '0.0.0-commit.a832a55',
+    })
+
+    // The dynamically registered ref now appears in the packument.
+    const pack = await SELF.fetch(`${BASE}/vite-plus`, {
+      headers: { accept: 'application/json' },
+    })
+    const body = (await pack.json()) as Record<string, any>
+    expect(body.versions['0.0.0-commit.a832a55']).toBeTruthy()
+    expect(body['dist-tags']['commit-a832a55']).toBe('0.0.0-commit.a832a55')
+  })
+
+  it('rejects an invalid ref', async () => {
+    const res = await SELF.fetch(`${BASE}/-/refs`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({ ref: 'nonsense' }),
+    })
+    expect(res.status).toBe(400)
+  })
+
+  it('unregisters a ref', async () => {
+    await SELF.fetch(`${BASE}/-/refs`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({ ref: 'commit.a832a55' }),
+    })
+    const del = await SELF.fetch(`${BASE}/-/refs`, {
+      method: 'DELETE',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({ ref: 'commit.a832a55' }),
+    })
+    expect(del.status).toBe(200)
+    const list = (await (
+      await SELF.fetch(`${BASE}/-/refs`, { headers: AUTH })
+    ).json()) as { refs: Array<{ ref: string }> }
+    expect(list.refs.some((r) => r.ref === 'commit.a832a55')).toBe(false)
+  })
+})
+
+describe('admin: purge', () => {
+  it('requires auth', async () => {
+    const res = await SELF.fetch(`${BASE}/-/purge`, { method: 'POST' })
+    expect(res.status).toBe(401)
+  })
+
+  it('validates package and version', async () => {
+    const res = await SELF.fetch(`${BASE}/-/purge`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({ package: 'react', version: '0.0.0-pr.1891' }),
+    })
+    expect(res.status).toBe(400)
+  })
+
+  it('purges an allowlisted preview build', async () => {
+    const res = await SELF.fetch(`${BASE}/-/purge`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({ package: 'vite-plus', version: '0.0.0-pr.1891' }),
+    })
+    expect(res.status).toBe(200)
+    expect((await res.json()) as any).toMatchObject({
+      purged: { package: 'vite-plus', version: '0.0.0-pr.1891' },
+    })
   })
 })
 

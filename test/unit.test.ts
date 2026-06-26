@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { verifyRefExists } from '../src/github/verifyRef'
 import {
   isPreviewVersion,
   parsePreviewVersion,
@@ -19,6 +20,7 @@ import {
   isUnderPackageRoot,
 } from '../src/security/validateTarballPath'
 import { buildVersionMetadata } from '../src/registry/buildVersionMetadata'
+import { computeDigests } from '../src/tarball/digests'
 import type { Env } from '../src/config'
 
 const env = {
@@ -218,19 +220,75 @@ describe('validateTarballPath', () => {
 })
 
 describe('buildVersionMetadata', () => {
-  it('drops devDependencies, sets dist.tarball and _id', () => {
+  it('drops devDependencies, sets dist.tarball/_id/integrity', () => {
     const meta = buildVersionMetadata(env, 'vite-plus', '0.0.0-pr.1891', {
-      name: 'vite-plus',
-      version: '0.0.0-pr.1891',
-      dependencies: { '@voidzero-dev/vite-plus-core': '0.0.0-pr.1891' },
-      devDependencies: { typescript: '^5' },
-      bin: { vp: './bin/vp' },
+      packageJson: {
+        name: 'vite-plus',
+        version: '0.0.0-pr.1891',
+        dependencies: { '@voidzero-dev/vite-plus-core': '0.0.0-pr.1891' },
+        devDependencies: { typescript: '^5' },
+        bin: { vp: './bin/vp' },
+      },
+      shasum: 'abc123',
+      integrity: 'sha512-deadbeef',
     })
     expect(meta.devDependencies).toBeUndefined()
     expect(meta.bin).toEqual({ vp: './bin/vp' })
     expect(meta._id).toBe('vite-plus@0.0.0-pr.1891')
     expect(meta.dist.tarball).toBe(
       'https://bridge.example.com/tarballs/vite-plus/0.0.0-pr.1891.tgz',
+    )
+    expect(meta.dist.shasum).toBe('abc123')
+    expect(meta.dist.integrity).toBe('sha512-deadbeef')
+  })
+})
+
+describe('computeDigests', () => {
+  it('computes SHA-1 shasum and SHA-512 SRI deterministically', async () => {
+    const data = new TextEncoder().encode('abc')
+    const d = await computeDigests(data)
+    // Known SHA-1("abc").
+    expect(d.shasum).toBe('a9993e364706816aba3e25717850c26c9cd0d89d')
+    expect(d.integrity).toMatch(/^sha512-[A-Za-z0-9+/]+=*$/)
+    const again = await computeDigests(data)
+    expect(again.integrity).toBe(d.integrity)
+  })
+})
+
+describe('verifyRefExists', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('hits the right GitHub endpoint and maps 200/404', async () => {
+    const calls: string[] = []
+    vi.stubGlobal('fetch', (url: string) => {
+      calls.push(url)
+      const status = url.endsWith('/pulls/1') ? 200 : 404
+      return Promise.resolve(new Response('', { status }))
+    })
+    const ghEnv = { PREVIEW_OWNER: 'voidzero-dev', PREVIEW_REPO: 'vite-plus' } as Env
+
+    expect(
+      await verifyRefExists(ghEnv, {
+        type: 'pr',
+        ref: '1',
+        version: '0.0.0-pr.1',
+        tag: 'pr-1',
+      }),
+    ).toBe(true)
+    expect(calls[0]).toBe(
+      'https://api.github.com/repos/voidzero-dev/vite-plus/pulls/1',
+    )
+
+    expect(
+      await verifyRefExists(ghEnv, {
+        type: 'commit',
+        ref: 'abcdef0',
+        version: '0.0.0-commit.abcdef0',
+        tag: 'commit-abcdef0',
+      }),
+    ).toBe(false)
+    expect(calls[1]).toBe(
+      'https://api.github.com/repos/voidzero-dev/vite-plus/commits/abcdef0',
     )
   })
 })

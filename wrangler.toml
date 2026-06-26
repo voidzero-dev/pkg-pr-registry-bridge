@@ -25,7 +25,11 @@ MAX_TARBALL_BYTES = "67108864"
 binding = "TARBALL_CACHE"
 bucket_name = "pkg-pr-registry-bridge-tarballs"
 
-# MVP2: dynamic preview-ref registry + purge bookkeeping.
-# [[kv_namespaces]]
-# binding = "PREVIEW_REFS"
-# id = "<kv-namespace-id>"
+# Dynamic preview-ref registry: refs added via POST /-/refs (no redeploy).
+[[kv_namespaces]]
+binding = "PREVIEW_REFS"
+id = "e8473fe4e0674f27a62399028a6604fd"
+
+# Secrets (set with `wrangler secret put`, not here):
+#   ADMIN_TOKEN   - bearer token guarding /-/refs and /-/purge
+#   GITHUB_TOKEN  - optional, enables PR/commit existence checks on /-/refs

@@ -10,7 +10,9 @@ export default defineConfig({
         bindings: {
           PUBLIC_BASE_URL: 'https://bridge.example.com',
           VITE_PLUS_PREVIEW_REFS: 'pr.1891',
+          ADMIN_TOKEN: 'test-admin-token',
         },
+        kvNamespaces: ['PREVIEW_REFS'],
       },
     }),
   ],

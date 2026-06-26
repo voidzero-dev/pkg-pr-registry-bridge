@@ -21,10 +21,12 @@ export interface Env {
   MAX_TARBALL_BYTES: string
   /** Durable cache for generated tarballs and rewritten package.json. */
   TARBALL_CACHE: R2Bucket
-  /** MVP2: dynamic preview-ref registry. */
+  /** Dynamic preview-ref registry (refs added at runtime, no redeploy). */
   PREVIEW_REFS?: KVNamespace
-  /** MVP2: token for GitHub PR/commit existence checks. */
+  /** Token for GitHub PR/commit existence checks (secret). */
   GITHUB_TOKEN?: string
+  /** Bearer token guarding the admin endpoints (`/-/refs`, `/-/purge`). */
+  ADMIN_TOKEN?: string
 }
 
 const DEFAULT_MAX_TARBALL_BYTES = 64 * 1024 * 1024

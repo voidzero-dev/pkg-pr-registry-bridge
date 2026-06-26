@@ -5,6 +5,7 @@ import {
 } from 'nanotar'
 import { HttpError } from '../httpError'
 import { rewritePackageJson } from './rewritePackageJson'
+import { computeDigests } from './digests'
 import {
   assertSafeTarballPath,
   isUnderPackageRoot,
@@ -15,11 +16,19 @@ const PACKAGE_JSON_NAMES = new Set([
   './package/package.json',
 ])
 
-export interface PreviewBuild {
-  /** The gzipped tarball bytes to serve. */
-  tarball: Uint8Array
+/** The cacheable artifacts for a preview version (everything but the bytes). */
+export interface PreviewMeta {
   /** The rewritten package.json, reused to build packument version metadata. */
   packageJson: Record<string, any>
+  /** SHA-1 hex of the generated tarball, for `dist.shasum`. */
+  shasum: string
+  /** SHA-512 SRI of the generated tarball, for `dist.integrity`. */
+  integrity: string
+}
+
+export interface PreviewBuild extends PreviewMeta {
+  /** The gzipped tarball bytes to serve. */
+  tarball: Uint8Array
 }
 
 /**
@@ -70,5 +79,6 @@ export async function buildPreviewTarball(
   }
 
   const tarball = await createTarGzip(out)
-  return { tarball, packageJson: rewritten }
+  const { shasum, integrity } = await computeDigests(tarball)
+  return { tarball, packageJson: rewritten, shasum, integrity }
 }

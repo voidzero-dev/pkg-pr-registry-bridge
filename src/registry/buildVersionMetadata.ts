@@ -1,4 +1,5 @@
 import type { Env } from '../config'
+import type { PreviewMeta } from '../tarball/buildPreviewTarball'
 
 /**
  * Fields from a package.json that should not appear in a registry version
@@ -22,21 +23,22 @@ const DROP_FIELDS = new Set([
 ])
 
 /**
- * Build a registry version document from the (already rewritten) preview
- * package.json. The package name selected the upstream; the synthetic version
- * is authoritative; `dist.tarball` points back at this bridge.
+ * Build a registry version document from the cached preview meta (rewritten
+ * package.json + integrity). The package name selected the upstream; the
+ * synthetic version is authoritative; `dist.tarball` points back at this bridge.
  *
- * MVP1 omits `dist.integrity`/`dist.shasum`: npm/bun compute and pin integrity
- * from the downloaded tarball. Never emit an incorrect integrity value.
+ * `dist.integrity`/`dist.shasum` are computed from the exact generated tarball
+ * bytes and only emitted when present (older cached builds may lack them, in
+ * which case npm/bun compute integrity from the downloaded tarball).
  */
 export function buildVersionMetadata(
   env: Env,
   packageName: string,
   version: string,
-  packageJson: Record<string, any>,
+  preview: PreviewMeta,
 ): Record<string, any> {
   const meta: Record<string, any> = {}
-  for (const [key, value] of Object.entries(packageJson)) {
+  for (const [key, value] of Object.entries(preview.packageJson)) {
     if (DROP_FIELDS.has(key)) continue
     meta[key] = value
   }
@@ -44,9 +46,13 @@ export function buildVersionMetadata(
   meta.name = packageName
   meta.version = version
   meta._id = `${packageName}@${version}`
-  meta.dist = {
+
+  const dist: Record<string, any> = {
     tarball: `${env.PUBLIC_BASE_URL}/tarballs/${packageName}/${version}.tgz`,
   }
+  if (preview.shasum) dist.shasum = preview.shasum
+  if (preview.integrity) dist.integrity = preview.integrity
+  meta.dist = dist
 
   return meta
 }
