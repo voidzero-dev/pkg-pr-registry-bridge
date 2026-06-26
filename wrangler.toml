@@ -2,10 +2,14 @@ name = "pkg-pr-registry-bridge"
 main = "src/index.ts"
 compatibility_date = "2024-11-01"
 
+# Custom domain. The `render.vip` zone must be on this Cloudflare account;
+# wrangler provisions the DNS record and TLS cert automatically.
+routes = [{ pattern = "pkg-pr-registry-bridge.render.vip", custom_domain = true }]
+
 [vars]
 # Public origin of this bridge. Must match the deployed route so generated
 # `dist.tarball` URLs are correct. Override per environment.
-PUBLIC_BASE_URL = "https://registry-bridge.example.com"
+PUBLIC_BASE_URL = "https://pkg-pr-registry-bridge.render.vip"
 NPM_REGISTRY = "https://registry.npmjs.org"
 PKG_PR_NEW_BASE = "https://pkg.pr.new"
 PREVIEW_OWNER = "voidzero-dev"
