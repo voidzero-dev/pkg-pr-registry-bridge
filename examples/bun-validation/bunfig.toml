@@ -1,0 +1,9 @@
+[install]
+registry = "https://pkg-pr-registry-bridge.render.vip/"
+
+# Bun's default network concurrency (48) triggers an HTTP/2 client bug against
+# Cloudflare on large dependency graphs (vite-plus pulls 400+ packages): streams
+# get dropped and resolution fails with "no version matching". Capping
+# concurrency avoids it. The bridge itself serves correct responses; this is a
+# bun-side workaround. See the project README.
+networkConcurrency = 8

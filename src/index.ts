@@ -11,8 +11,8 @@ import {
 } from './registry/parsePackageName'
 import { fetchNpmPackument } from './registry/fetchNpmPackument'
 import { buildVersionMetadata } from './registry/buildVersionMetadata'
-import { proxyToNpm } from './registry/proxyToNpm'
-import { getPreviewBuild } from './tarball/getPreviewBuild'
+import { redirectToNpm } from './registry/redirectToNpm'
+import { getPreviewMeta, getPreviewTarball } from './tarball/getPreviewBuild'
 import {
   packumentCacheControl,
   tarballCacheControl,
@@ -45,8 +45,8 @@ app.get('/tarballs/*', async (c) => {
   const hit = await cache.match(cacheKey)
   if (hit) return hit
 
-  const build = await getPreviewBuild(c.env, c.executionCtx, name, version)
-  const res = new Response(build.tarball, {
+  const tarball = await getPreviewTarball(c.env, name, version)
+  const res = new Response(tarball, {
     headers: {
       'content-type': 'application/gzip',
       'cache-control': tarballCacheControl(version),
@@ -64,17 +64,16 @@ app.post('/-/purge', (c) => c.json({ error: 'Not implemented' }, 501))
  *
  *  - Allowlisted package: fetch the npm packument (or synthesize an empty one
  *    if absent from npm), inject configured preview versions, return.
- *  - Everything else: transparent proxy to npm.
+ *  - Everything else: redirect to npm so the client fetches it directly.
  */
 app.get('*', async (c) => {
   const pkgReq = parsePackagePath(new URL(c.req.url).pathname)
-  if (!pkgReq) return proxyToNpm(c.env, c.req.raw)
+  if (!pkgReq) return redirectToNpm(c.env, c.req.raw)
 
   const { name } = pkgReq
-  if (!isPreviewPackage(name)) return proxyToNpm(c.env, c.req.raw)
+  if (!isPreviewPackage(name)) return redirectToNpm(c.env, c.req.raw)
 
-  const accept = c.req.header('accept') ?? 'application/json'
-  const base = await fetchNpmPackument(c.env, name, accept)
+  const base = await fetchNpmPackument(c.env, name)
 
   const packument: Record<string, any> =
     base.status === 200 && base.data
@@ -88,21 +87,18 @@ app.get('*', async (c) => {
   const refs = parseConfiguredPreviewRefsSafe(c.env.VITE_PLUS_PREVIEW_REFS)
   for (const ref of refs) {
     try {
-      const build = await getPreviewBuild(
-        c.env,
-        c.executionCtx,
-        name,
-        ref.version,
-      )
+      const packageJson = await getPreviewMeta(c.env, name, ref.version)
       packument.versions[ref.version] = buildVersionMetadata(
         c.env,
         name,
         ref.version,
-        build.packageJson,
+        packageJson,
       )
       packument['dist-tags'][ref.tag] = ref.version
     } catch (err) {
       // A failing ref must not break installs of the package's other versions.
+      // After the deploy-time warm step this path is served from R2 and does
+      // not hit the upstream, so this should not trigger in practice.
       console.warn(`Failed to inject preview ref ${ref.version}:`, err)
     }
   }
@@ -116,7 +112,7 @@ app.get('*', async (c) => {
 })
 
 /** Non-GET methods fall through to npm. */
-app.all('*', (c) => proxyToNpm(c.env, c.req.raw))
+app.all('*', (c) => redirectToNpm(c.env, c.req.raw))
 
 app.onError((err, c) => {
   if (err instanceof HttpError) {

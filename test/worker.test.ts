@@ -133,12 +133,12 @@ describe('packument endpoint', () => {
     )
   })
 
-  it('proxies non-allowlisted packages to npm', async () => {
-    const res = await SELF.fetch(`${BASE}/react`)
-    expect(res.status).toBe(200)
-    const body = (await res.json()) as Record<string, any>
-    expect(body.name).toBe('react')
-    expect(body.versions).toBeUndefined() // returned untouched
+  it('redirects non-allowlisted packages to npm', async () => {
+    const res = await SELF.fetch(`${BASE}/react`, { redirect: 'manual' })
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe(
+      'https://registry.npmjs.org/react',
+    )
   })
 })
 

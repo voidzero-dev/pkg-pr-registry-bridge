@@ -6,10 +6,13 @@
   "description": "Version-gated npm registry bridge for pkg.pr.new Vite+ preview builds, running on Cloudflare Workers",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "wrangler deploy && node scripts/warm.mjs && node scripts/e2e-bun.mjs",
+    "deploy:only": "wrangler deploy",
+    "warm": "node scripts/warm.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "node scripts/e2e-bun.mjs"
   },
   "dependencies": {
     "hono": "^4.12.27",
@@ -23,6 +26,16 @@
     "wrangler": "^4.105.0"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild", "workerd"]
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "workerd"
+    ]
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "11.9.0",
+      "onFail": "download"
+    }
   }
 }

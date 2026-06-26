@@ -4,3 +4,5 @@ dist/
 .dev.vars
 *.log
 .DS_Store
+examples/**/bun.lock
+examples/**/bun.lockb

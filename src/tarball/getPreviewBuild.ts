@@ -7,65 +7,76 @@ import { metaKey, tarballKey } from '../cache/r2Cache'
 import { buildPreviewTarball, type PreviewBuild } from './buildPreviewTarball'
 import { fetchUpstreamTarball } from './fetchUpstreamTarball'
 
-/** Minimal slice of ExecutionContext used to defer cache writes. */
-interface WaitUntil {
-  waitUntil(promise: Promise<unknown>): void
+function cacheControlFor(version: string): string {
+  return parsePreviewVersion(version)?.type === 'commit'
+    ? 'public, max-age=31536000, immutable'
+    : 'public, max-age=300'
 }
 
 /**
- * Get a preview build (generated tarball + rewritten package.json), served
- * from R2 when present and generated from pkg.pr.new on a miss. R2 writes are
- * scheduled with `waitUntil` so they never add latency to the response.
+ * Download the upstream tarball, rewrite it, and durably persist BOTH the
+ * rewritten package.json (small "meta") and the generated tarball to R2.
  *
- * R2 is the durable origin cache: a cold edge does not re-download and
- * re-rewrite from pkg.pr.new. Both the packument and tarball endpoints share
- * this single code path, so the upstream tarball is fetched at most once per
- * (name, version).
+ * The R2 writes are awaited (not deferred via `waitUntil`) so they reliably
+ * persist: this is what makes subsequent packument/tarball requests fast and,
+ * crucially, deterministic under a package manager's concurrent install load.
+ * This expensive path runs once per (name, version) and is normally triggered
+ * by the deploy-time warm step rather than by a user install.
  */
-export async function getPreviewBuild(
+async function buildAndStore(
   env: Env,
-  ctx: WaitUntil,
   name: string,
   version: string,
 ): Promise<PreviewBuild> {
-  const tKey = tarballKey(name, version)
-  const mKey = metaKey(name, version)
-
-  const [tarObj, metaObj] = await Promise.all([
-    env.TARBALL_CACHE.get(tKey),
-    env.TARBALL_CACHE.get(mKey),
-  ])
-  if (tarObj && metaObj) {
-    const [buf, json] = await Promise.all([
-      tarObj.arrayBuffer(),
-      metaObj.json<Record<string, any>>(),
-    ])
-    return { tarball: new Uint8Array(buf), packageJson: json }
-  }
-
   const url = toPkgPrNewUrl(env, name, version)
   if (!url) throw new HttpError(400, `Invalid preview version: ${version}`)
 
   const upstream = await fetchUpstreamTarball(url, maxTarballBytes(env))
   const build = await buildPreviewTarball(upstream, name, version)
+  const cacheControl = cacheControlFor(version)
 
-  const immutable = parsePreviewVersion(version)?.type === 'commit'
-  const cacheControl = immutable
-    ? 'public, max-age=31536000, immutable'
-    : 'public, max-age=300'
-
-  ctx.waitUntil(
-    Promise.all([
-      env.TARBALL_CACHE.put(tKey, build.tarball, {
-        httpMetadata: { contentType: 'application/gzip', cacheControl },
-      }),
-      env.TARBALL_CACHE.put(mKey, JSON.stringify(build.packageJson), {
-        httpMetadata: { contentType: 'application/json', cacheControl },
-      }),
-    ]).catch((err) => {
-      console.warn(`Failed to persist preview build ${name}@${version}:`, err)
+  await Promise.all([
+    env.TARBALL_CACHE.put(tarballKey(name, version), build.tarball, {
+      httpMetadata: { contentType: 'application/gzip', cacheControl },
     }),
-  )
+    env.TARBALL_CACHE.put(
+      metaKey(name, version),
+      JSON.stringify(build.packageJson),
+      { httpMetadata: { contentType: 'application/json', cacheControl } },
+    ),
+  ])
 
   return build
+}
+
+/**
+ * The rewritten package.json for a preview version, served from R2 when
+ * present. This is the cheap artifact the packument endpoint needs (no tarball
+ * download, no gzip) once the build has been cached.
+ */
+export async function getPreviewMeta(
+  env: Env,
+  name: string,
+  version: string,
+): Promise<Record<string, any>> {
+  const cached = await env.TARBALL_CACHE.get(metaKey(name, version))
+  console.log(`getMeta ${name}@${version} key=${metaKey(name, version)} hit=${!!cached}`)
+  if (cached) return cached.json<Record<string, any>>()
+  const build = await buildAndStore(env, name, version)
+  return build.packageJson
+}
+
+/**
+ * The generated tarball bytes for a preview version, served from R2 when
+ * present.
+ */
+export async function getPreviewTarball(
+  env: Env,
+  name: string,
+  version: string,
+): Promise<Uint8Array> {
+  const cached = await env.TARBALL_CACHE.get(tarballKey(name, version))
+  if (cached) return new Uint8Array(await cached.arrayBuffer())
+  const build = await buildAndStore(env, name, version)
+  return build.tarball
 }
