@@ -1,0 +1,27 @@
+name = "pkg-pr-registry-bridge"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+
+[vars]
+# Public origin of this bridge. Must match the deployed route so generated
+# `dist.tarball` URLs are correct. Override per environment.
+PUBLIC_BASE_URL = "https://registry-bridge.example.com"
+NPM_REGISTRY = "https://registry.npmjs.org"
+PKG_PR_NEW_BASE = "https://pkg.pr.new"
+PREVIEW_OWNER = "voidzero-dev"
+PREVIEW_REPO = "vite-plus"
+# Comma-separated preview refs to inject into packuments: `pr.<n>` / `commit.<sha>`.
+# Empty by default; configure per deployment (MVP2 moves this to KV).
+VITE_PLUS_PREVIEW_REFS = ""
+# Max upstream tarball size (bytes). 64 MiB default; see RFC section 7.2.
+MAX_TARBALL_BYTES = "67108864"
+
+# Durable cache for generated tarballs and rewritten package.json metadata.
+[[r2_buckets]]
+binding = "TARBALL_CACHE"
+bucket_name = "pkg-pr-registry-bridge-tarballs"
+
+# MVP2: dynamic preview-ref registry + purge bookkeeping.
+# [[kv_namespaces]]
+# binding = "PREVIEW_REFS"
+# id = "<kv-namespace-id>"
