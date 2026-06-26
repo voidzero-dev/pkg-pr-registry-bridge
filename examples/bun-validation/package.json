@@ -5,7 +5,7 @@
   "devDependencies": {
     "vite": "npm:@voidzero-dev/vite-plus-core@0.0.0-commit.6acea1aa818e96365b5811d47360367ba18a3a05",
     "@voidzero-dev/vite-plus-core": "0.0.0-commit.6acea1aa818e96365b5811d47360367ba18a3a05",
-    "vite-plus": "0.0.0-commit.6acea1aa818e96365b5811d47360367ba18a3a05"
+    "vite-plus": "0.1.24"
   },
   "overrides": {
     "vite": "npm:@voidzero-dev/vite-plus-core@0.0.0-commit.6acea1aa818e96365b5811d47360367ba18a3a05"
