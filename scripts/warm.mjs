@@ -9,6 +9,7 @@
 // failure-prone build path.
 //
 // Run automatically as part of `pnpm deploy`.
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -71,21 +72,30 @@ if (versions.length === 0) {
 console.log(`warm: ${base}`)
 let failed = false
 
+function sha512(buf) {
+  return `sha512-${createHash('sha512').update(buf).digest('base64')}`
+}
+
 for (const version of versions) {
-  // Build + cache each tarball (this also stores the rewritten package.json).
+  // Build + cache each tarball (this also stores the rewritten package.json),
+  // and remember its actual integrity to cross-check against the packument.
+  const tarballIntegrity = {}
   for (const pkg of PREVIEW_PACKAGES) {
     const url = `${base}/tarballs/${pkg}/${version}.tgz`
     try {
       const res = await getWithRetry(url)
-      const bytes = (await res.arrayBuffer()).byteLength
-      console.log(`  ✓ tarball ${pkg}@${version} (${bytes} bytes)`)
+      const buf = Buffer.from(await res.arrayBuffer())
+      tarballIntegrity[pkg] = sha512(buf)
+      console.log(`  ✓ tarball ${pkg}@${version} (${buf.length} bytes)`)
     } catch (err) {
       failed = true
       console.error(`  ✗ tarball ${pkg}@${version}: ${err.message}`)
     }
   }
 
-  // Confirm the packument now injects the version (served from cache).
+  // Confirm the packument injects the version, and that any advertised
+  // integrity actually matches the served tarball (guards the stale-cache /
+  // content-drift class of bug that surfaces as IntegrityCheckFailed).
   for (const pkg of PREVIEW_PACKAGES) {
     const url = `${base}/${pkg.replace('/', '%2F')}`
     try {
@@ -93,11 +103,20 @@ for (const version of versions) {
         headers: { accept: 'application/vnd.npm.install-v1+json' },
       })
       const packument = await res.json()
-      if (packument.versions && packument.versions[version]) {
-        console.log(`  ✓ packument ${pkg} injects ${version}`)
-      } else {
+      const meta = packument.versions && packument.versions[version]
+      if (!meta) {
         failed = true
         console.error(`  ✗ packument ${pkg} is missing ${version}`)
+      } else {
+        const advertised = meta.dist && meta.dist.integrity
+        if (advertised && advertised !== tarballIntegrity[pkg]) {
+          failed = true
+          console.error(
+            `  ✗ integrity mismatch ${pkg}@${version}: packument ${advertised} != served ${tarballIntegrity[pkg]}`,
+          )
+        } else {
+          console.log(`  ✓ packument ${pkg} injects ${version}`)
+        }
       }
     } catch (err) {
       failed = true

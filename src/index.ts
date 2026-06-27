@@ -56,20 +56,17 @@ app.get('/tarballs/*', async (c) => {
     throw new HttpError(400, `Invalid preview version: ${version}`)
   }
 
-  const cache = caches.default
-  const cacheKey = new Request(c.req.url, { method: 'GET' })
-  const hit = await cache.match(cacheKey)
-  if (hit) return hit
-
+  // Serve from R2 (global, and built together with the meta integrity), never
+  // the per-colo Cache API. An edge-cached tarball can outlive a content change
+  // and then mismatch the integrity advertised in the packument
+  // (IntegrityCheckFailed). R2 is the single source of truth.
   const tarball = await getPreviewTarball(c.env, name, version)
-  const res = new Response(tarball, {
+  return new Response(tarball, {
     headers: {
       'content-type': 'application/gzip',
       'cache-control': tarballCacheControl(version),
     },
   })
-  c.executionCtx.waitUntil(cache.put(cacheKey, res.clone()))
-  return res
 })
 
 /** List the configured preview refs (static env + runtime KV). */
