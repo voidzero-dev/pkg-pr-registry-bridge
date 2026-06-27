@@ -21,21 +21,23 @@ import {
 } from './fetchUpstreamTarball'
 
 /**
- * Build a large non-preview tarball (a platform binary) by streaming: swap only
- * `package/package.json` and pass the multi-MB native binary straight through,
- * never holding the decompressed payload whole. The full-buffer path
- * (`buildAndStore`) re-tars and re-gzips the entire payload, which exceeds the
- * Worker memory budget for these (~tens of MB) binaries (Cloudflare 1102). The
- * rewritten stream is piped straight into R2, then read back for the response,
- * so neither the build nor the store ever materializes the payload twice.
- * Integrity is not pinned for these packages (see `buildMetaLight`), so the
- * package manager computes it from the bytes it downloads.
+ * Stream a large non-preview tarball (a platform binary): swap only
+ * `package/package.json` and pass the multi-MB native binary straight through.
+ *
+ * The payload is never materialized whole, not even to store it: a Worker
+ * cannot hold a ~tens-of-MB decompressed binary plus the working set within the
+ * 128MB memory limit (cold builds return Cloudflare 1102; CPU is not the
+ * constraint, re-gzip is ~700ms). So this returns a stream piped straight to the
+ * client and does NOT cache to R2 (which would require buffering the whole
+ * payload to get a known length). Integrity is not pinned for these packages
+ * (see `buildMetaLight`), so the package manager computes it from the bytes it
+ * downloads, and the output uses gzip "stored" blocks (no recompression).
  */
-async function buildAndStoreStreaming(
+async function buildPlatformTarballStream(
   env: Env,
   name: string,
   version: string,
-): Promise<Uint8Array> {
+): Promise<ReadableStream<Uint8Array>> {
   const url = toPkgPrNewUrl(env, name, version)
   if (!url) throw new HttpError(400, `Invalid preview version: ${version}`)
 
@@ -51,26 +53,12 @@ async function buildAndStoreStreaming(
     return new TextEncoder().encode(`${JSON.stringify(rewritten, null, 2)}\n`)
   }
 
-  const outStream = rewriteTarballEntryStream(
+  return rewriteTarballEntryStream(
     upstream,
     PACKAGE_JSON_NAMES,
     rewrite,
     assertSafeTarballPath,
   )
-
-  // Collect the rewritten output (R2 needs a known length to store it). The
-  // stored-gzip output keeps pace with the decompressor, so the peak footprint
-  // is ~the decompressed payload once -- the same as buildMetaLight, which the
-  // packument path already runs on these binaries within budget.
-  const tarball = new Uint8Array(await new Response(outStream).arrayBuffer())
-
-  await env.TARBALL_CACHE.put(tarballKey(name, version), tarball, {
-    httpMetadata: {
-      contentType: 'application/gzip',
-      cacheControl: tarballCacheControl(),
-    },
-  })
-  return tarball
 }
 
 /**
@@ -180,20 +168,22 @@ export async function getPreviewMeta(
  * The generated tarball bytes for a preview version, served from R2 when
  * present.
  */
-export async function getPreviewTarball(
+export async function getPreviewTarballBody(
   env: Env,
   name: string,
   version: string,
-): Promise<Uint8Array> {
+): Promise<ReadableStream<Uint8Array> | Uint8Array> {
+  // Serve a cached build by streaming it from R2 (bounded memory; the cached
+  // platform binaries are tens of MB).
   const cached = await env.TARBALL_CACHE.get(tarballKey(name, version))
-  if (cached) return new Uint8Array(await cached.arrayBuffer())
+  if (cached) return cached.body
 
-  // Large platform binaries decompress to tens of MB; re-tarring + re-gzipping
-  // them as whole buffers exceeds the Worker budget (Cloudflare 1102). Build
-  // those by streaming, swapping only package.json. The small preview packages
-  // (which also pin integrity) keep the full-buffer path.
+  // Large platform binaries decompress to tens of MB; buffering them to re-tar,
+  // re-gzip, or even to store exceeds the Worker memory budget (Cloudflare
+  // 1102). Stream those straight to the client instead (no R2 cache). The small
+  // preview packages (which also pin integrity) keep the buffered+cached path.
   if (!isPreviewPackage(name)) {
-    return buildAndStoreStreaming(env, name, version)
+    return buildPlatformTarballStream(env, name, version)
   }
   return (await buildAndStore(env, name, version)).tarball
 }

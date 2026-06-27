@@ -18,7 +18,7 @@ import {
 import { fetchNpmPackument } from './registry/fetchNpmPackument'
 import { buildVersionMetadata } from './registry/buildVersionMetadata'
 import { redirectToNpm } from './registry/redirectToNpm'
-import { getPreviewMeta, getPreviewTarball } from './tarball/getPreviewBuild'
+import { getPreviewMeta, getPreviewTarballBody } from './tarball/getPreviewBuild'
 import { metaKey, tarballKey } from './cache/r2Cache'
 import { requireAdmin } from './security/auth'
 import { verifyRefExists } from './github/verifyRef'
@@ -58,8 +58,8 @@ async function serveTarball(
   if (!parsePreviewVersion(version)) {
     throw new HttpError(400, `Invalid preview version: ${version}`)
   }
-  const tarball = await getPreviewTarball(env, name, version)
-  return new Response(tarball, {
+  const body = await getPreviewTarballBody(env, name, version)
+  return new Response(body, {
     headers: {
       'content-type': 'application/gzip',
       'cache-control': tarballCacheControl(),
