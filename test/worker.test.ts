@@ -155,18 +155,42 @@ describe('packument endpoint', () => {
     )
   })
 
-  it('routes pkg.pr.new optionalDependency URLs through the bridge', async () => {
+  it('rewrites pkg.pr.new optionalDependency URLs to version strings', async () => {
     const res = await SELF.fetch(`${BASE}/vite-plus`, {
       headers: { accept: 'application/json' },
     })
     const body = (await res.json()) as Record<string, any>
     const opt = body.versions['0.0.0-pr.1891'].optionalDependencies
     expect(opt['@voidzero-dev/vite-plus-darwin-arm64']).toBe(
+      `0.0.0-commit.${PLATFORM_SHA}`,
+    )
+  })
+
+  it('injects the version into a platform package packument with os/cpu', async () => {
+    // Register the platform commit ref so the platform packument exposes it.
+    await SELF.fetch(`${BASE}/-/refs`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer test-admin-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ ref: `commit.${PLATFORM_SHA}` }),
+    })
+    const res = await SELF.fetch(
+      `${BASE}/@voidzero-dev%2Fvite-plus-darwin-arm64`,
+      { headers: { accept: 'application/json' } },
+    )
+    const body = (await res.json()) as Record<string, any>
+    const v = body.versions[`0.0.0-commit.${PLATFORM_SHA}`]
+    expect(v).toBeTruthy()
+    expect(v.os).toEqual(['darwin'])
+    expect(v.cpu).toEqual(['arm64'])
+    expect(v.dist.tarball).toBe(
       `${BASE}/tarballs/@voidzero-dev/vite-plus-darwin-arm64/0.0.0-commit.${PLATFORM_SHA}.tgz`,
     )
   })
 
-  it('serves a platform-binary tarball via the bridge (passthrough)', async () => {
+  it('serves a platform-binary tarball rewritten to the synthetic version', async () => {
     const res = await SELF.fetch(
       `${BASE}/tarballs/@voidzero-dev/vite-plus-darwin-arm64/0.0.0-commit.${PLATFORM_SHA}.tgz`,
     )
@@ -177,10 +201,9 @@ describe('packument endpoint', () => {
         files.find((f) => f.name === 'package/package.json')!.data,
       ),
     )
-    // Passed through unchanged: upstream name/version and platform fields.
     expect(pkg.name).toBe('@voidzero-dev/vite-plus-darwin-arm64')
-    expect(pkg.version).toBe('0.2.1')
-    expect(pkg.os).toEqual(['darwin'])
+    expect(pkg.version).toBe(`0.0.0-commit.${PLATFORM_SHA}`)
+    expect(pkg.os).toEqual(['darwin']) // platform fields preserved
     expect(pkg.cpu).toEqual(['arm64'])
   })
 

@@ -7,6 +7,7 @@ import { toPkgPrNewUrl } from '../preview/toPkgPrNewUrl'
 import { metaKey, tarballKey } from '../cache/r2Cache'
 import {
   buildPreviewTarball,
+  extractRewrittenPackageJson,
   type PreviewBuild,
   type PreviewMeta,
 } from './buildPreviewTarball'
@@ -58,35 +59,41 @@ async function buildAndStore(
 }
 
 /**
- * Fetch an upstream tarball and cache it unchanged. Used for workspace packages
- * that are not preview packages (e.g. the platform binaries): they have no
- * preview dependencies to rewrite, so re-tarring/re-gzipping their large
- * (~tens of MB) payloads in the Worker would be wasteful and risk CPU/memory
- * limits. A URL dependency uses the tarball's own package.json, so passing it
- * through verbatim is correct.
+ * Build packument metadata for a non-preview workspace package (a platform
+ * binary) without re-gzipping its large payload: parse the upstream tarball,
+ * extract and rewrite package.json, and cache just the meta. The tarball itself
+ * is re-built lazily on download. Integrity is omitted (the package manager
+ * computes it from the downloaded tarball).
  */
-async function passthroughAndStore(
+async function buildMetaLight(
   env: Env,
   name: string,
   version: string,
-): Promise<Uint8Array> {
+): Promise<PreviewMeta> {
   const url = toPkgPrNewUrl(env, name, version)
   if (!url) throw new HttpError(400, `Invalid preview version: ${version}`)
 
-  const bytes = await fetchUpstreamTarball(url, maxTarballBytes(env))
-  await env.TARBALL_CACHE.put(tarballKey(name, version), bytes, {
+  const upstream = await fetchUpstreamTarball(url, maxTarballBytes(env))
+  const packageJson = await extractRewrittenPackageJson(
+    upstream,
+    name,
+    version,
+    env,
+  )
+  const meta: PreviewMeta = { packageJson, shasum: '', integrity: '' }
+  await env.TARBALL_CACHE.put(metaKey(name, version), JSON.stringify(meta), {
     httpMetadata: {
-      contentType: 'application/gzip',
+      contentType: 'application/json',
       cacheControl: cacheControlFor(version),
     },
   })
-  return bytes
+  return meta
 }
 
 /**
  * The cached metadata (rewritten package.json + integrity) for a preview
  * version, served from R2 when present. This is the cheap artifact the
- * packument endpoint needs (no tarball download, no gzip) once cached.
+ * packument endpoint needs (no gzip) once cached.
  */
 export async function getPreviewMeta(
   env: Env,
@@ -102,6 +109,11 @@ export async function getPreviewMeta(
     }
     return { packageJson: stored, shasum: '', integrity: '' }
   }
+
+  // Large non-preview binaries: build meta without re-gzipping (the full
+  // tarball would otherwise exceed the Worker CPU limit per packument request).
+  if (!isPreviewPackage(name)) return buildMetaLight(env, name, version)
+
   const build = await buildAndStore(env, name, version)
   return {
     packageJson: build.packageJson,
@@ -121,10 +133,5 @@ export async function getPreviewTarball(
 ): Promise<Uint8Array> {
   const cached = await env.TARBALL_CACHE.get(tarballKey(name, version))
   if (cached) return new Uint8Array(await cached.arrayBuffer())
-  // Preview packages are rewritten; other workspace packages (platform
-  // binaries) are passed through unchanged.
-  if (isPreviewPackage(name)) {
-    return (await buildAndStore(env, name, version)).tarball
-  }
-  return passthroughAndStore(env, name, version)
+  return (await buildAndStore(env, name, version)).tarball
 }

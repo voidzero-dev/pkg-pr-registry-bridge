@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { Env } from './config'
 import { HttpError } from './httpError'
-import { isPreviewPackage, isWorkspacePackage } from './preview/packages'
+import { isWorkspacePackage } from './preview/packages'
 import { parsePreviewVersion } from './preview/parsePreviewVersion'
 import { parseConfiguredPreviewRefs } from './preview/parseConfiguredPreviewRefs'
 import {
@@ -224,7 +224,7 @@ app.get('*', async (c) => {
   if (!pkgReq) return redirectToNpm(c.env, c.req.raw)
 
   const { name } = pkgReq
-  if (!isPreviewPackage(name)) return redirectToNpm(c.env, c.req.raw)
+  if (!isWorkspacePackage(name, c.env)) return redirectToNpm(c.env, c.req.raw)
 
   const base = await fetchNpmPackument(c.env, name)
 

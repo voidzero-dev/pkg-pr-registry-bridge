@@ -16,13 +16,15 @@ function refToVersion(ref: string): string | null {
 }
 
 /**
- * Rewrite a direct pkg.pr.new dependency URL for the configured repo into the
- * equivalent bridge tarball URL, so transitive preview deps (e.g. the platform
- * binaries in `optionalDependencies`) are served and cached by the bridge
- * instead of fetched straight from pkg.pr.new. Returns null when the spec is
- * not such a URL.
+ * Convert a direct pkg.pr.new dependency URL for the configured repo into the
+ * equivalent synthetic version string (e.g. `0.0.0-commit.<sha>`), so
+ * transitive preview deps (e.g. the platform binaries in
+ * `optionalDependencies`) resolve through the bridge registry like the other
+ * preview packages, rather than as raw tarball URLs. A version string also lets
+ * the package manager filter platforms from the packument and download only the
+ * matching binary. Returns null when the spec is not such a URL.
  */
-export function rewritePkgPrNewUrl(
+export function pkgPrNewUrlToVersion(
   spec: string,
   env: RewriteEnv,
 ): string | null {
@@ -32,18 +34,16 @@ export function rewritePkgPrNewUrl(
   const at = rest.lastIndexOf('@')
   if (at <= 0) return null
   const name = rest.slice(0, at)
-  // Only route packages the tarball endpoint will actually serve; otherwise
-  // leave the working direct pkg.pr.new URL in place.
+  // Only route packages the bridge will serve; otherwise leave the working
+  // direct pkg.pr.new URL in place.
   if (!isWorkspacePackage(name, env)) return null
-  const version = refToVersion(rest.slice(at + 1))
-  if (!version) return null
-  return `${env.PUBLIC_BASE_URL}/tarballs/${name}/${version}.tgz`
+  return refToVersion(rest.slice(at + 1))
 }
 
 /**
  * Rewrite a dependency map:
  *  - preview packages (vite-plus, core) -> the synthetic preview version,
- *  - direct pkg.pr.new URLs -> bridge tarball URLs,
+ *  - direct pkg.pr.new URLs -> the synthetic version string for that ref,
  *  - everything else -> unchanged.
  */
 function rewriteDependencies(
@@ -58,8 +58,8 @@ function rewriteDependencies(
       next[name] = version
       continue
     }
-    const url = rewritePkgPrNewUrl(spec, env)
-    if (url) next[name] = url
+    const refVersion = pkgPrNewUrlToVersion(spec, env)
+    if (refVersion) next[name] = refVersion
   }
   return next
 }

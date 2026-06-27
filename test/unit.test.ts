@@ -20,7 +20,7 @@ import {
 } from '../src/registry/parsePackageName'
 import {
   rewritePackageJson,
-  rewritePkgPrNewUrl,
+  pkgPrNewUrlToVersion,
 } from '../src/tarball/rewritePackageJson'
 import { isWorkspacePackage } from '../src/preview/packages'
 import {
@@ -211,30 +211,34 @@ describe('isWorkspacePackage', () => {
   })
 })
 
-describe('rewritePkgPrNewUrl', () => {
+describe('pkgPrNewUrlToVersion', () => {
   const sha = '6acea1aa818e96365b5811d47360367ba18a3a05'
 
-  it('rewrites a whitelisted pkg.pr.new URL to a bridge tarball URL', () => {
+  it('maps a whitelisted pkg.pr.new URL to a synthetic version string', () => {
     expect(
-      rewritePkgPrNewUrl(
+      pkgPrNewUrlToVersion(
         `https://pkg.pr.new/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-darwin-arm64@${sha}`,
         env,
       ),
-    ).toBe(
-      `https://bridge.example.com/tarballs/@voidzero-dev/vite-plus-darwin-arm64/0.0.0-commit.${sha}.tgz`,
-    )
+    ).toBe(`0.0.0-commit.${sha}`)
+    expect(
+      pkgPrNewUrlToVersion(
+        'https://pkg.pr.new/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-darwin-arm64@1891',
+        env,
+      ),
+    ).toBe('0.0.0-pr.1891')
   })
 
   it('leaves non-workspace and non-pkg.pr.new specs alone', () => {
     expect(
-      rewritePkgPrNewUrl(
+      pkgPrNewUrlToVersion(
         `https://pkg.pr.new/voidzero-dev/vite-plus/@other/pkg@${sha}`,
         env,
       ),
     ).toBeNull()
-    expect(rewritePkgPrNewUrl('^2.3.1', env)).toBeNull()
+    expect(pkgPrNewUrlToVersion('^2.3.1', env)).toBeNull()
     expect(
-      rewritePkgPrNewUrl('https://example.com/foo.tgz', env),
+      pkgPrNewUrlToVersion('https://example.com/foo.tgz', env),
     ).toBeNull()
   })
 })
@@ -242,7 +246,7 @@ describe('rewritePkgPrNewUrl', () => {
 describe('rewritePackageJson', () => {
   const sha = '6acea1aa818e96365b5811d47360367ba18a3a05'
 
-  it('rewrites preview deps and pkg.pr.new URL optional deps', () => {
+  it('rewrites preview deps and pkg.pr.new URL optional deps to versions', () => {
     const out = rewritePackageJson(
       {
         name: 'vite-plus',
@@ -266,7 +270,7 @@ describe('rewritePackageJson', () => {
     expect(out.dependencies.picomatch).toBe('^2.3.1')
     expect(out.peerDependencies.vite).toBe('^5.0.0')
     expect(out.optionalDependencies['@voidzero-dev/vite-plus-darwin-arm64']).toBe(
-      `https://bridge.example.com/tarballs/@voidzero-dev/vite-plus-darwin-arm64/0.0.0-commit.${sha}.tgz`,
+      `0.0.0-commit.${sha}`,
     )
   })
 })

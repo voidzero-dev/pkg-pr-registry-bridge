@@ -35,15 +35,20 @@ for a runnable example.
   the npm packument (or synthesizes an empty one if the package is not on npm),
   injects the configured preview versions, and leaves existing versions and
   `latest` untouched.
-- **Tarball** (`GET /tarballs/<pkg>/<version>.tgz`): for the preview packages,
-  downloads the upstream pkg.pr.new tarball, rewrites `package/package.json`
-  (name, version, preview + pkg.pr.new-URL dependencies), repacks, and serves
-  it; for other workspace packages (the platform binaries) it serves the
-  upstream tarball unchanged (no re-gzip of their large payloads). Tarballs are
-  cached in R2; the first request per `(name, version)` builds/stores, and the
-  deploy-time warm step pre-populates the preview packages. Transitive
-  `optionalDependencies` that point at pkg.pr.new are rewritten to bridge
-  tarball URLs so they are served and cached by the bridge too.
+- **Tarball** (`GET /tarballs/<pkg>/<version>.tgz`): downloads the upstream
+  pkg.pr.new tarball, rewrites `package/package.json` (name, version,
+  dependencies), repacks, and serves it. Tarballs are cached in R2; the first
+  request per `(name, version)` builds/stores, and the deploy-time warm step
+  pre-populates the preview packages.
+- **Transitive deps**: a preview build's `optionalDependencies` point at
+  pkg.pr.new (the platform binaries). The bridge rewrites those URLs to
+  synthetic **version strings** (`0.0.0-commit.<sha>`) and serves packuments for
+  those packages too, so they resolve through the bridge like the other preview
+  packages, and the package manager downloads only the binary for the current
+  platform (reading os/cpu from the packument) instead of all of them. To stay
+  within Worker limits, a platform package's packument is built without
+  re-gzipping its (~tens of MB) payload; the tarball is re-built only when that
+  binary is actually downloaded.
 - **Everything else**: 302-redirected to `registry.npmjs.org`, so the client
   fetches the hundreds of normal packages in a typical install directly from
   npm's CDN. The Worker stays out of the data path for everything it doesn't

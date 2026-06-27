@@ -41,6 +41,33 @@ export interface PreviewBuild extends PreviewMeta {
  * Only `package/package.json` changes; all other entries pass through byte for
  * byte (with their original attrs/mode), which keeps executables executable.
  */
+/**
+ * Parse the upstream tarball and return the rewritten `package.json` without
+ * re-gzipping. Used to build packument metadata cheaply for large packages
+ * (the platform binaries), where re-tarring/re-gzipping every configured ref
+ * would exceed the Worker CPU limit. The full tarball is built lazily, only
+ * when the matching binary is actually downloaded.
+ */
+export async function extractRewrittenPackageJson(
+  gzippedTarball: Uint8Array,
+  packageName: string,
+  version: string,
+  env: RewriteEnv,
+): Promise<Record<string, any>> {
+  const files = await parseTarGzip(gzippedTarball, { metaOnly: false })
+  const pkgEntry = files.find((f) => PACKAGE_JSON_NAMES.has(f.name) && f.data)
+  if (!pkgEntry || !pkgEntry.data) {
+    throw new HttpError(422, 'Upstream tarball is missing package/package.json')
+  }
+  let pkg: Record<string, any>
+  try {
+    pkg = JSON.parse(new TextDecoder().decode(pkgEntry.data))
+  } catch {
+    throw new HttpError(422, 'Invalid package/package.json in upstream tarball')
+  }
+  return rewritePackageJson(pkg, packageName, version, env)
+}
+
 export async function buildPreviewTarball(
   gzippedTarball: Uint8Array,
   packageName: string,
