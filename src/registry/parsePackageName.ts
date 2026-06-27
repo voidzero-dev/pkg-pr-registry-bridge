@@ -12,6 +12,15 @@ export interface PackumentRequest {
   name: string
 }
 
+/** Strip leading slashes and percent-decode a request path; null if malformed. */
+function decodePath(pathname: string): string | null {
+  try {
+    return decodeURIComponent(pathname.replace(/^\/+/, ''))
+  } catch {
+    return null
+  }
+}
+
 /**
  * Identify a packument request from a request path. Returns null when the path
  * is not a plain packument (e.g. an npm tarball path containing `/-/`, the
@@ -19,15 +28,8 @@ export interface PackumentRequest {
  * proxy the request to npm.
  */
 export function parsePackagePath(pathname: string): PackumentRequest | null {
-  const raw = pathname.replace(/^\/+/, '')
-  if (!raw) return null
-
-  let decoded: string
-  try {
-    decoded = decodeURIComponent(raw)
-  } catch {
-    return null
-  }
+  const decoded = decodePath(pathname)
+  if (!decoded) return null
 
   // npm tarball URLs and registry APIs use a `/-/` segment.
   if (decoded.includes('/-/') || decoded.startsWith('-/')) return null
@@ -55,16 +57,10 @@ export interface TarballRequest {
  *   /tarballs/@voidzero-dev/vite-plus-core/0.0.0-pr.1891.tgz
  */
 export function parseTarballPath(pathname: string): TarballRequest | null {
-  const raw = pathname.replace(/^\/+/, '')
-  if (!raw.startsWith('tarballs/')) return null
+  const decoded = decodePath(pathname)
+  if (!decoded || !decoded.startsWith('tarballs/')) return null
 
-  let rest: string
-  try {
-    rest = decodeURIComponent(raw.slice('tarballs/'.length))
-  } catch {
-    return null
-  }
-
+  const rest = decoded.slice('tarballs/'.length)
   const segments = rest.split('/')
   const file = segments.pop()
   if (!file || !file.endsWith('.tgz')) return null
@@ -92,14 +88,12 @@ export function parseTarballPath(pathname: string): TarballRequest | null {
  * the package name (so the caller can fall back to the npm redirect).
  */
 export function parseNpmTarballPath(pathname: string): TarballRequest | null {
-  const raw = pathname.replace(/^\/+/, '')
+  // Cheap early-out: skip the decode for the common packument/redirect paths,
+  // which never contain the `/-/` tarball separator (it is never encoded).
+  if (!pathname.includes('/-/')) return null
 
-  let decoded: string
-  try {
-    decoded = decodeURIComponent(raw)
-  } catch {
-    return null
-  }
+  const decoded = decodePath(pathname)
+  if (!decoded) return null
 
   const sep = decoded.indexOf('/-/')
   if (sep === -1) return null

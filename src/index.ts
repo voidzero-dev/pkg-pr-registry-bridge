@@ -219,8 +219,10 @@ app.post('/-/purge', async (c) => {
 })
 
 /**
- * Packument endpoint and default-registry fallback.
+ * Packument endpoint, npm-convention tarball alias, and default-registry
+ * fallback.
  *
+ *  - npm-convention tarball path for a preview build: serve it (see below).
  *  - Allowlisted package: fetch the npm packument (or synthesize an empty one
  *    if absent from npm), inject configured preview versions, return.
  *  - Everything else: redirect to npm so the client fetches it directly.
