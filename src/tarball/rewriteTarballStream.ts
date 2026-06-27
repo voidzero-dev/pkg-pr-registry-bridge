@@ -194,6 +194,66 @@ function tarRewriteTransform(
   })
 }
 
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256)
+  for (let n = 0; n < 256; n++) {
+    let c = n
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+    table[n] = c >>> 0
+  }
+  return table
+})()
+
+/**
+ * Re-gzip the tar as "stored" (uncompressed) deflate blocks. Re-compressing the
+ * ~48MB native binary with `CompressionStream` is the slow consumer that lets
+ * the decompressor buffer ahead and blow the Worker's memory budget; emitting
+ * stored blocks is near-free CPU, so it keeps pace with the decompressor and the
+ * whole pipeline stays bounded. The output is larger (it is not compressed), but
+ * it is a valid gzip the package manager decodes normally.
+ */
+function storedGzipTransform(): TransformStream<Bytes, Bytes> {
+  let crc = 0xffffffff
+  let size = 0
+  let started = false
+  // gzip header: magic, deflate method, no flags, no mtime, OS unknown.
+  const HEADER = new Uint8Array([0x1f, 0x8b, 0x08, 0, 0, 0, 0, 0, 0, 0xff])
+
+  return new TransformStream<Bytes, Bytes>({
+    transform(chunk, controller) {
+      if (!started) {
+        controller.enqueue(HEADER)
+        started = true
+      }
+      for (let i = 0; i < chunk.length; i++) {
+        crc = (crc >>> 8) ^ CRC_TABLE[(crc ^ chunk[i]) & 0xff]
+      }
+      size = (size + chunk.length) >>> 0
+      // Stored deflate blocks: max 65535 bytes each, header is
+      // BFINAL/BTYPE byte (0 = non-final, stored) + LEN + ~LEN, both LE.
+      let off = 0
+      while (off < chunk.length) {
+        const n = Math.min(65535, chunk.length - off)
+        controller.enqueue(
+          new Uint8Array([0, n & 0xff, (n >> 8) & 0xff, ~n & 0xff, (~n >> 8) & 0xff]),
+        )
+        controller.enqueue(chunk.subarray(off, off + n))
+        off += n
+      }
+    },
+    flush(controller) {
+      if (!started) controller.enqueue(HEADER)
+      // Final empty stored block, then CRC32 + ISIZE (both little-endian).
+      controller.enqueue(new Uint8Array([1, 0, 0, 0xff, 0xff]))
+      const trailer = new Uint8Array(8)
+      const dv = new DataView(trailer.buffer)
+      dv.setUint32(0, (crc ^ 0xffffffff) >>> 0, true)
+      dv.setUint32(4, size >>> 0, true)
+      controller.enqueue(trailer)
+    },
+  })
+}
+
 /**
  * Stream-rewrite a gzipped tar: replace the named entry's bytes and re-gzip,
  * passing all other bytes through. Returns the gzipped output stream.
@@ -207,5 +267,5 @@ export function rewriteTarballEntryStream(
   return gzipped
     .pipeThrough(new DecompressionStream('gzip'))
     .pipeThrough(tarRewriteTransform(replaceNames, replaceWith, validateName))
-    .pipeThrough(new CompressionStream('gzip'))
+    .pipeThrough(storedGzipTransform())
 }

@@ -20,33 +20,14 @@ import {
   fetchUpstreamTarballStream,
 } from './fetchUpstreamTarball'
 
-async function collectStream(
-  stream: ReadableStream<Uint8Array>,
-): Promise<Uint8Array> {
-  const reader = stream.getReader()
-  const chunks: Uint8Array[] = []
-  let total = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    chunks.push(value)
-    total += value.byteLength
-  }
-  const out = new Uint8Array(total)
-  let offset = 0
-  for (const chunk of chunks) {
-    out.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  return out
-}
-
 /**
  * Build a large non-preview tarball (a platform binary) by streaming: swap only
  * `package/package.json` and pass the multi-MB native binary straight through,
  * never holding the decompressed payload whole. The full-buffer path
  * (`buildAndStore`) re-tars and re-gzips the entire payload, which exceeds the
- * Worker memory/CPU budget for these (~tens of MB) binaries (Cloudflare 1102).
+ * Worker memory budget for these (~tens of MB) binaries (Cloudflare 1102). The
+ * rewritten stream is piped straight into R2, then read back for the response,
+ * so neither the build nor the store ever materializes the payload twice.
  * Integrity is not pinned for these packages (see `buildMetaLight`), so the
  * package manager computes it from the bytes it downloads.
  */
@@ -70,14 +51,18 @@ async function buildAndStoreStreaming(
     return new TextEncoder().encode(`${JSON.stringify(rewritten, null, 2)}\n`)
   }
 
-  const tarball = await collectStream(
-    rewriteTarballEntryStream(
-      upstream,
-      PACKAGE_JSON_NAMES,
-      rewrite,
-      assertSafeTarballPath,
-    ),
+  const outStream = rewriteTarballEntryStream(
+    upstream,
+    PACKAGE_JSON_NAMES,
+    rewrite,
+    assertSafeTarballPath,
   )
+
+  // Collect the rewritten output (R2 needs a known length to store it). The
+  // stored-gzip output keeps pace with the decompressor, so the peak footprint
+  // is ~the decompressed payload once -- the same as buildMetaLight, which the
+  // packument path already runs on these binaries within budget.
+  const tarball = new Uint8Array(await new Response(outStream).arrayBuffer())
 
   await env.TARBALL_CACHE.put(tarballKey(name, version), tarball, {
     httpMetadata: {
