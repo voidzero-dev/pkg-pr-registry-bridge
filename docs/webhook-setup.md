@@ -67,9 +67,15 @@ If you control the publish workflow, call the admin endpoint right after
     curl -fsS -X POST \
       -H "authorization: Bearer ${{ secrets.PKG_PR_BRIDGE_ADMIN_TOKEN }}" \
       -H 'content-type: application/json' \
-      -d "{\"ref\":\"commit.${{ github.sha }}\"}" \
+      -d "{\"ref\":\"commit.${{ github.event.pull_request.head.sha }}\"}" \
       https://pkg-pr-registry-bridge.render.vip/-/refs
 ```
+
+> Use `github.event.pull_request.head.sha`, not `github.sha`. pkg.pr.new
+> publishes under the PR **head** commit, whereas on `pull_request` events
+> `github.sha` is the ephemeral **merge** commit; registering that would point
+> at a SHA pkg.pr.new never built. On `push` events (no merge commit),
+> `github.sha` is the head commit and is correct.
 
 ## Notes
 
