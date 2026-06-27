@@ -12,7 +12,7 @@ import {
   isUnderPackageRoot,
 } from '../security/validateTarballPath'
 
-const PACKAGE_JSON_NAMES = new Set([
+export const PACKAGE_JSON_NAMES = new Set([
   'package/package.json',
   './package/package.json',
 ])

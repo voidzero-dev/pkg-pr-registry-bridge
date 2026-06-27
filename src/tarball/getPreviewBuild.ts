@@ -5,13 +5,88 @@ import { isPreviewPackage } from '../preview/packages'
 import { toPkgPrNewUrl } from '../preview/toPkgPrNewUrl'
 import { metaKey, tarballKey } from '../cache/r2Cache'
 import { tarballCacheControl } from '../cache/headers'
+import { rewritePackageJson } from './rewritePackageJson'
+import { assertSafeTarballPath } from '../security/validateTarballPath'
+import { rewriteTarballEntryStream } from './rewriteTarballStream'
 import {
   buildPreviewTarball,
   extractRewrittenPackageJson,
+  PACKAGE_JSON_NAMES,
   type PreviewBuild,
   type PreviewMeta,
 } from './buildPreviewTarball'
-import { fetchUpstreamTarball } from './fetchUpstreamTarball'
+import {
+  fetchUpstreamTarball,
+  fetchUpstreamTarballStream,
+} from './fetchUpstreamTarball'
+
+async function collectStream(
+  stream: ReadableStream<Uint8Array>,
+): Promise<Uint8Array> {
+  const reader = stream.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value)
+    total += value.byteLength
+  }
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    out.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return out
+}
+
+/**
+ * Build a large non-preview tarball (a platform binary) by streaming: swap only
+ * `package/package.json` and pass the multi-MB native binary straight through,
+ * never holding the decompressed payload whole. The full-buffer path
+ * (`buildAndStore`) re-tars and re-gzips the entire payload, which exceeds the
+ * Worker memory/CPU budget for these (~tens of MB) binaries (Cloudflare 1102).
+ * Integrity is not pinned for these packages (see `buildMetaLight`), so the
+ * package manager computes it from the bytes it downloads.
+ */
+async function buildAndStoreStreaming(
+  env: Env,
+  name: string,
+  version: string,
+): Promise<Uint8Array> {
+  const url = toPkgPrNewUrl(env, name, version)
+  if (!url) throw new HttpError(400, `Invalid preview version: ${version}`)
+
+  const upstream = await fetchUpstreamTarballStream(url, maxTarballBytes(env))
+  const rewrite = (data: Uint8Array): Uint8Array => {
+    let pkg: Record<string, any>
+    try {
+      pkg = JSON.parse(new TextDecoder().decode(data))
+    } catch {
+      throw new HttpError(422, 'Invalid package/package.json in upstream tarball')
+    }
+    const rewritten = rewritePackageJson(pkg, name, version, env)
+    return new TextEncoder().encode(`${JSON.stringify(rewritten, null, 2)}\n`)
+  }
+
+  const tarball = await collectStream(
+    rewriteTarballEntryStream(
+      upstream,
+      PACKAGE_JSON_NAMES,
+      rewrite,
+      assertSafeTarballPath,
+    ),
+  )
+
+  await env.TARBALL_CACHE.put(tarballKey(name, version), tarball, {
+    httpMetadata: {
+      contentType: 'application/gzip',
+      cacheControl: tarballCacheControl(),
+    },
+  })
+  return tarball
+}
 
 /**
  * Download the upstream tarball, rewrite it, and durably persist BOTH the
@@ -127,5 +202,13 @@ export async function getPreviewTarball(
 ): Promise<Uint8Array> {
   const cached = await env.TARBALL_CACHE.get(tarballKey(name, version))
   if (cached) return new Uint8Array(await cached.arrayBuffer())
+
+  // Large platform binaries decompress to tens of MB; re-tarring + re-gzipping
+  // them as whole buffers exceeds the Worker budget (Cloudflare 1102). Build
+  // those by streaming, swapping only package.json. The small preview packages
+  // (which also pin integrity) keep the full-buffer path.
+  if (!isPreviewPackage(name)) {
+    return buildAndStoreStreaming(env, name, version)
+  }
   return (await buildAndStore(env, name, version)).tarball
 }
