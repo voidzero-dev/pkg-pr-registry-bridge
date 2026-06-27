@@ -252,17 +252,21 @@ describe('integrity', () => {
 const AUTH = { authorization: 'Bearer test-admin-token' }
 
 describe('admin: refs', () => {
-  it('requires auth', async () => {
-    expect((await SELF.fetch(`${BASE}/-/refs`)).status).toBe(401)
+  it('writes require auth (reads do not)', async () => {
+    // POST/DELETE require the bearer token.
+    expect(
+      (await SELF.fetch(`${BASE}/-/refs`, { method: 'POST' })).status,
+    ).toBe(401)
     expect(
       (await SELF.fetch(`${BASE}/-/refs`, {
+        method: 'POST',
         headers: { authorization: 'Bearer wrong' },
       })).status,
     ).toBe(401)
   })
 
-  it('lists the env-configured refs', async () => {
-    const res = await SELF.fetch(`${BASE}/-/refs`, { headers: AUTH })
+  it('lists the env-configured refs without auth (public read)', async () => {
+    const res = await SELF.fetch(`${BASE}/-/refs`)
     expect(res.status).toBe(200)
     const body = (await res.json()) as { refs: Array<{ ref: string }> }
     expect(body.refs.some((r) => r.ref === 'commit.a832a55')).toBe(true)

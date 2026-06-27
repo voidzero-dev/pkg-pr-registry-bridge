@@ -117,12 +117,13 @@ sources are merged.
 
 ## Admin endpoints
 
-Guarded by `Authorization: Bearer <ADMIN_TOKEN>` (set `ADMIN_TOKEN` with
-`wrangler secret put`). Without it configured the endpoints return 503.
+Writes are guarded by `Authorization: Bearer <ADMIN_TOKEN>` (set `ADMIN_TOKEN`
+with `wrangler secret put`); without it configured the write endpoints return
+503. `GET /-/refs` is a public read.
 
 ```bash
-# List configured refs (static env + runtime KV)
-curl -H "authorization: Bearer $ADMIN_TOKEN" https://.../-/refs
+# List configured refs (static env + runtime KV) - no auth required
+curl https://.../-/refs
 
 # Register a ref at runtime (no redeploy). If GITHUB_TOKEN is set, the ref is
 # verified to exist in voidzero-dev/vite-plus first.

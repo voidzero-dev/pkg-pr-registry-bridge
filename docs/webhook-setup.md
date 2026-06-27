@@ -53,8 +53,7 @@ gh api -X POST repos/voidzero-dev/vite-plus/hooks \
 After a PR build publishes (the bot comments), check it registered:
 
 ```bash
-curl -H "authorization: Bearer <YOUR_ADMIN_TOKEN>" \
-  https://pkg-pr-registry-bridge.render.vip/-/refs
+curl https://pkg-pr-registry-bridge.render.vip/-/refs
 ```
 
 ## Alternative: a CI step instead of a webhook

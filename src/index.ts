@@ -69,9 +69,8 @@ app.get('/tarballs/*', async (c) => {
   })
 })
 
-/** List the configured preview refs (static env + runtime KV). */
+/** List the configured preview refs (static env + runtime KV). Public read. */
 app.get('/-/refs', async (c) => {
-  admin(c)
   const refs = await getConfiguredRefs(c.env)
   return c.json({
     refs: refs.map((r) => ({
