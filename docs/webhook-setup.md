@@ -66,7 +66,7 @@ If you control the publish workflow, call the admin endpoint right after
 - name: Register pkg.pr.new ref with the registry bridge
   run: |
     curl -fsS -X POST \
-      -H "authorization: Bearer ${{ secrets.BRIDGE_ADMIN_TOKEN }}" \
+      -H "authorization: Bearer ${{ secrets.PKG_PR_BRIDGE_ADMIN_TOKEN }}" \
       -H 'content-type: application/json' \
       -d "{\"ref\":\"commit.${{ github.sha }}\"}" \
       https://pkg-pr-registry-bridge.render.vip/-/refs
