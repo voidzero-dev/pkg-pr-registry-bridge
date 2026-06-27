@@ -165,7 +165,7 @@ Set via `wrangler.toml` `[vars]` (tokens via `wrangler secret`):
 
 Bindings/secrets:
 
-- `TARBALL_CACHE` (R2) - generated tarballs + rewritten metadata (incl. integrity).
+- `TARBALL_CACHE` (R2) - generated tarballs + rewritten metadata (incl. integrity). A 90-day expiry lifecycle rule bounds storage (`wrangler r2 bucket lifecycle add ... --expire-days 90`).
 - `PREVIEW_REFS` (KV) - runtime-registered refs.
 - `ADMIN_TOKEN` (secret) - guards the admin endpoints.
 - `GITHUB_TOKEN` (secret, optional) - enables commit existence checks on `/-/refs`.

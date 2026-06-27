@@ -29,6 +29,10 @@ WORKSPACE_PACKAGES = "vite-plus,@voidzero-dev/vite-plus-*"
 MAX_TARBALL_BYTES = "67108864"
 
 # Durable cache for generated tarballs and rewritten package.json metadata.
+# A 90-day expiry lifecycle rule bounds storage growth (lifecycle rules live on
+# the bucket, not here):
+#   wrangler r2 bucket lifecycle add pkg-pr-registry-bridge-tarballs expire-90d \
+#     --expire-days 90
 [[r2_buckets]]
 binding = "TARBALL_CACHE"
 bucket_name = "pkg-pr-registry-bridge-tarballs"
