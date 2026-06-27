@@ -5,39 +5,37 @@ import {
   type ConfiguredPreviewRef,
 } from './parseConfiguredPreviewRefs'
 
-// All runtime refs live under a single KV key (a JSON string array). A single
-// `get` is strongly consistent in the region of the write, so a freshly
-// registered ref is reflected immediately there; `list()` would add cache
-// latency. Writes are rare (admin-only), so the read-modify-write is fine.
-const REFS_KEY = 'refs'
+// Each registered ref is its own KV key (`ref:<canonical>`). Registration is
+// therefore an independent `put` with no read-modify-write, so simultaneous
+// registrations (e.g. several PRs publishing at once) never overwrite each
+// other. Reading enumerates the keys via `list`, which is eventually consistent
+// (a freshly registered ref can take up to ~60s to appear), an acceptable trade
+// for never losing a ref.
+const KV_PREFIX = 'ref:'
+
+// Bound KV growth, aligned with the R2 tarball lifecycle (90 days). Re-running
+// the webhook on a new commit re-registers and refreshes the TTL.
+const REF_TTL_SECONDS = 90 * 24 * 60 * 60
 
 function canonical(ref: ConfiguredPreviewRef): string {
   return `${ref.type}.${ref.ref}`
 }
 
-async function readKvRefs(env: Env): Promise<string[]> {
+async function listKvRefs(env: Env): Promise<string[]> {
   if (!env.PREVIEW_REFS) return []
-  const raw = await env.PREVIEW_REFS.get(REFS_KEY)
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed.map(String) : []
-  } catch {
-    return []
-  }
-}
-
-async function writeKvRefs(env: Env, refs: string[]): Promise<void> {
-  if (!env.PREVIEW_REFS) {
-    throw new Error('PREVIEW_REFS KV namespace is not configured')
-  }
-  await env.PREVIEW_REFS.put(REFS_KEY, JSON.stringify(refs))
+  const refs: string[] = []
+  let cursor: string | undefined
+  do {
+    const page = await env.PREVIEW_REFS.list({ prefix: KV_PREFIX, cursor })
+    for (const key of page.keys) refs.push(key.name.slice(KV_PREFIX.length))
+    cursor = page.list_complete ? undefined : page.cursor
+  } while (cursor)
+  return refs
 }
 
 /**
  * Resolve the preview refs to inject into packuments: the static
- * `VITE_PLUS_PREVIEW_REFS` var merged with any refs registered at runtime in
- * KV. KV lets refs be added without a redeploy.
+ * `VITE_PLUS_PREVIEW_REFS` var merged with refs registered at runtime in KV.
  */
 export async function getConfiguredRefs(
   env: Env,
@@ -46,7 +44,7 @@ export async function getConfiguredRefs(
 
   let fromKv: ConfiguredPreviewRef[] = []
   try {
-    fromKv = parseConfiguredPreviewRefsSafe((await readKvRefs(env)).join(','))
+    fromKv = parseConfiguredPreviewRefsSafe((await listKvRefs(env)).join(','))
   } catch (err) {
     console.warn('Failed to read preview refs from KV:', err)
   }
@@ -56,23 +54,28 @@ export async function getConfiguredRefs(
   return [...byVersion.values()]
 }
 
-/** Validate and register a ref in KV. Returns the parsed ref. */
+/** Validate and register a ref. Concurrency-safe (independent per-ref key). */
 export async function registerRef(
   env: Env,
   ref: string,
 ): Promise<ConfiguredPreviewRef> {
   const [parsed] = parseConfiguredPreviewRefs(ref)
-  const canon = canonical(parsed)
-  const refs = await readKvRefs(env)
-  if (!refs.includes(canon)) refs.push(canon)
-  await writeKvRefs(env, refs)
+  if (!env.PREVIEW_REFS) {
+    throw new Error('PREVIEW_REFS KV namespace is not configured')
+  }
+  await env.PREVIEW_REFS.put(
+    `${KV_PREFIX}${canonical(parsed)}`,
+    JSON.stringify({ version: parsed.version, tag: parsed.tag }),
+    { expirationTtl: REF_TTL_SECONDS },
+  )
   return parsed
 }
 
-/** Remove a runtime-registered ref from KV. */
+/** Remove a runtime-registered ref. */
 export async function unregisterRef(env: Env, ref: string): Promise<void> {
   const [parsed] = parseConfiguredPreviewRefs(ref)
-  const canon = canonical(parsed)
-  const refs = (await readKvRefs(env)).filter((r) => r !== canon)
-  await writeKvRefs(env, refs)
+  if (!env.PREVIEW_REFS) {
+    throw new Error('PREVIEW_REFS KV namespace is not configured')
+  }
+  await env.PREVIEW_REFS.delete(`${KV_PREFIX}${canonical(parsed)}`)
 }

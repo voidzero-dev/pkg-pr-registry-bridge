@@ -297,6 +297,25 @@ describe('admin: refs', () => {
     expect(res.status).toBe(400)
   })
 
+  it('registers concurrently without overwriting (incremental)', async () => {
+    const a = 'commit.aaaaaaa'
+    const b = 'commit.bbbbbbb'
+    const post = (ref: string) =>
+      SELF.fetch(`${BASE}/-/refs`, {
+        method: 'POST',
+        headers: { ...AUTH, 'content-type': 'application/json' },
+        body: JSON.stringify({ ref }),
+      })
+    // Two PRs registering at the same time: both must survive.
+    await Promise.all([post(a), post(b)])
+    const list = (await (
+      await SELF.fetch(`${BASE}/-/refs`, { headers: AUTH })
+    ).json()) as { refs: Array<{ ref: string }> }
+    const refs = list.refs.map((r) => r.ref)
+    expect(refs).toContain(a)
+    expect(refs).toContain(b)
+  })
+
   it('unregisters a ref', async () => {
     // Use a sha that is not the env-configured ref, so removal is observable.
     const ref = 'commit.beefcafe'
