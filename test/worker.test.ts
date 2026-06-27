@@ -221,6 +221,46 @@ describe('tarball endpoint', () => {
     )
   })
 
+  it('also serves the npm-convention tarball path (/<name>/-/<name>-<version>.tgz)', async () => {
+    const res = await SELF.fetch(
+      `${BASE}/vite-plus/-/vite-plus-0.0.0-commit.a832a55.tgz`,
+    )
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe('application/gzip')
+
+    const bytes = new Uint8Array(await res.arrayBuffer())
+    const files = await parseTarGzip(bytes)
+    const pkgFile = files.find((f) => f.name === 'package/package.json')
+    const pkg = JSON.parse(new TextDecoder().decode(pkgFile!.data))
+    expect(pkg.name).toBe('vite-plus')
+    expect(pkg.version).toBe('0.0.0-commit.a832a55')
+  })
+
+  it('serves the npm-convention path for a scoped preview package', async () => {
+    const res = await SELF.fetch(
+      `${BASE}/@voidzero-dev/vite-plus-core/-/vite-plus-core-0.0.0-commit.a832a55.tgz`,
+    )
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe('application/gzip')
+  })
+
+  it('redirects an npm-convention path to npm for non-preview packages/versions', async () => {
+    // Non-preview package: still proxied to npm.
+    const other = await SELF.fetch(`${BASE}/react/-/react-18.2.0.tgz`, {
+      redirect: 'manual',
+    })
+    expect(other.status).toBe(302)
+    expect(other.headers.get('location')).toBe(
+      'https://registry.npmjs.org/react/-/react-18.2.0.tgz',
+    )
+    // Preview package but a non-preview (real) version: proxied to npm too.
+    const realVersion = await SELF.fetch(
+      `${BASE}/vite-plus/-/vite-plus-0.2.1.tgz`,
+      { redirect: 'manual' },
+    )
+    expect(realVersion.status).toBe(302)
+  })
+
   it('rejects unknown preview packages', async () => {
     const res = await SELF.fetch(`${BASE}/tarballs/react/0.0.0-commit.a832a55.tgz`)
     expect(res.status).toBe(404)

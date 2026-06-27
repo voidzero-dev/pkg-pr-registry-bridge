@@ -15,6 +15,7 @@ import {
 import { toPkgPrNewUrl } from '../src/preview/toPkgPrNewUrl'
 import {
   encodeNpmPackageName,
+  parseNpmTarballPath,
   parsePackagePath,
   parseTarballPath,
 } from '../src/registry/parsePackageName'
@@ -171,6 +172,46 @@ describe('parseTarballPath', () => {
   it('returns null for non-tarball paths', () => {
     expect(parseTarballPath('/vite-plus')).toBeNull()
     expect(parseTarballPath('/tarballs/vite-plus/0.0.0-pr.1891')).toBeNull()
+  })
+})
+
+describe('parseNpmTarballPath', () => {
+  it('parses npm-convention unscoped and scoped tarball paths', () => {
+    expect(
+      parseNpmTarballPath('/vite-plus/-/vite-plus-0.0.0-commit.a832a55.tgz'),
+    ).toEqual({ name: 'vite-plus', version: '0.0.0-commit.a832a55' })
+    expect(
+      parseNpmTarballPath(
+        '/@voidzero-dev/vite-plus-core/-/vite-plus-core-0.0.0-commit.a832a55.tgz',
+      ),
+    ).toEqual({
+      name: '@voidzero-dev/vite-plus-core',
+      version: '0.0.0-commit.a832a55',
+    })
+    // Encoded scope slash (some clients percent-encode the `/`).
+    expect(
+      parseNpmTarballPath(
+        '/@voidzero-dev%2Fvite-plus-core/-/vite-plus-core-0.0.0-commit.a832a55.tgz',
+      ),
+    ).toEqual({
+      name: '@voidzero-dev/vite-plus-core',
+      version: '0.0.0-commit.a832a55',
+    })
+  })
+
+  it('returns null when the path is not a tarball or the filename mismatches', () => {
+    // No `/-/` separator (a packument request).
+    expect(parseNpmTarballPath('/vite-plus')).toBeNull()
+    // Filename does not start with the unscoped package name.
+    expect(
+      parseNpmTarballPath('/vite-plus/-/other-0.0.0-commit.a832a55.tgz'),
+    ).toBeNull()
+    // Missing .tgz suffix.
+    expect(
+      parseNpmTarballPath('/vite-plus/-/vite-plus-0.0.0-commit.a832a55'),
+    ).toBeNull()
+    // Registry API path.
+    expect(parseNpmTarballPath('/-/v1/search?text=vite')).toBeNull()
   })
 })
 

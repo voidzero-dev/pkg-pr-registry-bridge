@@ -11,6 +11,7 @@ import {
   unregisterRef,
 } from './preview/getConfiguredRefs'
 import {
+  parseNpmTarballPath,
   parsePackagePath,
   parseTarballPath,
 } from './registry/parsePackageName'
@@ -41,32 +42,41 @@ const admin = (c: { req: { header: (k: string) => string | undefined }; env: Env
   requireAdmin({ env: c.env, authorization: c.req.header('authorization') })
 
 /**
- * Preview tarball endpoint. Serves a generated tarball from the edge cache,
- * then R2, then by generating it from pkg.pr.new.
+ * Serve a generated preview tarball from R2 (built together with the meta
+ * integrity), never the per-colo Cache API. An edge-cached tarball can outlive a
+ * content change and then mismatch the integrity advertised in the packument
+ * (IntegrityCheckFailed). R2 is the single source of truth.
  */
-app.get('/tarballs/*', async (c) => {
-  const parsed = parseTarballPath(new URL(c.req.url).pathname)
-  if (!parsed) throw new HttpError(404, 'Not found')
-
-  const { name, version } = parsed
-  if (!isWorkspacePackage(name, c.env)) {
+async function serveTarball(
+  env: Env,
+  name: string,
+  version: string,
+): Promise<Response> {
+  if (!isWorkspacePackage(name, env)) {
     throw new HttpError(404, `Unknown preview package: ${name}`)
   }
   if (!parsePreviewVersion(version)) {
     throw new HttpError(400, `Invalid preview version: ${version}`)
   }
-
-  // Serve from R2 (global, and built together with the meta integrity), never
-  // the per-colo Cache API. An edge-cached tarball can outlive a content change
-  // and then mismatch the integrity advertised in the packument
-  // (IntegrityCheckFailed). R2 is the single source of truth.
-  const tarball = await getPreviewTarball(c.env, name, version)
+  const tarball = await getPreviewTarball(env, name, version)
   return new Response(tarball, {
     headers: {
       'content-type': 'application/gzip',
       'cache-control': tarballCacheControl(version),
     },
   })
+}
+
+/**
+ * Preview tarball endpoint. Serves a generated tarball from R2, then by
+ * generating it from pkg.pr.new.
+ */
+app.get('/tarballs/*', async (c) => {
+  const parsed = parseTarballPath(new URL(c.req.url).pathname)
+  if (!parsed) throw new HttpError(404, 'Not found')
+  // `await` so a thrown HttpError unwinds inside this handler's frame and is
+  // routed to onError, rather than rejecting the returned promise unhandled.
+  return await serveTarball(c.env, parsed.name, parsed.version)
 })
 
 /** List the configured preview refs (static env + runtime KV). Public read. */
@@ -216,7 +226,22 @@ app.post('/-/purge', async (c) => {
  *  - Everything else: redirect to npm so the client fetches it directly.
  */
 app.get('*', async (c) => {
-  const pkgReq = parsePackagePath(new URL(c.req.url).pathname)
+  const pathname = new URL(c.req.url).pathname
+
+  // npm-convention tarball path (/<name>/-/<basename>-<version>.tgz). Clients
+  // should read dist.tarball (which points at /tarballs/...), but some, and
+  // stale lockfiles, synthesize this path instead. Serve preview builds here
+  // too; non-preview packages/versions fall through to the npm redirect below.
+  const npmTarball = parseNpmTarballPath(pathname)
+  if (
+    npmTarball &&
+    isWorkspacePackage(npmTarball.name, c.env) &&
+    parsePreviewVersion(npmTarball.version)
+  ) {
+    return await serveTarball(c.env, npmTarball.name, npmTarball.version)
+  }
+
+  const pkgReq = parsePackagePath(pathname)
   if (!pkgReq) return redirectToNpm(c.env, c.req.raw)
 
   const { name } = pkgReq

@@ -45,7 +45,10 @@ for a runnable example.
   pkg.pr.new tarball, rewrites `package/package.json` (name, version,
   dependencies), repacks, and serves it. Tarballs are cached in R2; the first
   request per `(name, version)` builds/stores, and the deploy-time warm step
-  pre-populates the preview packages.
+  pre-populates the preview packages. The same build is also served at the
+  npm-convention path (`GET /<pkg>/-/<name>-<version>.tgz`) for clients and
+  lockfiles that synthesize that URL instead of reading `dist.tarball`;
+  non-preview packages/versions on that path are redirected to npm.
 - **Transitive deps**: a preview build's `optionalDependencies` point at
   pkg.pr.new (the platform binaries). The bridge rewrites those URLs to
   synthetic **version strings** (`0.0.0-commit.<sha>`) and serves packuments for

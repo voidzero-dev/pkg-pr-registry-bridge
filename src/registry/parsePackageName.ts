@@ -75,6 +75,51 @@ export function parseTarballPath(pathname: string): TarballRequest | null {
   return { name, version }
 }
 
+/**
+ * Parse an npm-convention tarball path (the layout registry.npmjs.org uses):
+ *   /vite-plus/-/vite-plus-0.0.0-commit.<sha>.tgz
+ *   /@voidzero-dev/vite-plus-core/-/vite-plus-core-0.0.0-commit.<sha>.tgz
+ *   /@voidzero-dev%2Fvite-plus-core/-/vite-plus-core-0.0.0-commit.<sha>.tgz
+ *
+ * Clients are supposed to read `dist.tarball` from the packument, but some
+ * (and stale lockfiles) synthesize this path from the registry base instead.
+ * The bridge serves preview builds here too so those clients still resolve.
+ *
+ * npm names the file `<unscoped-name>-<version>.tgz`. We split on the `/-/`
+ * separator: the left side is the package name, and the version is the filename
+ * with the `<unscoped-name>-` prefix and `.tgz` suffix stripped. Returns null
+ * when the path is not a well-formed tarball path or the filename does not match
+ * the package name (so the caller can fall back to the npm redirect).
+ */
+export function parseNpmTarballPath(pathname: string): TarballRequest | null {
+  const raw = pathname.replace(/^\/+/, '')
+
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(raw)
+  } catch {
+    return null
+  }
+
+  const sep = decoded.indexOf('/-/')
+  if (sep === -1) return null
+
+  const name = decoded.slice(0, sep)
+  const file = decoded.slice(sep + '/-/'.length)
+  if (!name || !file.endsWith('.tgz') || file.includes('/')) return null
+
+  const unscoped = name.startsWith('@') ? name.split('/').pop() ?? '' : name
+  if (!unscoped) return null
+
+  const base = file.slice(0, -'.tgz'.length)
+  const prefix = `${unscoped}-`
+  if (!base.startsWith(prefix)) return null
+
+  const version = base.slice(prefix.length)
+  if (!version) return null
+  return { name, version }
+}
+
 /** Encode a package name for an outbound npm registry URL. */
 export function encodeNpmPackageName(name: string): string {
   return name.startsWith('@') ? name.replace('/', '%2F') : name
