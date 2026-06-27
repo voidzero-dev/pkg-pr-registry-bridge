@@ -6,6 +6,10 @@ compatibility_date = "2024-11-01"
 # wrangler provisions the DNS record and TLS cert automatically.
 routes = [{ pattern = "pkg-pr-registry-bridge.render.vip", custom_domain = true }]
 
+[observability.logs]
+enabled = true
+invocation_logs = true
+
 [vars]
 # Public origin of this bridge. Must match the deployed route so generated
 # `dist.tarball` URLs are correct. Override per environment.
@@ -17,6 +21,10 @@ PREVIEW_REPO = "vite-plus"
 # Comma-separated preview refs to inject into packuments: `pr.<n>` / `commit.<sha>`.
 # Empty by default; configure per deployment (MVP2 moves this to KV).
 VITE_PLUS_PREVIEW_REFS = "commit.6acea1aa818e96365b5811d47360367ba18a3a05,pr.1891"
+# Packages the tarball endpoint serves and whose pkg.pr.new dependency URLs are
+# routed through the bridge. Exact names or `prefix*` patterns. Add new
+# workspace packages here (config-only, no code change).
+WORKSPACE_PACKAGES = "vite-plus,@voidzero-dev/vite-plus-*"
 # Max upstream tarball size (bytes). 64 MiB default; see RFC section 7.2.
 MAX_TARBALL_BYTES = "67108864"
 

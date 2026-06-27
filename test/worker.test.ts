@@ -43,12 +43,23 @@ function gzip(bytes: Uint8Array): Response {
  * a `vi.stubGlobal('fetch', ...)` mock intercepts its outbound calls to npm and
  * pkg.pr.new, while SELF.fetch (a service binding) still routes normally.
  */
+const PLATFORM_SHA = '1234567890abcdef1234567890abcdef12345678'
+
 beforeAll(async () => {
   const vitePlusPr = await makeTarball({
     name: 'vite-plus',
     version: '1891',
     dependencies: { '@voidzero-dev/vite-plus-core': '1891' },
+    optionalDependencies: {
+      '@voidzero-dev/vite-plus-darwin-arm64': `https://pkg.pr.new/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-darwin-arm64@${PLATFORM_SHA}`,
+    },
     bin: { vp: './bin/vp' },
+  })
+  const darwinBin = await makeTarball({
+    name: '@voidzero-dev/vite-plus-darwin-arm64',
+    version: '0.2.1',
+    os: ['darwin'],
+    cpu: ['arm64'],
   })
   const corePr = await makeTarball({
     name: '@voidzero-dev/vite-plus-core',
@@ -87,6 +98,9 @@ beforeAll(async () => {
     }
     if (url.endsWith('/@voidzero-dev/vite-plus-core@a832a55')) {
       return Promise.resolve(gzip(coreCommit))
+    }
+    if (url.endsWith(`/@voidzero-dev/vite-plus-darwin-arm64@${PLATFORM_SHA}`)) {
+      return Promise.resolve(gzip(darwinBin))
     }
     return Promise.reject(new Error(`unexpected fetch: ${url}`))
   }
@@ -139,6 +153,35 @@ describe('packument endpoint', () => {
     expect(preview.dist.tarball).toBe(
       `${BASE}/tarballs/@voidzero-dev/vite-plus-core/0.0.0-pr.1891.tgz`,
     )
+  })
+
+  it('routes pkg.pr.new optionalDependency URLs through the bridge', async () => {
+    const res = await SELF.fetch(`${BASE}/vite-plus`, {
+      headers: { accept: 'application/json' },
+    })
+    const body = (await res.json()) as Record<string, any>
+    const opt = body.versions['0.0.0-pr.1891'].optionalDependencies
+    expect(opt['@voidzero-dev/vite-plus-darwin-arm64']).toBe(
+      `${BASE}/tarballs/@voidzero-dev/vite-plus-darwin-arm64/0.0.0-commit.${PLATFORM_SHA}.tgz`,
+    )
+  })
+
+  it('serves a platform-binary tarball via the bridge (passthrough)', async () => {
+    const res = await SELF.fetch(
+      `${BASE}/tarballs/@voidzero-dev/vite-plus-darwin-arm64/0.0.0-commit.${PLATFORM_SHA}.tgz`,
+    )
+    expect(res.status).toBe(200)
+    const files = await parseTarGzip(new Uint8Array(await res.arrayBuffer()))
+    const pkg = JSON.parse(
+      new TextDecoder().decode(
+        files.find((f) => f.name === 'package/package.json')!.data,
+      ),
+    )
+    // Passed through unchanged: upstream name/version and platform fields.
+    expect(pkg.name).toBe('@voidzero-dev/vite-plus-darwin-arm64')
+    expect(pkg.version).toBe('0.2.1')
+    expect(pkg.os).toEqual(['darwin'])
+    expect(pkg.cpu).toEqual(['arm64'])
   })
 
   it('redirects non-allowlisted packages to npm', async () => {

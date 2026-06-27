@@ -35,11 +35,15 @@ for a runnable example.
   the npm packument (or synthesizes an empty one if the package is not on npm),
   injects the configured preview versions, and leaves existing versions and
   `latest` untouched.
-- **Tarball** (`GET /tarballs/<pkg>/<version>.tgz`): downloads the upstream
-  pkg.pr.new tarball, rewrites `package/package.json` (name, version, preview
-  dependencies), repacks, and serves it. Generated tarballs and the rewritten
-  metadata are cached in R2; the first request per `(name, version)` builds and
-  stores them, and the deploy-time warm step pre-populates them.
+- **Tarball** (`GET /tarballs/<pkg>/<version>.tgz`): for the preview packages,
+  downloads the upstream pkg.pr.new tarball, rewrites `package/package.json`
+  (name, version, preview + pkg.pr.new-URL dependencies), repacks, and serves
+  it; for other workspace packages (the platform binaries) it serves the
+  upstream tarball unchanged (no re-gzip of their large payloads). Tarballs are
+  cached in R2; the first request per `(name, version)` builds/stores, and the
+  deploy-time warm step pre-populates the preview packages. Transitive
+  `optionalDependencies` that point at pkg.pr.new are rewritten to bridge
+  tarball URLs so they are served and cached by the bridge too.
 - **Everything else**: 302-redirected to `registry.npmjs.org`, so the client
   fetches the hundreds of normal packages in a typical install directly from
   npm's CDN. The Worker stays out of the data path for everything it doesn't
@@ -145,6 +149,7 @@ Set via `wrangler.toml` `[vars]` (tokens via `wrangler secret`):
 | `PKG_PR_NEW_BASE` | pkg.pr.new base (`https://pkg.pr.new`). |
 | `PREVIEW_OWNER` / `PREVIEW_REPO` | Fixed upstream repo (`voidzero-dev` / `vite-plus`). |
 | `VITE_PLUS_PREVIEW_REFS` | Comma-separated refs to inject: `pr.<n>` / `commit.<sha>`. |
+| `WORKSPACE_PACKAGES` | Allowlist for the tarball endpoint and pkg.pr.new-URL dep routing. Exact names or `prefix*`, e.g. `vite-plus,@voidzero-dev/vite-plus-*`. |
 | `MAX_TARBALL_BYTES` | Max upstream tarball size (default 64 MiB). |
 
 Bindings/secrets:

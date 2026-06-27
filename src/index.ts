@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { Env } from './config'
 import { HttpError } from './httpError'
-import { isPreviewPackage } from './preview/packages'
+import { isPreviewPackage, isWorkspacePackage } from './preview/packages'
 import { parsePreviewVersion } from './preview/parsePreviewVersion'
 import { parseConfiguredPreviewRefs } from './preview/parseConfiguredPreviewRefs'
 import {
@@ -49,7 +49,7 @@ app.get('/tarballs/*', async (c) => {
   if (!parsed) throw new HttpError(404, 'Not found')
 
   const { name, version } = parsed
-  if (!isPreviewPackage(name)) {
+  if (!isWorkspacePackage(name, c.env)) {
     throw new HttpError(404, `Unknown preview package: ${name}`)
   }
   if (!parsePreviewVersion(version)) {
@@ -195,7 +195,7 @@ app.post('/-/purge', async (c) => {
   const name = body.package ?? ''
   const version = body.version ?? ''
 
-  if (!isPreviewPackage(name)) {
+  if (!isWorkspacePackage(name, c.env)) {
     throw new HttpError(400, `Unknown preview package: ${name || '(empty)'}`)
   }
   if (!parsePreviewVersion(version)) {

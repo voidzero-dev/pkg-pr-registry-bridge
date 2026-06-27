@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { createTarGzip, parseTarGzip } from 'nanotar'
 import { buildPreviewTarball } from '../src/tarball/buildPreviewTarball'
+import type { RewriteEnv } from '../src/tarball/rewritePackageJson'
 
 const decode = (data?: Uint8Array) => new TextDecoder().decode(data)
+
+const env: RewriteEnv = {
+  PKG_PR_NEW_BASE: 'https://pkg.pr.new',
+  PREVIEW_OWNER: 'voidzero-dev',
+  PREVIEW_REPO: 'vite-plus',
+  PUBLIC_BASE_URL: 'https://bridge.example.com',
+  WORKSPACE_PACKAGES: 'vite-plus,@voidzero-dev/vite-plus-*',
+}
 
 async function makeUpstream(pkg: Record<string, any>) {
   return createTarGzip([
@@ -29,6 +38,7 @@ describe('buildPreviewTarball', () => {
       upstream,
       '@voidzero-dev/vite-plus-core',
       '0.0.0-pr.1891',
+    env,
     )
 
     expect(build.packageJson.name).toBe('@voidzero-dev/vite-plus-core')
@@ -55,7 +65,7 @@ describe('buildPreviewTarball', () => {
       { name: 'package/README.md', data: '# hi\n' },
     ])
     await expect(
-      buildPreviewTarball(upstream, 'vite-plus', '0.0.0-pr.1891'),
+      buildPreviewTarball(upstream, 'vite-plus', '0.0.0-pr.1891', env),
     ).rejects.toThrow(/missing package\/package\.json/)
   })
 })

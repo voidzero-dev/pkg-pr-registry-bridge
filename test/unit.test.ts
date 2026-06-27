@@ -18,7 +18,11 @@ import {
   parsePackagePath,
   parseTarballPath,
 } from '../src/registry/parsePackageName'
-import { rewritePackageJson } from '../src/tarball/rewritePackageJson'
+import {
+  rewritePackageJson,
+  rewritePkgPrNewUrl,
+} from '../src/tarball/rewritePackageJson'
+import { isWorkspacePackage } from '../src/preview/packages'
 import {
   assertSafeTarballPath,
   isUnderPackageRoot,
@@ -32,6 +36,7 @@ const env = {
   PREVIEW_OWNER: 'voidzero-dev',
   PREVIEW_REPO: 'vite-plus',
   PUBLIC_BASE_URL: 'https://bridge.example.com',
+  WORKSPACE_PACKAGES: 'vite-plus,@voidzero-dev/vite-plus-*',
 } as Env
 
 describe('parsePreviewVersion', () => {
@@ -186,8 +191,58 @@ describe('encodeNpmPackageName', () => {
   })
 })
 
+describe('isWorkspacePackage', () => {
+  it('matches exact names and prefix patterns from config', () => {
+    expect(isWorkspacePackage('vite-plus', env)).toBe(true)
+    expect(isWorkspacePackage('@voidzero-dev/vite-plus-core', env)).toBe(true)
+    expect(
+      isWorkspacePackage('@voidzero-dev/vite-plus-darwin-arm64', env),
+    ).toBe(true)
+    expect(isWorkspacePackage('react', env)).toBe(false)
+    expect(isWorkspacePackage('@voidzero-dev/other', env)).toBe(false)
+  })
+
+  it('falls back to PREVIEW_PACKAGES when unconfigured', () => {
+    const e = { WORKSPACE_PACKAGES: '' }
+    expect(isWorkspacePackage('vite-plus', e)).toBe(true)
+    expect(isWorkspacePackage('@voidzero-dev/vite-plus-darwin-arm64', e)).toBe(
+      false,
+    )
+  })
+})
+
+describe('rewritePkgPrNewUrl', () => {
+  const sha = '6acea1aa818e96365b5811d47360367ba18a3a05'
+
+  it('rewrites a whitelisted pkg.pr.new URL to a bridge tarball URL', () => {
+    expect(
+      rewritePkgPrNewUrl(
+        `https://pkg.pr.new/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-darwin-arm64@${sha}`,
+        env,
+      ),
+    ).toBe(
+      `https://bridge.example.com/tarballs/@voidzero-dev/vite-plus-darwin-arm64/0.0.0-commit.${sha}.tgz`,
+    )
+  })
+
+  it('leaves non-workspace and non-pkg.pr.new specs alone', () => {
+    expect(
+      rewritePkgPrNewUrl(
+        `https://pkg.pr.new/voidzero-dev/vite-plus/@other/pkg@${sha}`,
+        env,
+      ),
+    ).toBeNull()
+    expect(rewritePkgPrNewUrl('^2.3.1', env)).toBeNull()
+    expect(
+      rewritePkgPrNewUrl('https://example.com/foo.tgz', env),
+    ).toBeNull()
+  })
+})
+
 describe('rewritePackageJson', () => {
-  it('sets name/version and rewrites preview deps only', () => {
+  const sha = '6acea1aa818e96365b5811d47360367ba18a3a05'
+
+  it('rewrites preview deps and pkg.pr.new URL optional deps', () => {
     const out = rewritePackageJson(
       {
         name: 'vite-plus',
@@ -197,15 +252,22 @@ describe('rewritePackageJson', () => {
           picomatch: '^2.3.1',
         },
         peerDependencies: { vite: '^5.0.0' },
+        optionalDependencies: {
+          '@voidzero-dev/vite-plus-darwin-arm64': `https://pkg.pr.new/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-darwin-arm64@${sha}`,
+        },
       },
       'vite-plus',
       '0.0.0-pr.1891',
+      env,
     )
     expect(out.name).toBe('vite-plus')
     expect(out.version).toBe('0.0.0-pr.1891')
     expect(out.dependencies['@voidzero-dev/vite-plus-core']).toBe('0.0.0-pr.1891')
     expect(out.dependencies.picomatch).toBe('^2.3.1')
     expect(out.peerDependencies.vite).toBe('^5.0.0')
+    expect(out.optionalDependencies['@voidzero-dev/vite-plus-darwin-arm64']).toBe(
+      `https://bridge.example.com/tarballs/@voidzero-dev/vite-plus-darwin-arm64/0.0.0-commit.${sha}.tgz`,
+    )
   })
 })
 

@@ -4,7 +4,7 @@ import {
   type TarFileInput,
 } from 'nanotar'
 import { HttpError } from '../httpError'
-import { rewritePackageJson } from './rewritePackageJson'
+import { rewritePackageJson, type RewriteEnv } from './rewritePackageJson'
 import { computeDigests } from './digests'
 import {
   assertSafeTarballPath,
@@ -45,6 +45,7 @@ export async function buildPreviewTarball(
   gzippedTarball: Uint8Array,
   packageName: string,
   version: string,
+  env: RewriteEnv,
 ): Promise<PreviewBuild> {
   const files = await parseTarGzip(gzippedTarball)
 
@@ -62,7 +63,7 @@ export async function buildPreviewTarball(
     throw new HttpError(422, 'Invalid package/package.json in upstream tarball')
   }
 
-  const rewritten = rewritePackageJson(pkg, packageName, version)
+  const rewritten = rewritePackageJson(pkg, packageName, version, env)
   const rewrittenBytes = new TextEncoder().encode(
     `${JSON.stringify(rewritten, null, 2)}\n`,
   )

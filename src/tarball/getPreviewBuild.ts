@@ -2,6 +2,7 @@ import type { Env } from '../config'
 import { maxTarballBytes } from '../config'
 import { HttpError } from '../httpError'
 import { parsePreviewVersion } from '../preview/parsePreviewVersion'
+import { isPreviewPackage } from '../preview/packages'
 import { toPkgPrNewUrl } from '../preview/toPkgPrNewUrl'
 import { metaKey, tarballKey } from '../cache/r2Cache'
 import {
@@ -36,7 +37,7 @@ async function buildAndStore(
   if (!url) throw new HttpError(400, `Invalid preview version: ${version}`)
 
   const upstream = await fetchUpstreamTarball(url, maxTarballBytes(env))
-  const build = await buildPreviewTarball(upstream, name, version)
+  const build = await buildPreviewTarball(upstream, name, version, env)
   const cacheControl = cacheControlFor(version)
 
   const meta: PreviewMeta = {
@@ -54,6 +55,32 @@ async function buildAndStore(
   ])
 
   return build
+}
+
+/**
+ * Fetch an upstream tarball and cache it unchanged. Used for workspace packages
+ * that are not preview packages (e.g. the platform binaries): they have no
+ * preview dependencies to rewrite, so re-tarring/re-gzipping their large
+ * (~tens of MB) payloads in the Worker would be wasteful and risk CPU/memory
+ * limits. A URL dependency uses the tarball's own package.json, so passing it
+ * through verbatim is correct.
+ */
+async function passthroughAndStore(
+  env: Env,
+  name: string,
+  version: string,
+): Promise<Uint8Array> {
+  const url = toPkgPrNewUrl(env, name, version)
+  if (!url) throw new HttpError(400, `Invalid preview version: ${version}`)
+
+  const bytes = await fetchUpstreamTarball(url, maxTarballBytes(env))
+  await env.TARBALL_CACHE.put(tarballKey(name, version), bytes, {
+    httpMetadata: {
+      contentType: 'application/gzip',
+      cacheControl: cacheControlFor(version),
+    },
+  })
+  return bytes
 }
 
 /**
@@ -94,6 +121,10 @@ export async function getPreviewTarball(
 ): Promise<Uint8Array> {
   const cached = await env.TARBALL_CACHE.get(tarballKey(name, version))
   if (cached) return new Uint8Array(await cached.arrayBuffer())
-  const build = await buildAndStore(env, name, version)
-  return build.tarball
+  // Preview packages are rewritten; other workspace packages (platform
+  // binaries) are passed through unchanged.
+  if (isPreviewPackage(name)) {
+    return (await buildAndStore(env, name, version)).tarball
+  }
+  return passthroughAndStore(env, name, version)
 }

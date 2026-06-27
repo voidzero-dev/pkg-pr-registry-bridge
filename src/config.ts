@@ -17,6 +17,14 @@ export interface Env {
   PREVIEW_REPO: string
   /** Comma-separated preview refs to inject, e.g. `pr.1891,commit.a832a55`. */
   VITE_PLUS_PREVIEW_REFS: string
+  /**
+   * Comma-separated allowlist of packages the tarball endpoint may serve and
+   * whose pkg.pr.new dependency URLs are routed through the bridge. Entries are
+   * exact names or `prefix*` patterns, e.g.
+   * `vite-plus,@voidzero-dev/vite-plus-*`. Configurable so new workspace
+   * packages need no code change.
+   */
+  WORKSPACE_PACKAGES: string
   /** Max upstream tarball size in bytes (string-typed var). */
   MAX_TARBALL_BYTES: string
   /** Durable cache for generated tarballs and rewritten package.json. */
