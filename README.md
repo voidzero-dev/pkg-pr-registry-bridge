@@ -54,10 +54,14 @@ for a runnable example.
   synthetic **version strings** (`0.0.0-commit.<sha>`) and serves packuments for
   those packages too, so they resolve through the bridge like the other preview
   packages, and the package manager downloads only the binary for the current
-  platform (reading os/cpu from the packument) instead of all of them. To stay
-  within Worker limits, a platform package's packument is built without
-  re-gzipping its (~tens of MB) payload; the tarball is re-built only when that
-  binary is actually downloaded.
+  platform (reading os/cpu from the packument) instead of all of them. These
+  native binaries are large (tens of MB decompressed), too large to buffer
+  within the Worker's 128MB memory limit. So the packument is built without
+  re-gzipping the payload, and the tarball is **streamed** to the client
+  (decompress, swap only `package.json`, re-emit as gzip "stored"/uncompressed
+  blocks) without ever holding it whole or caching it in R2. The preview
+  packages themselves are small and keep the buffered, R2-cached, integrity
+  path.
 - **Everything else**: 302-redirected to `registry.npmjs.org`, so the client
   fetches the hundreds of normal packages in a typical install directly from
   npm's CDN. The Worker stays out of the data path for everything it doesn't
