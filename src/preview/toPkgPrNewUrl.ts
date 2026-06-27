@@ -6,10 +6,10 @@ type UpstreamEnv = Pick<Env, 'PKG_PR_NEW_BASE' | 'PREVIEW_OWNER' | 'PREVIEW_REPO
 /**
  * Map a package name + synthetic version to the pkg.pr.new upstream URL.
  *
- *   @voidzero-dev/vite-plus-core @ 0.0.0-pr.1891
- *     -> {base}/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-core@1891
- *   vite-plus @ 0.0.0-pr.1891
- *     -> {base}/voidzero-dev/vite-plus/vite-plus@1891
+ *   @voidzero-dev/vite-plus-core @ 0.0.0-commit.a832a55
+ *     -> {base}/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-core@a832a55
+ *   vite-plus @ 0.0.0-commit.a832a55
+ *     -> {base}/voidzero-dev/vite-plus/vite-plus@a832a55
  *
  * Owner/repo come from env and are never selected by request input.
  */

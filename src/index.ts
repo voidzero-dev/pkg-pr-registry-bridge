@@ -62,7 +62,7 @@ async function serveTarball(
   return new Response(tarball, {
     headers: {
       'content-type': 'application/gzip',
-      'cache-control': tarballCacheControl(version),
+      'cache-control': tarballCacheControl(),
     },
   })
 }
@@ -92,8 +92,8 @@ app.get('/-/refs', async (c) => {
 })
 
 /**
- * Register a preview ref at runtime (no redeploy). Body: `{ "ref": "pr.1891" }`
- * or `{ "ref": "commit.<sha>" }`. When `GITHUB_TOKEN` is set, the ref is
+ * Register a preview ref at runtime (no redeploy). Body:
+ * `{ "ref": "commit.<sha>" }`. When `GITHUB_TOKEN` is set, the ref is
  * verified to exist in the repo before being accepted.
  */
 app.post('/-/refs', async (c) => {
@@ -131,7 +131,7 @@ app.post('/-/refs', async (c) => {
   return c.json({ added: ref, version: parsed.version, tag: parsed.tag }, 201)
 })
 
-/** Unregister a runtime preview ref. Body: `{ "ref": "pr.1891" }`. */
+/** Unregister a runtime preview ref. Body: `{ "ref": "commit.<sha>" }`. */
 app.delete('/-/refs', async (c) => {
   admin(c)
   const body = (await c.req.json().catch(() => ({}))) as { ref?: string }
@@ -190,7 +190,7 @@ app.post('/-/webhook', async (c) => {
 
 /**
  * Purge a generated build from the caches. Body:
- * `{ "package": "vite-plus", "version": "0.0.0-pr.1891" }`.
+ * `{ "package": "vite-plus", "version": "0.0.0-commit.<sha>" }`.
  */
 app.post('/-/purge', async (c) => {
   admin(c)
@@ -260,24 +260,27 @@ app.get('*', async (c) => {
   packument['dist-tags'] ??= {}
   packument.versions ??= {}
 
+  // Inject each configured ref. The R2 meta reads are independent, so run them
+  // concurrently; each writes a distinct version/tag key, and a failing ref is
+  // isolated so it can't break installs of the package's other versions. After
+  // the deploy-time warm step these are R2 hits and don't touch the upstream.
   const refs = await getConfiguredRefs(c.env)
-  for (const ref of refs) {
-    try {
-      const preview = await getPreviewMeta(c.env, name, ref.version)
-      packument.versions[ref.version] = buildVersionMetadata(
-        c.env,
-        name,
-        ref.version,
-        preview,
-      )
-      packument['dist-tags'][ref.tag] = ref.version
-    } catch (err) {
-      // A failing ref must not break installs of the package's other versions.
-      // After the deploy-time warm step this path is served from R2 and does
-      // not hit the upstream, so this should not trigger in practice.
-      console.warn(`Failed to inject preview ref ${ref.version}:`, err)
-    }
-  }
+  await Promise.all(
+    refs.map(async (ref) => {
+      try {
+        const preview = await getPreviewMeta(c.env, name, ref.version)
+        packument.versions[ref.version] = buildVersionMetadata(
+          c.env,
+          name,
+          ref.version,
+          preview,
+        )
+        packument['dist-tags'][ref.tag] = ref.version
+      } catch (err) {
+        console.warn(`Failed to inject preview ref ${ref.version}:`, err)
+      }
+    }),
+  )
 
   return new Response(JSON.stringify(packument), {
     headers: {

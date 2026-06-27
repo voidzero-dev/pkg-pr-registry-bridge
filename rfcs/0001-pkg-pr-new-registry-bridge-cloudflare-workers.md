@@ -6,6 +6,13 @@
 - Source design: `pkg-pr-new-registry-bridge-version-gated-design.md`
 - Tracking repo: `pkg-pr-registry-bridge`
 
+> Implementation note: the shipped bridge supports only immutable commit refs
+> (`0.0.0-commit.<sha>`). PR-number refs (`0.0.0-pr.<n>`) shown in the examples
+> below were dropped during implementation because a PR ref is mutable (it
+> advances to newer commits), so its generated metadata/tarball could be
+> overwritten and mismatch a consumer's lockfile. Read `pr.<n>` examples as
+> historical design; use `commit.<sha>` for current behavior.
+
 ## 1. Summary
 
 This RFC specifies how to implement the version-gated pkg.pr.new registry

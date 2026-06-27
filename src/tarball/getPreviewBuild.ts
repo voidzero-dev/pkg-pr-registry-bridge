@@ -1,10 +1,10 @@
 import type { Env } from '../config'
 import { maxTarballBytes } from '../config'
 import { HttpError } from '../httpError'
-import { parsePreviewVersion } from '../preview/parsePreviewVersion'
 import { isPreviewPackage } from '../preview/packages'
 import { toPkgPrNewUrl } from '../preview/toPkgPrNewUrl'
 import { metaKey, tarballKey } from '../cache/r2Cache'
+import { tarballCacheControl } from '../cache/headers'
 import {
   buildPreviewTarball,
   extractRewrittenPackageJson,
@@ -12,12 +12,6 @@ import {
   type PreviewMeta,
 } from './buildPreviewTarball'
 import { fetchUpstreamTarball } from './fetchUpstreamTarball'
-
-function cacheControlFor(version: string): string {
-  return parsePreviewVersion(version)?.type === 'commit'
-    ? 'public, max-age=31536000, immutable'
-    : 'public, max-age=300'
-}
 
 /**
  * Download the upstream tarball, rewrite it, and durably persist BOTH the
@@ -39,7 +33,7 @@ async function buildAndStore(
 
   const upstream = await fetchUpstreamTarball(url, maxTarballBytes(env))
   const build = await buildPreviewTarball(upstream, name, version, env)
-  const cacheControl = cacheControlFor(version)
+  const cacheControl = tarballCacheControl()
 
   const meta: PreviewMeta = {
     packageJson: build.packageJson,
@@ -84,7 +78,7 @@ async function buildMetaLight(
   await env.TARBALL_CACHE.put(metaKey(name, version), JSON.stringify(meta), {
     httpMetadata: {
       contentType: 'application/json',
-      cacheControl: cacheControlFor(version),
+      cacheControl: tarballCacheControl(),
     },
   })
   return meta

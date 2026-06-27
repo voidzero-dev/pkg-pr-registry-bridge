@@ -53,8 +53,8 @@ export interface TarballRequest {
 
 /**
  * Parse the bridge's own preview tarball path:
- *   /tarballs/vite-plus/0.0.0-pr.1891.tgz
- *   /tarballs/@voidzero-dev/vite-plus-core/0.0.0-pr.1891.tgz
+ *   /tarballs/vite-plus/0.0.0-commit.a832a55.tgz
+ *   /tarballs/@voidzero-dev/vite-plus-core/0.0.0-commit.a832a55.tgz
  */
 export function parseTarballPath(pathname: string): TarballRequest | null {
   const decoded = decodePath(pathname)

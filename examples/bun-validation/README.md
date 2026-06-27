@@ -5,8 +5,8 @@ preview build of Vite+ through the bridge using normal npm alias/override
 semantics.
 
 This example pins a **commit** build (`0.0.0-commit.<sha>`), which is immutable
-and reproducible, rather than a PR build (`0.0.0-pr.<n>`, which can move as the
-PR gets new commits).
+and reproducible. (PR-number versions are not supported: a PR ref is mutable, so
+its generated metadata/tarball could be overwritten as the PR advances.)
 
 The bridge is configured as the default registry in `bunfig.toml`, and the
 `vite` alias override resolves to `@voidzero-dev/vite-plus-core` at the
@@ -32,6 +32,6 @@ node -p "require('./node_modules/@voidzero-dev/vite-plus-core/package.json').ver
 bunx vp --version
 ```
 
-To target a different preview build, change the `0.0.0-commit.<sha>` (or
-`0.0.0-pr.<n>`) version in `package.json`, and make sure that ref is exposed by
-the bridge via `VITE_PLUS_PREVIEW_REFS`.
+To target a different preview build, change the `0.0.0-commit.<sha>` version in
+`package.json`, and make sure that ref is exposed by the bridge via
+`VITE_PLUS_PREVIEW_REFS`.

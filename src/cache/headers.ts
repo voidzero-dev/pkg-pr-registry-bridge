@@ -5,7 +5,7 @@ const IMMUTABLE_MAX_AGE = 'public, max-age=31536000, immutable'
  * Cache policy for a tarball. Only immutable commit builds are served, so the
  * content for a given (name, version) never changes.
  */
-export function tarballCacheControl(_version: string): string {
+export function tarballCacheControl(): string {
   return IMMUTABLE_MAX_AGE
 }
 

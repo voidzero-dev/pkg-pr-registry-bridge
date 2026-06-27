@@ -8,33 +8,15 @@
 //
 // Config (all optional; sensible defaults read from wrangler.toml):
 //   BRIDGE_URL         override the bridge origin (default: PUBLIC_BASE_URL)
-//   BRIDGE_E2E_REF     preview ref to test, e.g. `pr.1891` (default: first of
-//                      VITE_PLUS_PREVIEW_REFS)
-//   BRIDGE_E2E_VERSION explicit synthetic version, e.g. `0.0.0-pr.1891`
+//   BRIDGE_E2E_REF     preview ref to test, e.g. `commit.<sha>` (default: first
+//                      of VITE_PLUS_PREVIEW_REFS)
+//   BRIDGE_E2E_VERSION explicit synthetic version, e.g. `0.0.0-commit.<sha>`
 //                      (overrides BRIDGE_E2E_REF)
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-
-function readWrangler() {
-  const toml = fs.readFileSync(path.join(root, 'wrangler.toml'), 'utf8')
-  const grab = (key) =>
-    (toml.match(new RegExp(`${key}\\s*=\\s*"([^"]*)"`)) || [])[1] ?? ''
-  return {
-    baseUrl: grab('PUBLIC_BASE_URL'),
-    refs: grab('VITE_PLUS_PREVIEW_REFS'),
-  }
-}
-
-function refToVersion(ref) {
-  const commit = ref.match(/^commit\.([0-9a-f]{7,40})$/i)
-  if (commit) return `0.0.0-commit.${commit[1]}`
-  return null
-}
+import { readWrangler, refToVersion } from './lib/wrangler.mjs'
 
 async function waitForHealth(base) {
   for (let attempt = 1; attempt <= 10; attempt++) {

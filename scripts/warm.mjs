@@ -10,25 +10,9 @@
 //
 // Run automatically as part of `pnpm deploy`.
 import { createHash } from 'node:crypto'
-import fs from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { readWrangler, refToVersion } from './lib/wrangler.mjs'
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const PREVIEW_PACKAGES = ['vite-plus', '@voidzero-dev/vite-plus-core']
-
-function readWrangler() {
-  const toml = fs.readFileSync(path.join(root, 'wrangler.toml'), 'utf8')
-  const grab = (key) =>
-    (toml.match(new RegExp(`${key}\\s*=\\s*"([^"]*)"`)) || [])[1] ?? ''
-  return { baseUrl: grab('PUBLIC_BASE_URL'), refs: grab('VITE_PLUS_PREVIEW_REFS') }
-}
-
-function refToVersion(ref) {
-  const commit = ref.match(/^commit\.([0-9a-f]{7,40})$/i)
-  if (commit) return `0.0.0-commit.${commit[1]}`
-  return null
-}
 
 async function getWithRetry(url, opts, attempts = 3) {
   let lastErr

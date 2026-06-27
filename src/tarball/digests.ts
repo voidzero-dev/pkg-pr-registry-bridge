@@ -1,18 +1,4 @@
-function toHex(buffer: ArrayBuffer): string {
-  let out = ''
-  for (const byte of new Uint8Array(buffer)) {
-    out += byte.toString(16).padStart(2, '0')
-  }
-  return out
-}
-
-function toBase64(buffer: ArrayBuffer): string {
-  let binary = ''
-  for (const byte of new Uint8Array(buffer)) {
-    binary += String.fromCharCode(byte)
-  }
-  return btoa(binary)
-}
+import { toBase64, toHex } from '../util/encoding'
 
 export interface Digests {
   /** SHA-1 hex, for `dist.shasum`. */
