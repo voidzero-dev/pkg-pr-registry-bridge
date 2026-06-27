@@ -127,6 +127,13 @@ A registered ref is reflected immediately and built into the packument on the
 next request (and into R2 on first fetch). This is the no-redeploy path for
 exposing new pkg.pr.new builds.
 
+### Auto-register via webhook
+
+`POST /-/webhook` is a GitHub webhook receiver (HMAC-verified with
+`GITHUB_WEBHOOK_SECRET`). Point a repo `Issue comments` webhook at it: when the
+`pkg-pr-new[bot]` comments that a build was published, the bridge auto-registers
+the PR ref and the build's commit refs. Setup: [`docs/webhook-setup.md`](./docs/webhook-setup.md).
+
 ## Configuration
 
 Set via `wrangler.toml` `[vars]` (tokens via `wrangler secret`):
@@ -146,6 +153,7 @@ Bindings/secrets:
 - `PREVIEW_REFS` (KV) - runtime-registered refs.
 - `ADMIN_TOKEN` (secret) - guards the admin endpoints.
 - `GITHUB_TOKEN` (secret, optional) - enables PR/commit existence checks on `/-/refs`.
+- `GITHUB_WEBHOOK_SECRET` (secret, optional) - verifies the `/-/webhook` receiver.
 
 ## Develop
 
@@ -179,5 +187,6 @@ MVP1 + MVP2 of the RFC, deployed: default-registry bridge with npm redirect
 fallback, `pr.<n>`/`commit.<sha>` preview injection, tarball rewrite, R2 + edge
 caching, deploy-time warm, computed SHA-512/SHA-1 integrity, KV-backed dynamic
 refs, authenticated admin endpoints (`/-/refs`, `/-/purge`), optional GitHub
-existence checks, and a bun end-to-end check. Remaining (MVP3): a pkg.pr.new
-webhook to auto-register refs, more workspace packages via config, and metrics.
+existence checks, and the pkg.pr.new auto-register webhook (`/-/webhook`), plus a
+bun end-to-end check. Remaining (MVP3): more workspace packages via config and
+metrics.

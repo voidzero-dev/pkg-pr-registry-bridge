@@ -22,6 +22,11 @@ import { metaKey, tarballKey } from './cache/r2Cache'
 import { requireAdmin } from './security/auth'
 import { verifyRefExists } from './github/verifyRef'
 import {
+  isPkgPrNewComment,
+  refsFromBotComment,
+  verifyGitHubSignature,
+} from './github/webhook'
+import {
   packumentCacheControl,
   tarballCacheControl,
 } from './cache/headers'
@@ -131,6 +136,50 @@ app.delete('/-/refs', async (c) => {
     throw new HttpError(400, String(err))
   }
   return c.json({ removed: ref })
+})
+
+/**
+ * GitHub webhook receiver. Configure a repo webhook (content-type
+ * application/json, the `Issue comments` event) pointing here with a shared
+ * secret. When the pkg.pr.new bot comments on a PR (i.e. a build was just
+ * published), the PR ref and the build's commit refs are auto-registered, so
+ * new previews become installable with no redeploy and no manual call.
+ */
+app.post('/-/webhook', async (c) => {
+  const secret = c.env.GITHUB_WEBHOOK_SECRET
+  if (!secret) throw new HttpError(503, 'Webhook is not configured')
+
+  const raw = await c.req.text()
+  const signature = c.req.header('x-hub-signature-256') ?? ''
+  if (!(await verifyGitHubSignature(secret, raw, signature))) {
+    throw new HttpError(401, 'Invalid signature')
+  }
+
+  const event = c.req.header('x-github-event')
+  if (event === 'ping') return c.json({ ok: true })
+
+  let payload: any
+  try {
+    payload = JSON.parse(raw)
+  } catch {
+    throw new HttpError(400, 'Invalid JSON payload')
+  }
+
+  if (!isPkgPrNewComment(event, payload)) {
+    return c.json({ ignored: event ?? 'unknown' })
+  }
+
+  const refs = refsFromBotComment(payload.comment.body ?? '', payload.issue.number)
+  const registered: string[] = []
+  for (const ref of refs) {
+    try {
+      const parsed = await registerRef(c.env, ref)
+      registered.push(parsed.version)
+    } catch (err) {
+      console.warn(`Webhook failed to register ref ${ref}:`, err)
+    }
+  }
+  return c.json({ registered })
 })
 
 /**

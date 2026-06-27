@@ -11,6 +11,7 @@ export default defineConfig({
           PUBLIC_BASE_URL: 'https://bridge.example.com',
           VITE_PLUS_PREVIEW_REFS: 'pr.1891',
           ADMIN_TOKEN: 'test-admin-token',
+          GITHUB_WEBHOOK_SECRET: 'test-webhook-secret',
         },
         kvNamespaces: ['PREVIEW_REFS'],
       },

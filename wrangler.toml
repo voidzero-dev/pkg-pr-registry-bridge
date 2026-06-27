@@ -31,5 +31,6 @@ binding = "PREVIEW_REFS"
 id = "e8473fe4e0674f27a62399028a6604fd"
 
 # Secrets (set with `wrangler secret put`, not here):
-#   ADMIN_TOKEN   - bearer token guarding /-/refs and /-/purge
-#   GITHUB_TOKEN  - optional, enables PR/commit existence checks on /-/refs
+#   ADMIN_TOKEN           - bearer token guarding /-/refs and /-/purge
+#   GITHUB_TOKEN          - optional, PR/commit existence checks on /-/refs
+#   GITHUB_WEBHOOK_SECRET - optional, HMAC secret for the /-/webhook receiver

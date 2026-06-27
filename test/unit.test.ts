@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { verifyRefExists } from '../src/github/verifyRef'
 import {
+  refsFromBotComment,
+  verifyGitHubSignature,
+} from '../src/github/webhook'
+import {
   isPreviewVersion,
   parsePreviewVersion,
 } from '../src/preview/parsePreviewVersion'
@@ -290,5 +294,44 @@ describe('verifyRefExists', () => {
     expect(calls[1]).toBe(
       'https://api.github.com/repos/voidzero-dev/vite-plus/commits/abcdef0',
     )
+  })
+})
+
+describe('refsFromBotComment', () => {
+  it('extracts the PR ref and distinct commit shas', () => {
+    const sha = '6acea1aa818e96365b5811d47360367ba18a3a05'
+    const body = [
+      '```',
+      'npm i https://pkg.pr.new/voidzero-dev/vite-plus@1891',
+      '```',
+      `npm i https://pkg.pr.new/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-darwin-arm64@${sha}`,
+      `npm i https://pkg.pr.new/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-linux-x64-gnu@${sha}`,
+    ].join('\n')
+    expect(refsFromBotComment(body, 1891)).toEqual([
+      'pr.1891',
+      `commit.${sha}`,
+    ])
+  })
+})
+
+describe('verifyGitHubSignature', () => {
+  it('accepts a correct HMAC and rejects a wrong one', async () => {
+    const secret = 'shh'
+    const body = '{"hello":"world"}'
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    )
+    const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body))
+    const hex = [...new Uint8Array(mac)]
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('')
+
+    expect(await verifyGitHubSignature(secret, body, `sha256=${hex}`)).toBe(true)
+    expect(await verifyGitHubSignature(secret, body, `sha256=${'0'.repeat(64)}`)).toBe(false)
+    expect(await verifyGitHubSignature(secret, body, 'garbage')).toBe(false)
   })
 })

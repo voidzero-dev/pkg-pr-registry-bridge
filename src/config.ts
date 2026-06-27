@@ -27,6 +27,8 @@ export interface Env {
   GITHUB_TOKEN?: string
   /** Bearer token guarding the admin endpoints (`/-/refs`, `/-/purge`). */
   ADMIN_TOKEN?: string
+  /** Shared secret for verifying GitHub webhook payloads (`/-/webhook`). */
+  GITHUB_WEBHOOK_SECRET?: string
 }
 
 const DEFAULT_MAX_TARBALL_BYTES = 64 * 1024 * 1024

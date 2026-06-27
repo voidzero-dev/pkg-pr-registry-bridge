@@ -299,6 +299,84 @@ describe('admin: purge', () => {
   })
 })
 
+async function sign(secret: string, body: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  )
+  const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body))
+  const hex = [...new Uint8Array(mac)]
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+  return `sha256=${hex}`
+}
+
+describe('admin: webhook', () => {
+  const SECRET = 'test-webhook-secret'
+
+  it('rejects an invalid signature', async () => {
+    const res = await SELF.fetch(`${BASE}/-/webhook`, {
+      method: 'POST',
+      headers: {
+        'x-github-event': 'issue_comment',
+        'x-hub-signature-256': 'sha256=deadbeef',
+      },
+      body: '{}',
+    })
+    expect(res.status).toBe(401)
+  })
+
+  it('auto-registers refs from a pkg.pr.new bot comment', async () => {
+    const sha = '1234567890abcdef1234567890abcdef12345678'
+    const body = JSON.stringify({
+      action: 'created',
+      issue: { number: 1891, pull_request: { url: 'x' } },
+      comment: {
+        user: { login: 'pkg-pr-new[bot]' },
+        body: `vite-plus@1891 darwin-arm64@${sha}`,
+      },
+    })
+    const res = await SELF.fetch(`${BASE}/-/webhook`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-github-event': 'issue_comment',
+        'x-hub-signature-256': await sign(SECRET, body),
+      },
+      body,
+    })
+    expect(res.status).toBe(200)
+    const out = (await res.json()) as { registered: string[] }
+    expect(out.registered).toEqual(
+      expect.arrayContaining(['0.0.0-pr.1891', `0.0.0-commit.${sha}`]),
+    )
+
+    const list = (await (
+      await SELF.fetch(`${BASE}/-/refs`, {
+        headers: { authorization: 'Bearer test-admin-token' },
+      })
+    ).json()) as { refs: Array<{ ref: string }> }
+    expect(list.refs.some((r) => r.ref === `commit.${sha}`)).toBe(true)
+  })
+
+  it('ignores non-bot events and answers ping', async () => {
+    const body = '{"zen":"hi"}'
+    const res = await SELF.fetch(`${BASE}/-/webhook`, {
+      method: 'POST',
+      headers: {
+        'x-github-event': 'ping',
+        'x-hub-signature-256': await sign(SECRET, body),
+      },
+      body,
+    })
+    expect(res.status).toBe(200)
+    expect((await res.json()) as any).toEqual({ ok: true })
+  })
+})
+
 describe('health', () => {
   it('responds ok', async () => {
     const res = await SELF.fetch(`${BASE}/_health`)
