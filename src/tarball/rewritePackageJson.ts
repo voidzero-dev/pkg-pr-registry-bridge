@@ -10,7 +10,8 @@ export interface RewriteEnv {
 }
 
 function refToVersion(ref: string): string | null {
-  if (/^\d+$/.test(ref)) return `0.0.0-pr.${ref}`
+  // Only immutable commit refs are routed through the bridge. A PR-number URL
+  // (a mutable ref) is left as the original direct pkg.pr.new URL.
   if (/^[0-9a-f]{7,40}$/i.test(ref)) return `0.0.0-commit.${ref}`
   return null
 }

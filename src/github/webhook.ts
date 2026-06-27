@@ -45,13 +45,14 @@ export const PKG_PR_NEW_BOT = 'pkg-pr-new[bot]'
 const SHA_RE = /@([0-9a-f]{40})\b/gi
 
 /**
- * Extract registrable refs from a pkg.pr.new bot comment on a PR: the PR number
- * (`pr.<n>`) plus every distinct full commit sha referenced in the install URLs
- * (`commit.<sha>`). The bot posts this comment only after a build is published,
- * so these refs are known to exist.
+ * Extract registrable refs from a pkg.pr.new bot comment on a PR: every
+ * distinct full commit sha referenced in the install URLs (`commit.<sha>`).
+ * Only immutable commit refs are registered (PR-number refs are not supported).
+ * The bot posts this comment only after a build is published, so these refs are
+ * known to exist.
  */
-export function refsFromBotComment(body: string, prNumber: number): string[] {
-  const refs = new Set<string>([`pr.${prNumber}`])
+export function refsFromBotComment(body: string): string[] {
+  const refs = new Set<string>()
   for (const match of body.matchAll(SHA_RE)) {
     refs.add(`commit.${match[1].toLowerCase()}`)
   }

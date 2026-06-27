@@ -9,7 +9,7 @@ export default defineConfig({
         // Test overrides for the bindings declared in wrangler.toml.
         bindings: {
           PUBLIC_BASE_URL: 'https://bridge.example.com',
-          VITE_PLUS_PREVIEW_REFS: 'pr.1891',
+          VITE_PLUS_PREVIEW_REFS: 'commit.a832a55',
           ADMIN_TOKEN: 'test-admin-token',
           GITHUB_WEBHOOK_SECRET: 'test-webhook-secret',
         },

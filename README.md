@@ -10,17 +10,23 @@ The package name selects the upstream package; the version pattern selects the
 source:
 
 ```
-@voidzero-dev/vite-plus-core@0.0.0-pr.1891       -> pkg.pr.new PR build
-vite-plus@0.0.0-commit.a832a55                   -> pkg.pr.new commit build
-vite-plus@0.2.1, react@latest                    -> npm registry
+@voidzero-dev/vite-plus-core@0.0.0-commit.a832a55  -> pkg.pr.new commit build
+vite-plus@0.0.0-commit.a832a55                     -> pkg.pr.new commit build
+vite-plus@0.2.1, react@latest                      -> npm registry
 ```
+
+Only **immutable commit builds** (`0.0.0-commit.<sha>`) are supported. PR-number
+versions (`0.0.0-pr.<n>`) are intentionally rejected: a PR ref is mutable (it
+advances to newer commits), so its generated metadata/tarball would be
+overwritten and could mismatch what a consumer already pinned in a lockfile.
+Pinning a commit sha keeps the content immutable.
 
 This makes a Bun alias override work through the bridge:
 
 ```json
 {
   "overrides": {
-    "vite": "npm:@voidzero-dev/vite-plus-core@0.0.0-pr.1891"
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.0.0-commit.a832a55"
   }
 }
 ```
@@ -129,7 +135,7 @@ curl -X DELETE -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: applica
 
 # Purge a generated build from the caches (R2 + edge)
 curl -X POST -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \
-  -d '{"package":"vite-plus","version":"0.0.0-pr.1891"}' https://.../-/purge
+  -d '{"package":"vite-plus","version":"0.0.0-commit.a832a55"}' https://.../-/purge
 ```
 
 A registered ref is reflected immediately and built into the packument on the
@@ -141,7 +147,7 @@ exposing new pkg.pr.new builds.
 `POST /-/webhook` is a GitHub webhook receiver (HMAC-verified with
 `GITHUB_WEBHOOK_SECRET`). Point a repo `Issue comments` webhook at it: when the
 `pkg-pr-new[bot]` comments that a build was published, the bridge auto-registers
-the PR ref and the build's commit refs. Setup: [`docs/webhook-setup.md`](./docs/webhook-setup.md).
+the build's commit refs. Setup: [`docs/webhook-setup.md`](./docs/webhook-setup.md).
 
 ## Configuration
 
@@ -153,7 +159,7 @@ Set via `wrangler.toml` `[vars]` (tokens via `wrangler secret`):
 | `NPM_REGISTRY` | npm fallback registry (`https://registry.npmjs.org`). |
 | `PKG_PR_NEW_BASE` | pkg.pr.new base (`https://pkg.pr.new`). |
 | `PREVIEW_OWNER` / `PREVIEW_REPO` | Fixed upstream repo (`voidzero-dev` / `vite-plus`). |
-| `VITE_PLUS_PREVIEW_REFS` | Comma-separated refs to inject: `pr.<n>` / `commit.<sha>`. |
+| `VITE_PLUS_PREVIEW_REFS` | Comma-separated commit refs to inject: `commit.<sha>` (PR refs rejected). |
 | `WORKSPACE_PACKAGES` | Allowlist for the tarball endpoint and pkg.pr.new-URL dep routing. Exact names or `prefix*`, e.g. `vite-plus,@voidzero-dev/vite-plus-*`. |
 | `MAX_TARBALL_BYTES` | Max upstream tarball size (default 64 MiB). |
 
@@ -162,7 +168,7 @@ Bindings/secrets:
 - `TARBALL_CACHE` (R2) - generated tarballs + rewritten metadata (incl. integrity).
 - `PREVIEW_REFS` (KV) - runtime-registered refs.
 - `ADMIN_TOKEN` (secret) - guards the admin endpoints.
-- `GITHUB_TOKEN` (secret, optional) - enables PR/commit existence checks on `/-/refs`.
+- `GITHUB_TOKEN` (secret, optional) - enables commit existence checks on `/-/refs`.
 - `GITHUB_WEBHOOK_SECRET` (secret, optional) - verifies the `/-/webhook` receiver.
 
 ## Develop
@@ -194,7 +200,7 @@ deploy without the post-deploy checks.
 ## Status
 
 MVP1 + MVP2 of the RFC, deployed: default-registry bridge with npm redirect
-fallback, `pr.<n>`/`commit.<sha>` preview injection, tarball rewrite, R2 + edge
+fallback, `commit.<sha>` preview injection, tarball rewrite, R2 + edge
 caching, deploy-time warm, computed SHA-512/SHA-1 integrity, KV-backed dynamic
 refs, authenticated admin endpoints (`/-/refs`, `/-/purge`), optional GitHub
 existence checks, and the pkg.pr.new auto-register webhook (`/-/webhook`), plus a

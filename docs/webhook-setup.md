@@ -11,7 +11,7 @@ Repo:   `voidzero-dev/vite-plus` (owner/repo are fixed in the Worker)
 pkg.pr.new publishes a preview build in CI, and the `pkg-pr-new[bot]` posts/edits
 a comment on the PR with the install URLs. A GitHub repo webhook delivers that
 `issue_comment` event to the bridge's `/-/webhook`. The bridge verifies the HMAC
-signature, then registers the PR ref (`pr.<number>`) and every commit sha in the
+signature, then registers every commit sha in the
 comment (`commit.<sha>`) into KV. Those versions then appear in the packument
 with no redeploy, so consumers can install them immediately.
 

@@ -31,8 +31,6 @@ function readWrangler() {
 }
 
 function refToVersion(ref) {
-  const pr = ref.match(/^pr\.(\d+)$/)
-  if (pr) return `0.0.0-pr.${pr[1]}`
   const commit = ref.match(/^commit\.([0-9a-f]{7,40})$/i)
   if (commit) return `0.0.0-commit.${commit[1]}`
   return null

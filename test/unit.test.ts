@@ -40,13 +40,6 @@ const env = {
 } as Env
 
 describe('parsePreviewVersion', () => {
-  it('parses pr versions', () => {
-    expect(parsePreviewVersion('0.0.0-pr.1891')).toEqual({
-      type: 'pr',
-      ref: '1891',
-    })
-  })
-
   it('parses commit versions (short and long sha)', () => {
     expect(parsePreviewVersion('0.0.0-commit.a832a55')).toEqual({
       type: 'commit',
@@ -63,28 +56,28 @@ describe('parsePreviewVersion', () => {
     })
   })
 
-  it('rejects non-preview and malformed versions', () => {
+  it('rejects pr-number versions and other malformed versions', () => {
     for (const v of [
       '0.2.1',
       'latest',
       '1891',
       'pr-1891',
+      '0.0.0-pr.1891', // PR refs are not supported (mutable)
+      '0.0.0-pr.1',
       '0.2.1-pr.1891',
-      '0.0.0-pr.abc',
       '0.0.0-commit.xyz',
       '0.0.0-commit.abc', // < 7 hex chars
     ]) {
       expect(parsePreviewVersion(v), v).toBeNull()
     }
-    expect(isPreviewVersion('0.0.0-pr.1')).toBe(true)
+    expect(isPreviewVersion('0.0.0-commit.a832a55')).toBe(true)
     expect(isPreviewVersion('0.2.1')).toBe(false)
   })
 })
 
 describe('parseConfiguredPreviewRefs', () => {
-  it('parses pr and commit refs into versions and tags', () => {
-    expect(parseConfiguredPreviewRefs('pr.1891,commit.a832a55')).toEqual([
-      { type: 'pr', ref: '1891', version: '0.0.0-pr.1891', tag: 'pr-1891' },
+  it('parses commit refs into versions and tags', () => {
+    expect(parseConfiguredPreviewRefs('commit.a832a55')).toEqual([
       {
         type: 'commit',
         ref: 'a832a55',
@@ -99,10 +92,10 @@ describe('parseConfiguredPreviewRefs', () => {
     expect(parseConfiguredPreviewRefs(undefined)).toEqual([])
   })
 
-  it('throws on invalid ref (strict) but skips it (safe)', () => {
+  it('rejects pr/invalid refs (strict throws, safe skips)', () => {
     expect(() => parseConfiguredPreviewRefs('bogus')).toThrow()
+    expect(() => parseConfiguredPreviewRefs('pr.1891')).toThrow()
     expect(parseConfiguredPreviewRefsSafe('pr.1,bogus,commit.abcdef0')).toEqual([
-      { type: 'pr', ref: '1', version: '0.0.0-pr.1', tag: 'pr-1' },
       {
         type: 'commit',
         ref: 'abcdef0',
@@ -114,18 +107,17 @@ describe('parseConfiguredPreviewRefs', () => {
 })
 
 describe('toPkgPrNewUrl', () => {
-  it('maps scoped and unscoped names', () => {
+  it('maps scoped and unscoped commit names', () => {
     expect(
-      toPkgPrNewUrl(env, '@voidzero-dev/vite-plus-core', '0.0.0-pr.1891'),
+      toPkgPrNewUrl(env, '@voidzero-dev/vite-plus-core', '0.0.0-commit.a832a55'),
     ).toBe(
-      'https://pkg.pr.new/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-core@1891',
-    )
-    expect(toPkgPrNewUrl(env, 'vite-plus', '0.0.0-pr.1891')).toBe(
-      'https://pkg.pr.new/voidzero-dev/vite-plus/vite-plus@1891',
+      'https://pkg.pr.new/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-core@a832a55',
     )
     expect(toPkgPrNewUrl(env, 'vite-plus', '0.0.0-commit.a832a55')).toBe(
       'https://pkg.pr.new/voidzero-dev/vite-plus/vite-plus@a832a55',
     )
+    // PR-number versions are not preview versions -> null.
+    expect(toPkgPrNewUrl(env, 'vite-plus', '0.0.0-pr.1891')).toBeNull()
   })
 
   it('returns null for non-preview versions', () => {
@@ -221,12 +213,13 @@ describe('pkgPrNewUrlToVersion', () => {
         env,
       ),
     ).toBe(`0.0.0-commit.${sha}`)
+    // A PR-number URL is mutable -> not routed (left as the original URL).
     expect(
       pkgPrNewUrlToVersion(
         'https://pkg.pr.new/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-darwin-arm64@1891',
         env,
       ),
-    ).toBe('0.0.0-pr.1891')
+    ).toBeNull()
   })
 
   it('leaves non-workspace and non-pkg.pr.new specs alone', () => {
@@ -328,26 +321,14 @@ describe('computeDigests', () => {
 describe('verifyRefExists', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it('hits the right GitHub endpoint and maps 200/404', async () => {
+  it('hits the commits endpoint and maps 200/404', async () => {
     const calls: string[] = []
     vi.stubGlobal('fetch', (url: string) => {
       calls.push(url)
-      const status = url.endsWith('/pulls/1') ? 200 : 404
+      const status = url.endsWith('/commits/abcdef0') ? 200 : 404
       return Promise.resolve(new Response('', { status }))
     })
     const ghEnv = { PREVIEW_OWNER: 'voidzero-dev', PREVIEW_REPO: 'vite-plus' } as Env
-
-    expect(
-      await verifyRefExists(ghEnv, {
-        type: 'pr',
-        ref: '1',
-        version: '0.0.0-pr.1',
-        tag: 'pr-1',
-      }),
-    ).toBe(true)
-    expect(calls[0]).toBe(
-      'https://api.github.com/repos/voidzero-dev/vite-plus/pulls/1',
-    )
 
     expect(
       await verifyRefExists(ghEnv, {
@@ -356,15 +337,24 @@ describe('verifyRefExists', () => {
         version: '0.0.0-commit.abcdef0',
         tag: 'commit-abcdef0',
       }),
-    ).toBe(false)
-    expect(calls[1]).toBe(
+    ).toBe(true)
+    expect(calls[0]).toBe(
       'https://api.github.com/repos/voidzero-dev/vite-plus/commits/abcdef0',
     )
+
+    expect(
+      await verifyRefExists(ghEnv, {
+        type: 'commit',
+        ref: 'deadbee',
+        version: '0.0.0-commit.deadbee',
+        tag: 'commit-deadbee',
+      }),
+    ).toBe(false)
   })
 })
 
 describe('refsFromBotComment', () => {
-  it('extracts the PR ref and distinct commit shas', () => {
+  it('extracts distinct commit shas (no pr ref)', () => {
     const sha = '6acea1aa818e96365b5811d47360367ba18a3a05'
     const body = [
       '```',
@@ -373,10 +363,7 @@ describe('refsFromBotComment', () => {
       `npm i https://pkg.pr.new/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-darwin-arm64@${sha}`,
       `npm i https://pkg.pr.new/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-linux-x64-gnu@${sha}`,
     ].join('\n')
-    expect(refsFromBotComment(body, 1891)).toEqual([
-      'pr.1891',
-      `commit.${sha}`,
-    ])
+    expect(refsFromBotComment(body)).toEqual([`commit.${sha}`])
   })
 })
 

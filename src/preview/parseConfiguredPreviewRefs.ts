@@ -1,16 +1,21 @@
 /**
- * Parses the configured preview refs (from `VITE_PLUS_PREVIEW_REFS`) that
+ * Parses the configured preview refs (from `VITE_PLUS_PREVIEW_REFS` or KV) that
  * should be injected into packuments.
  *
- * Supported syntax:
- *   pr.<number>
+ * Only immutable commit refs are supported:
  *   commit.<sha>
+ *
+ * PR-number refs (`pr.<n>`) are rejected: a PR ref is mutable, so its metadata
+ * would be overwritten as the PR advances.
  */
-export type ConfiguredPreviewRef =
-  | { type: 'pr'; ref: string; version: string; tag: string }
-  | { type: 'commit'; ref: string; version: string; tag: string }
+export type ConfiguredPreviewRef = {
+  type: 'commit'
+  ref: string
+  version: string
+  tag: string
+}
 
-/** Strict parser: throws on an invalid ref. */
+/** Strict parser: throws on an invalid or non-commit ref. */
 export function parseConfiguredPreviewRefs(
   input: string | undefined,
 ): ConfiguredPreviewRef[] {
@@ -20,16 +25,6 @@ export function parseConfiguredPreviewRefs(
     .map((s) => s.trim())
     .filter(Boolean)
     .map((value) => {
-      const pr = value.match(/^pr\.(\d+)$/)
-      if (pr) {
-        return {
-          type: 'pr' as const,
-          ref: pr[1],
-          version: `0.0.0-pr.${pr[1]}`,
-          tag: `pr-${pr[1]}`,
-        }
-      }
-
       const commit = value.match(/^commit\.([0-9a-f]{7,40})$/i)
       if (commit) {
         return {
@@ -39,8 +34,9 @@ export function parseConfiguredPreviewRefs(
           tag: `commit-${commit[1]}`,
         }
       }
-
-      throw new Error(`Invalid preview ref: ${value}`)
+      throw new Error(
+        `Invalid preview ref (only commit.<sha> is supported): ${value}`,
+      )
     })
 }
 

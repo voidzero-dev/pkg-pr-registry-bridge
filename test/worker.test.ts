@@ -46,30 +46,21 @@ function gzip(bytes: Uint8Array): Response {
 const PLATFORM_SHA = '1234567890abcdef1234567890abcdef12345678'
 
 beforeAll(async () => {
-  const vitePlusPr = await makeTarball({
-    name: 'vite-plus',
-    version: '1891',
-    dependencies: { '@voidzero-dev/vite-plus-core': '1891' },
-    optionalDependencies: {
-      '@voidzero-dev/vite-plus-darwin-arm64': `https://pkg.pr.new/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-darwin-arm64@${PLATFORM_SHA}`,
-    },
-    bin: { vp: './bin/vp' },
-  })
   const darwinBin = await makeTarball({
     name: '@voidzero-dev/vite-plus-darwin-arm64',
     version: '0.2.1',
     os: ['darwin'],
     cpu: ['arm64'],
   })
-  const corePr = await makeTarball({
-    name: '@voidzero-dev/vite-plus-core',
-    version: '1891',
-    dependencies: { 'vite-plus': '1891' },
-  })
+  // The configured ref is `commit.a832a55` (see vitest.config.ts).
   const vitePlusCommit = await makeTarball({
     name: 'vite-plus',
     version: 'a832a55',
     dependencies: { '@voidzero-dev/vite-plus-core': 'a832a55' },
+    optionalDependencies: {
+      '@voidzero-dev/vite-plus-darwin-arm64': `https://pkg.pr.new/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-darwin-arm64@${PLATFORM_SHA}`,
+    },
+    bin: { vp: './bin/vp' },
   })
   const coreCommit = await makeTarball({
     name: '@voidzero-dev/vite-plus-core',
@@ -88,10 +79,6 @@ beforeAll(async () => {
     }
     if (url === 'https://registry.npmjs.org/react') {
       return Promise.resolve(json({ name: 'react', 'dist-tags': { latest: '19.0.0' } }))
-    }
-    if (url.endsWith('/vite-plus@1891')) return Promise.resolve(gzip(vitePlusPr))
-    if (url.endsWith('/@voidzero-dev/vite-plus-core@1891')) {
-      return Promise.resolve(gzip(corePr))
     }
     if (url.endsWith('/vite-plus@a832a55')) {
       return Promise.resolve(gzip(vitePlusCommit))
@@ -125,16 +112,16 @@ describe('packument endpoint', () => {
     expect(body['dist-tags'].latest).toBe('0.2.1')
 
     // preview version + dist-tag injected.
-    const preview = body.versions['0.0.0-pr.1891']
+    const preview = body.versions['0.0.0-commit.a832a55']
     expect(preview).toBeTruthy()
-    expect(preview.version).toBe('0.0.0-pr.1891')
+    expect(preview.version).toBe('0.0.0-commit.a832a55')
     expect(preview.dependencies['@voidzero-dev/vite-plus-core']).toBe(
-      '0.0.0-pr.1891',
+      '0.0.0-commit.a832a55',
     )
     expect(preview.dist.tarball).toBe(
-      `${BASE}/tarballs/vite-plus/0.0.0-pr.1891.tgz`,
+      `${BASE}/tarballs/vite-plus/0.0.0-commit.a832a55.tgz`,
     )
-    expect(body['dist-tags']['pr-1891']).toBe('0.0.0-pr.1891')
+    expect(body['dist-tags']['commit-a832a55']).toBe('0.0.0-commit.a832a55')
     expect(res.headers.get('cache-control')).toContain('max-age=300')
   })
 
@@ -147,11 +134,11 @@ describe('packument endpoint', () => {
 
     expect(body.name).toBe('@voidzero-dev/vite-plus-core')
     expect(body['dist-tags'].latest).toBeUndefined()
-    const preview = body.versions['0.0.0-pr.1891']
+    const preview = body.versions['0.0.0-commit.a832a55']
     expect(preview).toBeTruthy()
-    expect(preview.dependencies['vite-plus']).toBe('0.0.0-pr.1891')
+    expect(preview.dependencies['vite-plus']).toBe('0.0.0-commit.a832a55')
     expect(preview.dist.tarball).toBe(
-      `${BASE}/tarballs/@voidzero-dev/vite-plus-core/0.0.0-pr.1891.tgz`,
+      `${BASE}/tarballs/@voidzero-dev/vite-plus-core/0.0.0-commit.a832a55.tgz`,
     )
   })
 
@@ -160,7 +147,7 @@ describe('packument endpoint', () => {
       headers: { accept: 'application/json' },
     })
     const body = (await res.json()) as Record<string, any>
-    const opt = body.versions['0.0.0-pr.1891'].optionalDependencies
+    const opt = body.versions['0.0.0-commit.a832a55'].optionalDependencies
     expect(opt['@voidzero-dev/vite-plus-darwin-arm64']).toBe(
       `0.0.0-commit.${PLATFORM_SHA}`,
     )
@@ -217,44 +204,36 @@ describe('packument endpoint', () => {
 })
 
 describe('tarball endpoint', () => {
-  it('serves a generated PR tarball with rewritten package.json', async () => {
-    const res = await SELF.fetch(`${BASE}/tarballs/vite-plus/0.0.0-pr.1891.tgz`)
+  it('serves a generated commit tarball with rewritten package.json and immutable cache', async () => {
+    const res = await SELF.fetch(`${BASE}/tarballs/vite-plus/0.0.0-commit.a832a55.tgz`)
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toBe('application/gzip')
-    expect(res.headers.get('cache-control')).toContain('max-age=300')
+    expect(res.headers.get('cache-control')).toContain('immutable')
 
     const bytes = new Uint8Array(await res.arrayBuffer())
     const files = await parseTarGzip(bytes)
     const pkgFile = files.find((f) => f.name === 'package/package.json')
     const pkg = JSON.parse(new TextDecoder().decode(pkgFile!.data))
     expect(pkg.name).toBe('vite-plus')
-    expect(pkg.version).toBe('0.0.0-pr.1891')
-    expect(pkg.dependencies['@voidzero-dev/vite-plus-core']).toBe(
-      '0.0.0-pr.1891',
-    )
-  })
-
-  it('serves commit tarballs with an immutable cache policy', async () => {
-    const res = await SELF.fetch(
-      `${BASE}/tarballs/vite-plus/0.0.0-commit.a832a55.tgz`,
-    )
-    expect(res.status).toBe(200)
-    expect(res.headers.get('cache-control')).toContain('immutable')
-
-    const files = await parseTarGzip(new Uint8Array(await res.arrayBuffer()))
-    const pkgFile = files.find((f) => f.name === 'package/package.json')
-    const pkg = JSON.parse(new TextDecoder().decode(pkgFile!.data))
     expect(pkg.version).toBe('0.0.0-commit.a832a55')
+    expect(pkg.dependencies['@voidzero-dev/vite-plus-core']).toBe(
+      '0.0.0-commit.a832a55',
+    )
   })
 
   it('rejects unknown preview packages', async () => {
-    const res = await SELF.fetch(`${BASE}/tarballs/react/0.0.0-pr.1891.tgz`)
+    const res = await SELF.fetch(`${BASE}/tarballs/react/0.0.0-commit.a832a55.tgz`)
     expect(res.status).toBe(404)
   })
 
-  it('rejects invalid preview versions', async () => {
-    const res = await SELF.fetch(`${BASE}/tarballs/vite-plus/0.2.1.tgz`)
-    expect(res.status).toBe(400)
+  it('rejects pr-number and other invalid preview versions', async () => {
+    // PR-number versions are not supported (mutable refs).
+    expect(
+      (await SELF.fetch(`${BASE}/tarballs/vite-plus/0.0.0-pr.1891.tgz`)).status,
+    ).toBe(400)
+    expect(
+      (await SELF.fetch(`${BASE}/tarballs/vite-plus/0.2.1.tgz`)).status,
+    ).toBe(400)
   })
 })
 
@@ -264,7 +243,7 @@ describe('integrity', () => {
       headers: { accept: 'application/json' },
     })
     const body = (await res.json()) as Record<string, any>
-    const dist = body.versions['0.0.0-pr.1891'].dist
+    const dist = body.versions['0.0.0-commit.a832a55'].dist
     expect(dist.integrity).toMatch(/^sha512-[A-Za-z0-9+/]+=*$/)
     expect(dist.shasum).toMatch(/^[0-9a-f]{40}$/)
   })
@@ -286,7 +265,7 @@ describe('admin: refs', () => {
     const res = await SELF.fetch(`${BASE}/-/refs`, { headers: AUTH })
     expect(res.status).toBe(200)
     const body = (await res.json()) as { refs: Array<{ ref: string }> }
-    expect(body.refs.some((r) => r.ref === 'pr.1891')).toBe(true)
+    expect(body.refs.some((r) => r.ref === 'commit.a832a55')).toBe(true)
   })
 
   it('registers a ref in KV and injects it into the packument', async () => {
@@ -319,21 +298,23 @@ describe('admin: refs', () => {
   })
 
   it('unregisters a ref', async () => {
+    // Use a sha that is not the env-configured ref, so removal is observable.
+    const ref = 'commit.beefcafe'
     await SELF.fetch(`${BASE}/-/refs`, {
       method: 'POST',
       headers: { ...AUTH, 'content-type': 'application/json' },
-      body: JSON.stringify({ ref: 'commit.a832a55' }),
+      body: JSON.stringify({ ref }),
     })
     const del = await SELF.fetch(`${BASE}/-/refs`, {
       method: 'DELETE',
       headers: { ...AUTH, 'content-type': 'application/json' },
-      body: JSON.stringify({ ref: 'commit.a832a55' }),
+      body: JSON.stringify({ ref }),
     })
     expect(del.status).toBe(200)
     const list = (await (
       await SELF.fetch(`${BASE}/-/refs`, { headers: AUTH })
     ).json()) as { refs: Array<{ ref: string }> }
-    expect(list.refs.some((r) => r.ref === 'commit.a832a55')).toBe(false)
+    expect(list.refs.some((r) => r.ref === ref)).toBe(false)
   })
 })
 
@@ -347,7 +328,7 @@ describe('admin: purge', () => {
     const res = await SELF.fetch(`${BASE}/-/purge`, {
       method: 'POST',
       headers: { ...AUTH, 'content-type': 'application/json' },
-      body: JSON.stringify({ package: 'react', version: '0.0.0-pr.1891' }),
+      body: JSON.stringify({ package: 'react', version: '0.0.0-commit.a832a55' }),
     })
     expect(res.status).toBe(400)
   })
@@ -356,11 +337,11 @@ describe('admin: purge', () => {
     const res = await SELF.fetch(`${BASE}/-/purge`, {
       method: 'POST',
       headers: { ...AUTH, 'content-type': 'application/json' },
-      body: JSON.stringify({ package: 'vite-plus', version: '0.0.0-pr.1891' }),
+      body: JSON.stringify({ package: 'vite-plus', version: '0.0.0-commit.a832a55' }),
     })
     expect(res.status).toBe(200)
     expect((await res.json()) as any).toMatchObject({
-      purged: { package: 'vite-plus', version: '0.0.0-pr.1891' },
+      purged: { package: 'vite-plus', version: '0.0.0-commit.a832a55' },
     })
   })
 })
@@ -416,9 +397,8 @@ describe('admin: webhook', () => {
     })
     expect(res.status).toBe(200)
     const out = (await res.json()) as { registered: string[] }
-    expect(out.registered).toEqual(
-      expect.arrayContaining(['0.0.0-pr.1891', `0.0.0-commit.${sha}`]),
-    )
+    // Only the commit sha is registered (the PR number is not a supported ref).
+    expect(out.registered).toEqual([`0.0.0-commit.${sha}`])
 
     const list = (await (
       await SELF.fetch(`${BASE}/-/refs`, {

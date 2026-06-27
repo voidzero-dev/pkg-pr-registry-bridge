@@ -37,20 +37,20 @@ describe('buildPreviewTarball', () => {
     const build = await buildPreviewTarball(
       upstream,
       '@voidzero-dev/vite-plus-core',
-      '0.0.0-pr.1891',
+      '0.0.0-commit.a832a55',
     env,
     )
 
     expect(build.packageJson.name).toBe('@voidzero-dev/vite-plus-core')
-    expect(build.packageJson.version).toBe('0.0.0-pr.1891')
-    expect(build.packageJson.dependencies['vite-plus']).toBe('0.0.0-pr.1891')
+    expect(build.packageJson.version).toBe('0.0.0-commit.a832a55')
+    expect(build.packageJson.dependencies['vite-plus']).toBe('0.0.0-commit.a832a55')
     expect(build.packageJson.dependencies.picomatch).toBe('^2.3.1')
 
     const files = await parseTarGzip(build.tarball)
 
     const pkgFile = files.find((f) => f.name === 'package/package.json')
     expect(pkgFile).toBeTruthy()
-    expect(JSON.parse(decode(pkgFile!.data)).version).toBe('0.0.0-pr.1891')
+    expect(JSON.parse(decode(pkgFile!.data)).version).toBe('0.0.0-commit.a832a55')
 
     const index = files.find((f) => f.name === 'package/dist/index.js')
     expect(decode(index!.data)).toBe('export const x = 1\n')
@@ -65,7 +65,7 @@ describe('buildPreviewTarball', () => {
       { name: 'package/README.md', data: '# hi\n' },
     ])
     await expect(
-      buildPreviewTarball(upstream, 'vite-plus', '0.0.0-pr.1891', env),
+      buildPreviewTarball(upstream, 'vite-plus', '0.0.0-commit.a832a55', env),
     ).rejects.toThrow(/missing package\/package\.json/)
   })
 })

@@ -15,7 +15,7 @@ export interface Env {
   PREVIEW_OWNER: string
   /** Fixed upstream repo; never selected by request input. */
   PREVIEW_REPO: string
-  /** Comma-separated preview refs to inject, e.g. `pr.1891,commit.a832a55`. */
+  /** Comma-separated commit refs to inject, e.g. `commit.a832a55`. */
   VITE_PLUS_PREVIEW_REFS: string
   /**
    * Comma-separated allowlist of packages the tarball endpoint may serve and
