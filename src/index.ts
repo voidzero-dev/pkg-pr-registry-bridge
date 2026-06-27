@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { Env } from './config'
 import { HttpError } from './httpError'
-import { isWorkspacePackage } from './preview/packages'
+import { isPreviewPackage, isWorkspacePackage } from './preview/packages'
 import { parsePreviewVersion } from './preview/parsePreviewVersion'
 import { parseConfiguredPreviewRefs } from './preview/parseConfiguredPreviewRefs'
 import {
@@ -238,7 +238,12 @@ app.get('*', async (c) => {
   packument.versions ??= {}
 
   const refs = await getConfiguredRefs(c.env)
+  const previewPackage = isPreviewPackage(name)
   for (const ref of refs) {
+    // Platform binaries are only ever referenced by commit (pkg.pr.new pins
+    // them by sha), so skip PR refs for them to avoid building those large
+    // tarballs for versions nothing depends on.
+    if (!previewPackage && ref.type !== 'commit') continue
     try {
       const preview = await getPreviewMeta(c.env, name, ref.version)
       packument.versions[ref.version] = buildVersionMetadata(
