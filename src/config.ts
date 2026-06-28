@@ -33,7 +33,7 @@ export interface Env {
    * serves them, so it never decompresses or hashes a large payload itself.
    * Also holds the runtime-registered refs index (see getConfiguredRefs).
    */
-  TARBALL_CACHE: R2Bucket
+  STORAGE: R2Bucket
   /** Token for GitHub PR/commit existence checks (secret). */
   GITHUB_TOKEN?: string
   /** Bearer token guarding the admin endpoints (`/-/refs`, `/-/purge`, etc.). */

@@ -566,7 +566,7 @@ async function main() {
   const [parsed] = parseConfiguredPreviewRefs(`commit.${rawSha}`);
   const ref = `commit.${parsed.ref}`;
   const version = parsed.version;
-  const bridge = (input("bridge-url") || "https://pkg-pr-registry-bridge.render.vip").replace(/\/+$/, "");
+  const bridge = (input("bridge-url") || "https://pkg-pr-registry-bridge.void.app").replace(/\/+$/, "");
   const token = input("admin-token", true);
   const env = {
     PUBLIC_BASE_URL: bridge,

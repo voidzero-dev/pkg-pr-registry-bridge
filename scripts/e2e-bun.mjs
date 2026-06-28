@@ -6,7 +6,7 @@
 // installed packages resolved to the synthetic preview version (which only the
 // bridge can serve). Intended to run after every deploy (`pnpm deploy`).
 //
-// Config (all optional; sensible defaults read from wrangler.toml):
+// Config (all optional; sensible defaults read from .env / .env.production):
 //   BRIDGE_URL         override the bridge origin (default: PUBLIC_BASE_URL)
 //   BRIDGE_E2E_REF     preview ref to test, e.g. `commit.<sha>` (default: first
 //                      of VITE_PLUS_PREVIEW_REFS)
@@ -16,7 +16,7 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { readWrangler, refToVersion } from './lib/wrangler.mjs'
+import { readConfig, refToVersion } from './lib/config.mjs'
 
 async function waitForHealth(base) {
   for (let attempt = 1; attempt <= 10; attempt++) {
@@ -31,14 +31,14 @@ async function waitForHealth(base) {
   throw new Error(`bridge health check never passed at ${base}/_health`)
 }
 
-const wrangler = readWrangler()
-const bridgeUrl = (process.env.BRIDGE_URL || wrangler.baseUrl || '').replace(
+const config = readConfig()
+const bridgeUrl = (process.env.BRIDGE_URL || config.baseUrl || '').replace(
   /\/+$/,
   '',
 )
 const ref = (
   process.env.BRIDGE_E2E_REF ||
-  wrangler.refs.split(',')[0] ||
+  config.refs.split(',')[0] ||
   ''
 ).trim()
 const version =

@@ -4,7 +4,7 @@ A version-gated npm registry bridge that lets package managers install
 [pkg.pr.new](https://pkg.pr.new) Vite+ preview builds using normal npm registry
 semantics. Runs as a single Cloudflare Worker.
 
-Live: `https://pkg-pr-registry-bridge.render.vip`
+Live: `https://pkg-pr-registry-bridge.void.app`
 
 The package name selects the upstream package; the version pattern selects the
 source:
@@ -83,7 +83,7 @@ versions (strict allowlist). Owner/repo are fixed to `voidzero-dev/vite-plus`.
 
 ```toml
 [install]
-registry = "https://pkg-pr-registry-bridge.render.vip/"
+registry = "https://pkg-pr-registry-bridge.void.app/"
 
 # REQUIRED for large installs. Bun's default network concurrency (48) triggers
 # an HTTP/2 client bug against Cloudflare on big dependency graphs (vite-plus
@@ -133,8 +133,8 @@ sources are merged.
 ## Admin endpoints
 
 Writes are guarded by `Authorization: Bearer <ADMIN_TOKEN>` (set `ADMIN_TOKEN`
-with `wrangler secret put`); without it configured the write endpoints return
-503. `GET /-/refs` is a public read.
+with `void secret put ADMIN_TOKEN`); without it configured the write endpoints
+return 503. `GET /-/refs` is a public read.
 
 ```bash
 # List configured refs (static env + runtime R2 index) - no auth required
@@ -168,7 +168,7 @@ The heavy work (download, rewrite, re-pack, hash) runs in CI via a reusable
 action, so the Worker only serves. Wire it into vite-plus's pkg.pr.new workflow:
 see [`docs/ci-setup.md`](./docs/ci-setup.md). To publish by hand (same code
 path), run `PKG_PR_BRIDGE_ADMIN_TOKEN=… pnpm warm <sha>`; with no arguments it
-publishes the refs in `wrangler.toml` (also part of `pnpm run deploy`).
+publishes the refs in `.env` (also part of `pnpm run deploy`).
 
 The action's bundle is committed
 (`.github/actions/publish-preview/dist/index.mjs`); rebuild it with
@@ -176,7 +176,9 @@ The action's bundle is committed
 
 ## Configuration
 
-Set via `wrangler.toml` `[vars]` (tokens via `wrangler secret`):
+Non-secret values are declared in `env.ts` (typed and validated) and set in
+`.env` (committed), with per-environment overrides in `.env.production`. Secrets
+are uploaded with `void secret put`:
 
 | Var | Meaning |
 | --- | --- |
@@ -190,35 +192,54 @@ Set via `wrangler.toml` `[vars]` (tokens via `wrangler secret`):
 
 Bindings/secrets:
 
-- `TARBALL_CACHE` (R2) - generated tarballs, rewritten metadata (incl. integrity), and the runtime-registered refs index. A 90-day expiry lifecycle rule bounds storage (`wrangler r2 bucket lifecycle add ... --expire-days 90`).
-- `ADMIN_TOKEN` (secret) - guards the admin endpoints.
-- `GITHUB_TOKEN` (secret, optional) - enables commit existence checks on `/-/refs`.
+- `STORAGE` (R2) - generated tarballs, rewritten metadata (incl. integrity), and the runtime-registered refs index. Auto-provisioned by Void on deploy (no manual bucket creation); the binding is declared in `void.json` (`inference.bindings.storage`). The runtime refs index self-expires after 90 days (in-code TTL).
+- `ADMIN_TOKEN` (secret) - guards the admin endpoints. Set with `void secret put ADMIN_TOKEN`.
+- `GITHUB_TOKEN` (secret, optional) - enables commit existence checks on `/-/refs`. Set with `void secret put GITHUB_TOKEN`.
 
 ## Develop
 
+This is a [Void](https://void.cloud) app: `voidPlugin()` in `vite.config.ts`
+builds the Worker from the `routes/` layer, which forwards every request to the
+Hono registry app in `src/app.ts`. Void infers the `STORAGE` R2 binding and
+loads `.env*` into the Worker's vars.
+
 ```bash
-pnpm install
+pnpm install       # also runs `void prepare` (generates .void/ types)
 pnpm typecheck
 pnpm test          # vitest, runs the worker in workerd (Miniflare)
-pnpm dev           # local wrangler dev server
+pnpm dev           # `vite dev` (local worker via Miniflare, http://localhost:5173)
 ```
+
+For local admin/secret testing, put `ADMIN_TOKEN=…` (and optionally
+`GITHUB_TOKEN=…`) in `.env.local` (gitignored).
 
 ## Deploy
 
+Deploys to the [Void](https://void.cloud) managed platform with `void deploy`;
+Void provisions the Worker and the `STORAGE` R2 bucket (no Cloudflare account
+needed).
+
 ```bash
-# One-time: create the R2 bucket referenced by wrangler.toml
-pnpm exec wrangler r2 bucket create pkg-pr-registry-bridge-tarballs
+# One-time: authenticate and set the admin secret on the project.
+void auth login
+void secret put ADMIN_TOKEN              # guards the admin write endpoints
+void secret put GITHUB_TOKEN             # optional: ref existence checks
 
 # Deploy, warm the caches, and run the end-to-end bun install check.
 # Use `pnpm run deploy` (not `pnpm deploy`, which is pnpm's built-in command).
-pnpm run deploy
+pnpm run deploy                          # void deploy + warm + e2e
 ```
 
-`pnpm run deploy` runs `wrangler deploy`, then `pnpm warm` (publishes the
-configured preview refs into R2 via the action so installs are served from
-cache), then `pnpm test:e2e` (a real `bun install` against the live bridge that
-asserts the alias/override resolves to the synthetic version). Use
-`pnpm run deploy:only` to deploy without the post-deploy checks.
+`pnpm run deploy` runs `void deploy`, then `pnpm warm` (publishes the configured
+preview refs into R2 via the action so installs are served from cache), then
+`pnpm test:e2e` (a real `bun install` against the live bridge that asserts the
+alias/override resolves to the synthetic version). Use `pnpm run deploy:only`
+for `void deploy` alone.
+
+The public origin (`PUBLIC_BASE_URL` in `.env.production`) is the Void platform
+URL `https://pkg-pr-registry-bridge.void.app`. To serve from a custom domain
+instead, run `void domain add <hostname>` (it prints the CNAME + ownership TXT to
+add at your DNS provider) and set `PUBLIC_BASE_URL` to that host.
 
 ## Status
 

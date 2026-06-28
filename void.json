@@ -1,0 +1,13 @@
+{
+  "$schema": "./node_modules/void/schema.json",
+  "target": "cloudflare",
+  "inference": {
+    "appType": "void",
+    "bindings": {
+      "storage": true
+    }
+  },
+  "worker": {
+    "compatibility_date": "2026-02-24"
+  }
+}

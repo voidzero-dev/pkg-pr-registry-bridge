@@ -1,5 +1,10 @@
 node_modules/
 dist/
+# Void-generated artifacts (types, local dev state).
+.void/
+# Local secret overrides (ADMIN_TOKEN, GITHUB_TOKEN, etc.).
+.env.local
+.env.*.local
 # The publish-preview action ships its bundled output (committed so consumers
 # need no build/install step).
 !.github/actions/publish-preview/dist/
@@ -9,3 +14,8 @@ dist/
 .DS_Store
 examples/**/bun.lock
 examples/**/bun.lockb
+node_modules
+dist
+.void
+.wrangler
+*.tsbuildinfo

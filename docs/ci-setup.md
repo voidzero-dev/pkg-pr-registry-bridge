@@ -1,10 +1,11 @@
 # Wiring vite-plus CI to the registry bridge
 
-Bridge: `https://pkg-pr-registry-bridge.render.vip`
+Bridge: `https://pkg-pr-registry-bridge.void.app`
 Repo:   `voidzero-dev/vite-plus` (owner/repo are fixed in the Worker)
 
 > Keep the real `ADMIN_TOKEN` in a password manager / Actions secret, not in the
-> repo.
+> repo. On the bridge itself the same value is set with
+> `void secret put ADMIN_TOKEN`.
 
 ## How it works
 
@@ -32,7 +33,7 @@ Right after the pkg.pr.new build publishes:
   with:
     sha: ${{ github.event.pull_request.head.sha }}
     admin-token: ${{ secrets.PKG_PR_BRIDGE_ADMIN_TOKEN }}
-    # bridge-url defaults to https://pkg-pr-registry-bridge.render.vip
+    # bridge-url defaults to https://pkg-pr-registry-bridge.void.app
 ```
 
 > Use `github.event.pull_request.head.sha`, not `github.sha`. pkg.pr.new publishes
@@ -46,7 +47,7 @@ Right after the pkg.pr.new build publishes:
 After a PR build publishes and the step runs:
 
 ```bash
-curl https://pkg-pr-registry-bridge.render.vip/-/refs
+curl https://pkg-pr-registry-bridge.void.app/-/refs
 ```
 
 ## Notes

@@ -40,10 +40,10 @@ async function buildAndStore(
     integrity: build.integrity,
   }
   await Promise.all([
-    env.TARBALL_CACHE.put(tarballKey(name, version), build.tarball, {
+    env.STORAGE.put(tarballKey(name, version), build.tarball, {
       httpMetadata: { contentType: 'application/gzip', cacheControl },
     }),
-    env.TARBALL_CACHE.put(metaKey(name, version), JSON.stringify(meta), {
+    env.STORAGE.put(metaKey(name, version), JSON.stringify(meta), {
       httpMetadata: { contentType: 'application/json', cacheControl },
     }),
   ])
@@ -82,7 +82,7 @@ export async function getPreviewMeta(
   name: string,
   version: string,
 ): Promise<PreviewMeta> {
-  const cached = await env.TARBALL_CACHE.get(metaKey(name, version))
+  const cached = await env.STORAGE.get(metaKey(name, version))
   if (cached) {
     const stored = await cached.json<Record<string, any>>()
     // Tolerate the pre-integrity meta format (a bare package.json object).
@@ -121,7 +121,7 @@ export async function getPreviewTarballBody(
   name: string,
   version: string,
 ): Promise<PreviewTarball> {
-  const cached = await env.TARBALL_CACHE.get(tarballKey(name, version))
+  const cached = await env.STORAGE.get(tarballKey(name, version))
   if (cached) {
     return { kind: 'body', body: cached.body, contentLength: cached.size }
   }
