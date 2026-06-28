@@ -46,14 +46,20 @@ export interface Env {
 }
 
 /**
- * A prebuild queue task. Without `name`, it's a version task: build the preview
- * packages and fan out one task per platform binary. With `name`, it's a single
- * platform-binary task (so each invocation does bounded CPU/memory work and a
- * flaky binary only retries itself).
+ * A prebuild queue task, in one of three shapes so each invocation does a single
+ * bounded pass over the ~48MB payload (a flaky one retries only itself):
+ * - `{version}` — version task: build the preview packages, fan out one build
+ *   task per platform binary.
+ * - `{version, name}` — build task: build that binary into R2, then enqueue its
+ *   hash task.
+ * - `{version, name, hash}` — hash task: compute the binary's integrity over the
+ *   finished R2 object. Separate from the build because the build's CRC32 and
+ *   the SHA-512 are each a full pass, and together exceed the CPU limit.
  */
 export interface PrebuildMessage {
   version: string
   name?: string
+  hash?: boolean
 }
 
 const DEFAULT_MAX_TARBALL_BYTES = 64 * 1024 * 1024

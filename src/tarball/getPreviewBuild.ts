@@ -239,21 +239,40 @@ async function backfillIntegrity(
 // spends its time, so it is a usable bound for the loop (not a precise timer).
 export const PREWARM_BUDGET_MS = 20_000
 
-/**
- * Ensure one platform binary is in R2 with integrity: build it if uncached,
- * then (always) backfill integrity if the meta has none. Build and hash are two
- * separate passes so neither invocation exceeds the consumer's CPU limit; a
- * crash in either is retried (build is skipped once cached, hash is idempotent).
- * This is the unit of work the prebuild queue fans out to, so a flaky binary
- * only retries itself.
- */
-export async function prebuildPlatform(
+/** Build one platform binary into R2 if it is not already cached (the heavy,
+ * OOM-prone pass: decompress + rewrite + CRC32 + multipart upload). */
+async function ensurePlatformTarball(
   env: Env,
   name: string,
   version: string,
 ): Promise<void> {
   const existing = await env.TARBALL_CACHE.head(tarballKey(name, version))
   if (!existing) await buildPlatformTarballToR2(env, name, version)
+}
+
+/**
+ * Queue BUILD task for one binary: build it (if uncached), then enqueue its
+ * HASH task as a SEPARATE message. The build's CRC32 and the hash's SHA-512 are
+ * each a full pass over the ~48MB payload; doing both in one invocation exceeds
+ * the consumer's CPU limit, so they run as two invocations with independent
+ * budgets. A flaky build OOMs and retries only itself.
+ */
+export async function prebuildPlatformBuild(
+  env: Env,
+  name: string,
+  version: string,
+): Promise<void> {
+  await ensurePlatformTarball(env, name, version)
+  await env.PREBUILD_QUEUE?.send({ version, name, hash: true })
+}
+
+/** Queue HASH task for one binary: compute integrity over the finished R2
+ * object (an R2 read + streaming SHA-512). Idempotent: skipped if already set. */
+export async function prebuildPlatformHash(
+  env: Env,
+  name: string,
+  version: string,
+): Promise<void> {
   await backfillIntegrity(env, name, version)
 }
 
@@ -321,7 +340,9 @@ export async function prewarmVersion(
   for (const [name, depVersion] of platforms) {
     if (Date.now() - start > budgetMs) break
     try {
-      await prebuildPlatform(env, name, depVersion)
+      // No queue to split across invocations here, so build then hash inline.
+      await ensurePlatformTarball(env, name, depVersion)
+      await backfillIntegrity(env, name, depVersion)
     } catch (err) {
       console.warn(`prewarm ${name}@${depVersion}:`, err)
     }

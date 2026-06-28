@@ -306,24 +306,28 @@ describe('integrity', () => {
     const ver = `0.0.0-commit.${PLATFORM_SHA}`
     const pkg = '@voidzero-dev/vite-plus-darwin-arm64'
 
-    // A prebuild task builds the tarball, then backfills integrity over the
-    // finished R2 object (a separate pass from the build). Drive that path.
-    await worker.queue!(
-      {
-        queue: 'pkg-pr-registry-bridge-prebuild',
-        messages: [
-          {
-            id: '1',
-            timestamp: new Date(0),
-            attempts: 1,
-            body: { version: ver, name: pkg },
-            ack: () => {},
-            retry: () => {},
-          },
-        ],
-      } as any,
-      env as any,
-    )
+    // Build and hash are separate queue invocations (each one ~48MB pass). The
+    // test harness does not auto-run enqueued messages, so drive both: the build
+    // task writes the tarball, the hash task backfills integrity over it.
+    const runTask = (body: Record<string, unknown>) =>
+      worker.queue!(
+        {
+          queue: 'pkg-pr-registry-bridge-prebuild',
+          messages: [
+            {
+              id: '1',
+              timestamp: new Date(0),
+              attempts: 1,
+              body,
+              ack: () => {},
+              retry: () => {},
+            },
+          ],
+        } as any,
+        env as any,
+      )
+    await runTask({ version: ver, name: pkg })
+    await runTask({ version: ver, name: pkg, hash: true })
 
     const tres = await SELF.fetch(`${BASE}/tarballs/${pkg}/${ver}.tgz`)
     expect(tres.status).toBe(200)

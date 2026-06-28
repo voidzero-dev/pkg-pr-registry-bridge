@@ -22,7 +22,8 @@ import {
   fanOutVersion,
   getPreviewMeta,
   getPreviewTarballBody,
-  prebuildPlatform,
+  prebuildPlatformBuild,
+  prebuildPlatformHash,
   prewarmVersion,
 } from './tarball/getPreviewBuild'
 import { metaKey, tarballKey } from './cache/r2Cache'
@@ -371,18 +372,20 @@ export default {
   fetch: app.fetch,
 
   /**
-   * Prebuild queue consumer. A version task fans out one task per platform
-   * binary; a binary task builds (or integrity-backfills) that one binary, so
-   * each invocation does bounded CPU/memory work. If a build OOMs (a hard 1102
-   * that kills the isolate uncatchably) the message is not acked and the queue
-   * retries just that binary. Catchable failures (e.g. a 404 upstream) are
-   * caught and acked, so they do not retry pointlessly.
+   * Prebuild queue consumer. A version task fans out a build task per platform
+   * binary; a build task builds that one binary and enqueues its hash task; a
+   * hash task computes its integrity. Splitting build (CRC32) from hash
+   * (SHA-512) keeps each invocation to one ~48MB pass, under the CPU limit. If a
+   * build OOMs (a hard 1102 that kills the isolate uncatchably) the message is
+   * not acked and the queue retries just that binary. Catchable failures (e.g. a
+   * 404 upstream) are caught and acked, so they do not retry pointlessly.
    */
   async queue(batch: MessageBatch<PrebuildMessage>, env: Env): Promise<void> {
     for (const message of batch.messages) {
-      const { version, name } = message.body
+      const { version, name, hash } = message.body
       try {
-        if (name) await prebuildPlatform(env, name, version)
+        if (name && hash) await prebuildPlatformHash(env, name, version)
+        else if (name) await prebuildPlatformBuild(env, name, version)
         else await fanOutVersion(env, version)
       } catch (err) {
         console.warn(`prebuild ${name ?? version}:`, err)
