@@ -1,0 +1,29 @@
+name: Deploy
+on:
+  push:
+    branches: [main]
+
+# A newer push cancels an in-flight deploy for the same branch.
+concurrency:
+  group: void-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # VOID_PROJECT is required because the project link in `.void/` is
+      # gitignored, so there is nothing to resolve from in CI.
+      - run: pnpm exec void deploy
+        env:
+          VOID_TOKEN: ${{ secrets.VOID_TOKEN }}
+          VOID_PROJECT: pkg-pr-registry-bridge

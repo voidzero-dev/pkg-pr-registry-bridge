@@ -241,6 +241,10 @@ URL `https://pkg-pr-registry-bridge.void.app`. To serve from a custom domain
 instead, run `void domain add <hostname>` (it prints the CNAME + ownership TXT to
 add at your DNS provider) and set `PUBLIC_BASE_URL` to that host.
 
+Pushes to `main` auto-deploy via `.github/workflows/deploy.yml` (`pnpm exec void
+deploy`). Add a `VOID_TOKEN` repository secret (`void auth token` copies one to
+your clipboard); `VOID_PROJECT` is pinned in the workflow.
+
 ## Status
 
 Deployed: default-registry bridge with npm redirect fallback, `commit.<sha>`
