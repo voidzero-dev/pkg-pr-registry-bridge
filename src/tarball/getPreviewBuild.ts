@@ -89,10 +89,8 @@ async function decompressToBuffer(gzipped: Uint8Array): Promise<Uint8Array> {
  * plus one part, the same envelope as buildMetaLight, which the packument path
  * already runs on these binaries.
  *
- * The SHA-512 `dist.integrity` is computed incrementally over the output chunks
- * as they are framed (Web Crypto's digest is one-shot, so hashing the whole tgz
- * would need it in memory and re-OOM; a streaming hash never holds a second
- * copy), and stored in the meta so the packument can advertise it once built.
+ * Integrity is NOT computed here: a separate, lighter pass (backfillIntegrity)
+ * hashes the finished R2 object, so the build stays bounded per invocation.
  */
 async function buildPlatformTarballToR2(
   env: Env,
@@ -136,9 +134,7 @@ async function buildPlatformTarballToR2(
     const parts: R2UploadedPart[] = []
     let pending: Uint8Array[] = []
     let pendingLen = 0
-    const hash = sha512.create()
     await emitStoredGzip(tar, async (chunk) => {
-      hash.update(chunk)
       pending.push(chunk)
       pendingLen += chunk.byteLength
       while (pendingLen >= PART_SIZE) {
@@ -159,12 +155,14 @@ async function buildPlatformTarballToR2(
     }
     await upload.complete(parts)
 
-    // Persist the meta with the computed integrity so the packument advertises
-    // it (the lightweight buildMetaLight path can't, having no tarball to hash).
+    // Persist the meta WITHOUT integrity. Hashing the 48MB output here, on top of
+    // the decompress + CRC32 + multipart this invocation already does, pushes a
+    // single build over the consumer's CPU limit; integrity is computed in a
+    // separate, lighter pass (backfillIntegrity, just a read + streaming hash).
     const meta: PreviewMeta = {
       packageJson,
       shasum: '',
-      integrity: `sha512-${toBase64(hash.digest().buffer as ArrayBuffer)}`,
+      integrity: '',
     }
     await env.TARBALL_CACHE.put(metaKey(name, version), JSON.stringify(meta), {
       httpMetadata: {
@@ -205,9 +203,11 @@ async function integrityFromCachedTarball(
 
 /**
  * Backfill integrity for a platform binary whose tarball is cached but whose
- * meta predates integrity. Called from prewarmVersion, so the multi-MB hash runs
- * off the request path and one-at-a-time (the packument path injects refs
- * concurrently, so hashing there piled up and OOM'd).
+ * meta has no integrity (a fresh build leaves it empty, and old metas predate
+ * it). Runs off the request path, one-at-a-time, as its own pass: just an R2
+ * read + streaming hash, light enough to stay under the consumer's CPU limit
+ * even right after a build (the packument path injects refs concurrently, so
+ * hashing there piled up and OOM'd; this never runs there).
  */
 async function backfillIntegrity(
   env: Env,
@@ -241,9 +241,11 @@ export const PREWARM_BUDGET_MS = 20_000
 
 /**
  * Ensure one platform binary is in R2 with integrity: build it if uncached,
- * else backfill integrity if its meta predates it. This is the unit of work the
- * prebuild queue fans out to, so each invocation does bounded CPU/memory work
- * (one ~48MB decompress + hash) and a flaky binary only retries itself.
+ * then (always) backfill integrity if the meta has none. Build and hash are two
+ * separate passes so neither invocation exceeds the consumer's CPU limit; a
+ * crash in either is retried (build is skipped once cached, hash is idempotent).
+ * This is the unit of work the prebuild queue fans out to, so a flaky binary
+ * only retries itself.
  */
 export async function prebuildPlatform(
   env: Env,
@@ -252,7 +254,7 @@ export async function prebuildPlatform(
 ): Promise<void> {
   const existing = await env.TARBALL_CACHE.head(tarballKey(name, version))
   if (!existing) await buildPlatformTarballToR2(env, name, version)
-  else await backfillIntegrity(env, name, version)
+  await backfillIntegrity(env, name, version)
 }
 
 /**

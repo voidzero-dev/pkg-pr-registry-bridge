@@ -306,7 +306,25 @@ describe('integrity', () => {
     const ver = `0.0.0-commit.${PLATFORM_SHA}`
     const pkg = '@voidzero-dev/vite-plus-darwin-arm64'
 
-    // Building the tarball also stores its meta with the streamed SHA-512.
+    // A prebuild task builds the tarball, then backfills integrity over the
+    // finished R2 object (a separate pass from the build). Drive that path.
+    await worker.queue!(
+      {
+        queue: 'pkg-pr-registry-bridge-prebuild',
+        messages: [
+          {
+            id: '1',
+            timestamp: new Date(0),
+            attempts: 1,
+            body: { version: ver, name: pkg },
+            ack: () => {},
+            retry: () => {},
+          },
+        ],
+      } as any,
+      env as any,
+    )
+
     const tres = await SELF.fetch(`${BASE}/tarballs/${pkg}/${ver}.tgz`)
     expect(tres.status).toBe(200)
     const tarball = new Uint8Array(await tres.arrayBuffer())
