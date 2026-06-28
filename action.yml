@@ -37,5 +37,5 @@ outputs:
 runs:
   using: 'node20'
   # Bundle lives under .github/actions/ (built by `pnpm build:action`); this
-  # action.yml is at the repo root so it can be used as `fengmk2/<repo>@<ref>`.
+  # action.yml is at the repo root so it can be used as `<owner>/<repo>@<ref>`.
   main: '.github/actions/publish-preview/dist/index.mjs'
