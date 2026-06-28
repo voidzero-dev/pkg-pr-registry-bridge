@@ -2,6 +2,7 @@ name: Deploy
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 # A newer push cancels an in-flight deploy for the same branch.
 concurrency:
