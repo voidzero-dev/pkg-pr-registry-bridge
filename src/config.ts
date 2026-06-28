@@ -45,9 +45,15 @@ export interface Env {
   GITHUB_WEBHOOK_SECRET?: string
 }
 
-/** A request to pre-build all of a version's tarballs into R2. */
+/**
+ * A prebuild queue task. Without `name`, it's a version task: build the preview
+ * packages and fan out one task per platform binary. With `name`, it's a single
+ * platform-binary task (so each invocation does bounded CPU/memory work and a
+ * flaky binary only retries itself).
+ */
 export interface PrebuildMessage {
   version: string
+  name?: string
 }
 
 const DEFAULT_MAX_TARBALL_BYTES = 64 * 1024 * 1024

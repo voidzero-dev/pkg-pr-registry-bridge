@@ -238,61 +238,90 @@ async function backfillIntegrity(
 // short). Date.now() in a Worker only advances on I/O, which is where the build
 // spends its time, so it is a usable bound for the loop (not a precise timer).
 export const PREWARM_BUDGET_MS = 20_000
-// The queue consumer can run long and retries durably, so it gets a much larger
-// budget to build a whole version's binaries in one pass.
-export const QUEUE_PREWARM_BUDGET_MS = 5 * 60_000
 
 /**
- * Pre-build a version's tarballs into R2 so installs are served from cache.
- *
- * Meant to run OFF the request path (via the prebuild queue, or `ctx.waitUntil`
- * as a fallback) when a ref is registered, so the heavy platform-binary build
- * never blocks a user's install. Best-effort and time-bounded: every step is
- * isolated, already-cached tarballs are skipped, and whatever does not finish is
- * still built reliably on demand (the queue also retries). Builds the two
- * preview packages first (also to enumerate the platform binaries from
- * vite-plus's rewritten optionalDependencies), then each platform binary.
+ * Ensure one platform binary is in R2 with integrity: build it if uncached,
+ * else backfill integrity if its meta predates it. This is the unit of work the
+ * prebuild queue fans out to, so each invocation does bounded CPU/memory work
+ * (one ~48MB decompress + hash) and a flaky binary only retries itself.
+ */
+export async function prebuildPlatform(
+  env: Env,
+  name: string,
+  version: string,
+): Promise<void> {
+  const existing = await env.TARBALL_CACHE.head(tarballKey(name, version))
+  if (!existing) await buildPlatformTarballToR2(env, name, version)
+  else await backfillIntegrity(env, name, version)
+}
+
+/**
+ * The platform binaries a version needs: the workspace packages among
+ * vite-plus's optionalDependencies that are not the preview packages themselves
+ * (derived from the WORKSPACE_PACKAGES allowlist, so adding one needs no code
+ * change), each at the version vite-plus declares for it. Building vite-plus is
+ * also what makes its rewritten package.json available to read them from.
+ */
+async function platformBinariesOf(
+  env: Env,
+  version: string,
+): Promise<Array<[string, string]>> {
+  // getPreviewMeta builds + stores the tarball (and meta) on a miss but returns
+  // the cached meta on a hit, so it is cheap on a retry.
+  const vitePlus = await getPreviewMeta(env, 'vite-plus', version)
+  try {
+    await getPreviewMeta(env, '@voidzero-dev/vite-plus-core', version)
+  } catch (err) {
+    console.warn(`prewarm core@${version}:`, err)
+  }
+  return Object.entries(
+    (vitePlus.packageJson.optionalDependencies as Record<string, string>) ?? {},
+  ).filter(([name]) => isWorkspacePackage(name, env) && !isPreviewPackage(name))
+}
+
+/**
+ * Fan out a version's platform-binary builds onto the queue: build the preview
+ * packages, then enqueue one task per binary so each is built in its own bounded
+ * invocation. Used by the queue consumer (which has PREBUILD_QUEUE bound).
+ */
+export async function fanOutVersion(env: Env, version: string): Promise<void> {
+  let platforms: Array<[string, string]>
+  try {
+    platforms = await platformBinariesOf(env, version)
+  } catch (err) {
+    console.warn(`prewarm vite-plus@${version}:`, err)
+    return
+  }
+  for (const [name, depVersion] of platforms) {
+    await env.PREBUILD_QUEUE?.send({ version: depVersion, name })
+  }
+}
+
+/**
+ * Pre-build a version's tarballs into R2 INLINE (preview packages, then each
+ * platform binary sequentially). The fallback for `ctx.waitUntil` when the
+ * prebuild queue is not bound (local dev / tests); the queue path fans out
+ * instead. Best-effort and time-bounded so it cannot run away.
  */
 export async function prewarmVersion(
   env: Env,
   version: string,
   budgetMs: number = PREWARM_BUDGET_MS,
 ): Promise<void> {
-  // getPreviewMeta builds + stores the tarball (and meta) on a miss but returns
-  // the cached meta on a hit, so a queue retry after a partial OOM does not
-  // re-download and re-gzip the preview packages. vite-plus's rewritten
-  // package.json gives us the platform-binary set.
-  let vitePlus: PreviewMeta
+  let platforms: Array<[string, string]>
   try {
-    vitePlus = await getPreviewMeta(env, 'vite-plus', version)
+    platforms = await platformBinariesOf(env, version)
   } catch (err) {
     console.warn(`prewarm vite-plus@${version}:`, err)
     return
   }
-  try {
-    await getPreviewMeta(env, '@voidzero-dev/vite-plus-core', version)
-  } catch (err) {
-    console.warn(`prewarm core@${version}:`, err)
-  }
-
-  // The platform binaries are the workspace packages among vite-plus's
-  // optionalDependencies that are not the preview packages themselves, derived
-  // from the WORKSPACE_PACKAGES allowlist so adding one needs no code change.
-  // Build each at the version vite-plus declares for it (what the package
-  // manager will request), not at the parent version.
-  const platforms = Object.entries(
-    (vitePlus.packageJson.optionalDependencies as Record<string, string>) ?? {},
-  ).filter(([name]) => isWorkspacePackage(name, env) && !isPreviewPackage(name))
-
   const start = Date.now()
-  for (const [pkg, depVersion] of platforms) {
+  for (const [name, depVersion] of platforms) {
     if (Date.now() - start > budgetMs) break
     try {
-      const existing = await env.TARBALL_CACHE.head(tarballKey(pkg, depVersion))
-      if (!existing) await buildPlatformTarballToR2(env, pkg, depVersion)
-      else await backfillIntegrity(env, pkg, depVersion)
+      await prebuildPlatform(env, name, depVersion)
     } catch (err) {
-      console.warn(`prewarm ${pkg}@${depVersion}:`, err)
+      console.warn(`prewarm ${name}@${depVersion}:`, err)
     }
   }
 }

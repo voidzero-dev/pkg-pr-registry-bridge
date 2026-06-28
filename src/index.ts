@@ -19,10 +19,11 @@ import { fetchNpmPackument } from './registry/fetchNpmPackument'
 import { buildVersionMetadata } from './registry/buildVersionMetadata'
 import { redirectToNpm } from './registry/redirectToNpm'
 import {
+  fanOutVersion,
   getPreviewMeta,
   getPreviewTarballBody,
+  prebuildPlatform,
   prewarmVersion,
-  QUEUE_PREWARM_BUDGET_MS,
 } from './tarball/getPreviewBuild'
 import { metaKey, tarballKey } from './cache/r2Cache'
 import { requireAdmin } from './security/auth'
@@ -370,16 +371,22 @@ export default {
   fetch: app.fetch,
 
   /**
-   * Prebuild queue consumer. Builds a registered version's tarballs into R2 with
-   * a generous budget. If a build OOMs (a hard 1102 that kills the isolate
-   * uncatchably), the message is not acked and the queue retries it; the
-   * per-tarball cache check makes each retry skip what already built, so it
-   * converges. Catchable failures are isolated inside `prewarmVersion`, so the
-   * message still acks (no pointless retries for, say, a 404 upstream).
+   * Prebuild queue consumer. A version task fans out one task per platform
+   * binary; a binary task builds (or integrity-backfills) that one binary, so
+   * each invocation does bounded CPU/memory work. If a build OOMs (a hard 1102
+   * that kills the isolate uncatchably) the message is not acked and the queue
+   * retries just that binary. Catchable failures (e.g. a 404 upstream) are
+   * caught and acked, so they do not retry pointlessly.
    */
   async queue(batch: MessageBatch<PrebuildMessage>, env: Env): Promise<void> {
     for (const message of batch.messages) {
-      await prewarmVersion(env, message.body.version, QUEUE_PREWARM_BUDGET_MS)
+      const { version, name } = message.body
+      try {
+        if (name) await prebuildPlatform(env, name, version)
+        else await fanOutVersion(env, version)
+      } catch (err) {
+        console.warn(`prebuild ${name ?? version}:`, err)
+      }
       message.ack()
     }
   },

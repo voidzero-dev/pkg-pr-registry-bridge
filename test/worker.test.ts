@@ -555,40 +555,47 @@ describe('admin: webhook', () => {
 })
 
 describe('prebuild queue consumer', () => {
-  it('builds a version into R2 and acks the message', async () => {
-    let acked = false
-    let retried = false
-    const batch = {
+  function message(body: Record<string, unknown>, sink: { acked: boolean }) {
+    return {
       queue: 'pkg-pr-registry-bridge-prebuild',
       messages: [
         {
           id: '1',
           timestamp: new Date(0),
           attempts: 1,
-          body: { version: '0.0.0-commit.a832a55' },
+          body,
           ack: () => {
-            acked = true
+            sink.acked = true
           },
-          retry: () => {
-            retried = true
-          },
+          retry: () => {},
         },
       ],
     }
+  }
 
-    await worker.queue!(batch as any, env as any)
+  it('builds a single platform binary into R2 and acks', async () => {
+    const ver = `0.0.0-commit.${PLATFORM_SHA}`
+    const pkg = '@voidzero-dev/vite-plus-darwin-arm64'
+    const sink = { acked: false }
 
-    expect(acked).toBe(true)
-    expect(retried).toBe(false)
-    // The platform binary vite-plus declares (darwin-arm64@PLATFORM_SHA) is now
-    // built and served from R2 without a cold build.
-    const res = await SELF.fetch(
-      `${BASE}/tarballs/@voidzero-dev/vite-plus-darwin-arm64/0.0.0-commit.${PLATFORM_SHA}.tgz`,
-    )
+    // A binary task: one bounded build, the unit the version task fans out to.
+    await worker.queue!(message({ version: ver, name: pkg }, sink) as any, env as any)
+
+    expect(sink.acked).toBe(true)
+    const res = await SELF.fetch(`${BASE}/tarballs/${pkg}/${ver}.tgz`)
     expect(res.status).toBe(200)
     expect(res.headers.get('content-length')).toBe(
       String((await res.arrayBuffer()).byteLength),
     )
+  })
+
+  it('acks a version task (fan-out)', async () => {
+    const sink = { acked: false }
+    await worker.queue!(
+      message({ version: '0.0.0-commit.a832a55' }, sink) as any,
+      env as any,
+    )
+    expect(sink.acked).toBe(true)
   })
 })
 
