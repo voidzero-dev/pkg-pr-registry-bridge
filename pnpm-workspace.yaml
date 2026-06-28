@@ -1,7 +1,10 @@
 # pnpm 11 reads dependency build-script approvals here (the package.json `pnpm`
 # field is no longer honored). esbuild bundles the publish action; workerd runs
-# the Worker for tests/dev; sharp is a transitive dependency.
+# the Worker for tests/dev; sharp is a transitive dependency. better-sqlite3 is a
+# transitive of Void's D1/Drizzle layer, which this bridge does not use, so its
+# native build is skipped.
 allowBuilds:
   esbuild: true
   workerd: true
   sharp: true
+  better-sqlite3: false
