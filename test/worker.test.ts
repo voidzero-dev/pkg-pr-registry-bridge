@@ -447,6 +447,36 @@ describe('admin: purge', () => {
   })
 })
 
+describe('admin: prebuild', () => {
+  it('requires auth', async () => {
+    const res = await SELF.fetch(`${BASE}/-/prebuild`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ref: 'commit.a832a55' }),
+    })
+    expect(res.status).toBe(401)
+  })
+
+  it('enqueues a prebuild for a ref', async () => {
+    const res = await SELF.fetch(`${BASE}/-/prebuild`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({ ref: 'commit.a832a55' }),
+    })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ queued: '0.0.0-commit.a832a55' })
+  })
+
+  it('rejects a non-preview version', async () => {
+    const res = await SELF.fetch(`${BASE}/-/prebuild`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({ version: '0.2.1' }),
+    })
+    expect(res.status).toBe(400)
+  })
+})
+
 async function sign(secret: string, body: string): Promise<string> {
   const key = await crypto.subtle.importKey(
     'raw',

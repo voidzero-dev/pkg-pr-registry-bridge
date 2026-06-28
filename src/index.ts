@@ -165,6 +165,35 @@ app.post('/-/refs', async (c) => {
   return c.json({ added: ref, version: parsed.version, tag: parsed.tag }, 201)
 })
 
+/**
+ * Enqueue a prebuild for a version (no redeploy, no re-registration). Body:
+ * `{ "ref": "commit.<sha>" }` or `{ "version": "0.0.0-commit.<sha>" }`. The
+ * consumer builds the version's tarballs into R2 with integrity off the request
+ * path, retrying durably. Use this to (re)build an already-registered ref, e.g.
+ * to backfill integrity onto binaries built before it was computed.
+ */
+app.post('/-/prebuild', async (c) => {
+  admin(c)
+  const body = (await c.req.json().catch(() => ({}))) as {
+    ref?: string
+    version?: string
+  }
+  let version = (body.version ?? '').trim()
+  if (!version && body.ref) {
+    try {
+      const [parsed] = parseConfiguredPreviewRefs(body.ref.trim())
+      version = parsed.version
+    } catch {
+      throw new HttpError(400, `Invalid ref: ${body.ref}`)
+    }
+  }
+  if (!parsePreviewVersion(version)) {
+    throw new HttpError(400, `Invalid version: ${version || '(empty)'}`)
+  }
+  schedulePrebuild(c, version)
+  return c.json({ queued: version })
+})
+
 /** Unregister a runtime preview ref. Body: `{ "ref": "commit.<sha>" }`. */
 app.delete('/-/refs', async (c) => {
   admin(c)

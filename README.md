@@ -151,6 +151,12 @@ curl -X DELETE -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: applica
 # Purge a generated build from the caches (R2 + edge)
 curl -X POST -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \
   -d '{"package":"vite-plus","version":"0.0.0-commit.a832a55"}' https://.../-/purge
+
+# Enqueue a prebuild for a version (builds its tarballs into R2 with integrity,
+# off the request path, durably retried). Use to (re)build an already-registered
+# ref without re-registering.
+curl -X POST -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \
+  -d '{"ref":"commit.a832a55"}' https://.../-/prebuild
 ```
 
 A registered ref is reflected immediately and built into the packument on the
