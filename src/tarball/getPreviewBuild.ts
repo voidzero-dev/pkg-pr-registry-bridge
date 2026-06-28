@@ -156,9 +156,10 @@ async function buildPlatformTarballToR2(
 // Default soft wall-clock budget for a `ctx.waitUntil` prewarm (its lifetime is
 // short). Date.now() in a Worker only advances on I/O, which is where the build
 // spends its time, so it is a usable bound for the loop (not a precise timer).
-// The queue consumer passes a much larger budget since it can run long and
-// retries durably.
 export const PREWARM_BUDGET_MS = 20_000
+// The queue consumer can run long and retries durably, so it gets a much larger
+// budget to build a whole version's binaries in one pass.
+export const QUEUE_PREWARM_BUDGET_MS = 5 * 60_000
 
 /**
  * Pre-build a version's tarballs into R2 so installs are served from cache.
@@ -176,15 +177,19 @@ export async function prewarmVersion(
   version: string,
   budgetMs: number = PREWARM_BUDGET_MS,
 ): Promise<void> {
-  let vitePlus: PreviewBuild
+  // getPreviewMeta builds + stores the tarball (and meta) on a miss but returns
+  // the cached meta on a hit, so a queue retry after a partial OOM does not
+  // re-download and re-gzip the preview packages. vite-plus's rewritten
+  // package.json gives us the platform-binary set.
+  let vitePlus: PreviewMeta
   try {
-    vitePlus = await buildAndStore(env, 'vite-plus', version)
+    vitePlus = await getPreviewMeta(env, 'vite-plus', version)
   } catch (err) {
     console.warn(`prewarm vite-plus@${version}:`, err)
     return
   }
   try {
-    await buildAndStore(env, '@voidzero-dev/vite-plus-core', version)
+    await getPreviewMeta(env, '@voidzero-dev/vite-plus-core', version)
   } catch (err) {
     console.warn(`prewarm core@${version}:`, err)
   }

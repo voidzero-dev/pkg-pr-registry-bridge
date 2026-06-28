@@ -22,6 +22,7 @@ import {
   getPreviewMeta,
   getPreviewTarballBody,
   prewarmVersion,
+  QUEUE_PREWARM_BUDGET_MS,
 } from './tarball/getPreviewBuild'
 import { metaKey, tarballKey } from './cache/r2Cache'
 import { requireAdmin } from './security/auth'
@@ -349,9 +350,8 @@ export default {
    */
   async queue(batch: MessageBatch<PrebuildMessage>, env: Env): Promise<void> {
     for (const message of batch.messages) {
-      await prewarmVersion(env, message.body.version, 5 * 60_000)
+      await prewarmVersion(env, message.body.version, QUEUE_PREWARM_BUDGET_MS)
       message.ack()
     }
   },
 } satisfies ExportedHandler<Env, PrebuildMessage>
-
