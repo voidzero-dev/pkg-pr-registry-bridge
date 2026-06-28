@@ -4,12 +4,12 @@
  * Replaces the bytes of a single named entry (the rewritten `package.json`)
  * inside a gzipped tar, fixing that entry's header (size + checksum), and passes
  * every other entry through byte-for-byte. Runs as a Web Streams pipeline
- * (`DecompressionStream` -> tar transform -> `CompressionStream`) so the
+ * (`DecompressionStream` -> tar transform -> stored-gzip transform) so the
  * decompressed payload is never held whole in memory.
  *
  * This is what lets the platform-binary tarballs work: their native `.node`
  * payload decompresses to tens of MB, and re-tarring + re-gzipping it as whole
- * buffers exceeds the Worker memory/CPU budget (Cloudflare error 1102). Only the
+ * buffers exceeds the Worker memory budget (Cloudflare error 1102). Only the
  * tiny `package.json` is buffered; the large binary streams straight through.
  */
 
@@ -18,6 +18,8 @@ import { HttpError } from '../httpError'
 // Tar/stream bytes can be backed by any ArrayBuffer-like buffer (stream chunks,
 // subarrays, fresh allocations); use one alias so they compose without friction.
 type Bytes = Uint8Array<ArrayBufferLike>
+
+const textDecoder = new TextDecoder()
 
 const BLOCK = 512
 const NAME_LEN = 100
@@ -37,7 +39,7 @@ function isZeroBlock(block: Bytes): boolean {
 function readCStr(header: Bytes, off: number, len: number): string {
   let end = 0
   while (end < len && header[off + end] !== 0) end++
-  return new TextDecoder().decode(header.subarray(off, off + end))
+  return textDecoder.decode(header.subarray(off, off + end))
 }
 
 function readName(header: Bytes): string {
@@ -124,8 +126,8 @@ function tarRewriteTransform(
   validateName?: (name: string) => void,
 ): TransformStream<Bytes, Bytes> {
   let buf: Bytes = new Uint8Array(0)
-  // 'header' -> at an entry boundary; 'copy'/'skip' -> inside entry data;
-  // 'trailer' -> hit the end-of-archive zero blocks, pass everything through.
+  // 'header' -> at an entry boundary; 'copy' -> inside entry data; 'trailer' ->
+  // hit the end-of-archive zero blocks, pass everything through unchanged.
   let state: 'header' | 'copy' | 'trailer' = 'header'
   let remaining = 0
 

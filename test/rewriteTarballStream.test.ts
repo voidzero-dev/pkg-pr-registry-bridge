@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createTarGzip, parseTarGzip } from 'nanotar'
 import { rewriteTarballEntryStream } from '../src/tarball/rewriteTarballStream'
-
-const PACKAGE_JSON_NAMES = new Set([
-  'package/package.json',
-  './package/package.json',
-])
+import { PACKAGE_JSON_NAMES } from '../src/tarball/buildPreviewTarball'
 
 function streamOf(bytes: Uint8Array): ReadableStream<Uint8Array> {
   return new Response(bytes).body as ReadableStream<Uint8Array>

@@ -10,6 +10,7 @@ import { assertSafeTarballPath } from '../security/validateTarballPath'
 import { rewriteTarballEntryStream } from './rewriteTarballStream'
 import {
   buildPreviewTarball,
+  encodePackageJson,
   extractRewrittenPackageJson,
   PACKAGE_JSON_NAMES,
   type PreviewBuild,
@@ -49,8 +50,7 @@ async function buildPlatformTarballStream(
     } catch {
       throw new HttpError(422, 'Invalid package/package.json in upstream tarball')
     }
-    const rewritten = rewritePackageJson(pkg, name, version, env)
-    return new TextEncoder().encode(`${JSON.stringify(rewritten, null, 2)}\n`)
+    return encodePackageJson(rewritePackageJson(pkg, name, version, env))
   }
 
   return rewriteTarballEntryStream(

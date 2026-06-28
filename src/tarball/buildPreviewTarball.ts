@@ -17,6 +17,13 @@ export const PACKAGE_JSON_NAMES = new Set([
   './package/package.json',
 ])
 
+const textEncoder = new TextEncoder()
+
+/** Serialize a rewritten package.json to the bytes written into the tarball. */
+export function encodePackageJson(pkg: Record<string, any>): Uint8Array {
+  return textEncoder.encode(`${JSON.stringify(pkg, null, 2)}\n`)
+}
+
 /** The cacheable artifacts for a preview version (everything but the bytes). */
 export interface PreviewMeta {
   /** The rewritten package.json, reused to build packument version metadata. */
@@ -90,9 +97,7 @@ export async function buildPreviewTarball(
   const { files, pkgEntry, pkg } = await parsePackageJson(gzippedTarball)
 
   const rewritten = rewritePackageJson(pkg, packageName, version, env)
-  const rewrittenBytes = new TextEncoder().encode(
-    `${JSON.stringify(rewritten, null, 2)}\n`,
-  )
+  const rewrittenBytes = encodePackageJson(rewritten)
 
   const out: TarFileInput[] = []
   for (const file of files) {
