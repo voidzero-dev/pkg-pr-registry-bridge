@@ -36,4 +36,6 @@ outputs:
     description: 'The synthetic version published (0.0.0-commit.<sha>).'
 runs:
   using: 'node20'
-  main: 'dist/index.mjs'
+  # Bundle lives under .github/actions/ (built by `pnpm build:action`); this
+  # action.yml is at the repo root so it can be used as `fengmk2/<repo>@<ref>`.
+  main: '.github/actions/publish-preview/dist/index.mjs'

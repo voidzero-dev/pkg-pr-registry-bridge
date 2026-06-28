@@ -28,7 +28,7 @@ In `voidzero-dev/vite-plus` -> Settings -> Secrets and variables -> Actions, add
 Right after the pkg.pr.new build publishes:
 
 ```yaml
-- uses: fengmk2/pkg-pr-registry-bridge/.github/actions/publish-preview@main
+- uses: fengmk2/pkg-pr-registry-bridge@main
   with:
     sha: ${{ github.event.pull_request.head.sha }}
     admin-token: ${{ secrets.PKG_PR_BRIDGE_ADMIN_TOKEN }}
