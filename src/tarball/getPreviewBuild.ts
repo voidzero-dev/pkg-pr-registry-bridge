@@ -7,7 +7,7 @@ import { metaKey, tarballKey } from '../cache/r2Cache'
 import { tarballCacheControl } from '../cache/headers'
 import { rewritePackageJson } from './rewritePackageJson'
 import { assertSafeTarballPath } from '../security/validateTarballPath'
-import { rewriteTarEntryInPlace } from './rewriteTarballBuffer'
+import { rewriteTarballEntryStream } from './rewriteTarballStream'
 import {
   buildPreviewTarball,
   encodePackageJson,
@@ -16,65 +16,33 @@ import {
   type PreviewBuild,
   type PreviewMeta,
 } from './buildPreviewTarball'
-import { fetchUpstreamTarball } from './fetchUpstreamTarball'
+import {
+  fetchUpstreamTarball,
+  fetchUpstreamTarballStream,
+} from './fetchUpstreamTarball'
+
+// R2 multipart parts must be >=5 MiB and (except the last) equal-sized.
+const PART_SIZE = 10 * 1024 * 1024
 
 /**
- * Decompress a gzipped tar into a single right-sized buffer. The buffer is
- * presized from the gzip ISIZE trailer (decompressed length, valid for the
- * <4GB single-member tarballs npm produces) so there is no doubling from a
- * growing collector. The compressed input goes out of scope on return.
+ * Build the rewritten tarball for a large non-preview package (a platform
+ * binary) as a stream: swap only `package/package.json` and pass the multi-MB
+ * native binary straight through, re-emitting gzip "stored" (uncompressed)
+ * blocks. Nothing is materialized whole, so it stays within the Worker's 128MB
+ * memory limit (buffering the ~tens-of-MB decompressed payload to re-tar/re-gzip
+ * it returns Cloudflare 1102).
  */
-async function decompressToBuffer(gzipped: Uint8Array): Promise<Uint8Array> {
-  const isize = new DataView(
-    gzipped.buffer,
-    gzipped.byteOffset + gzipped.length - 4,
-    4,
-  ).getUint32(0, true)
-
-  const out = new Uint8Array(isize)
-  let pos = 0
-  const reader = new Response(gzipped)
-    .body!.pipeThrough(new DecompressionStream('gzip'))
-    .getReader()
-  try {
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      out.set(value, pos)
-      pos += value.byteLength
-    }
-  } finally {
-    reader.releaseLock()
-  }
-  return pos === isize ? out : out.subarray(0, pos)
-}
-
-/**
- * Build a large non-preview tarball (a platform binary) as a complete buffer.
- *
- * Earlier attempts failed two ways: buffering the decompressed payload AND a
- * re-tarred copy exceeded the 128MB Worker limit (Cloudflare 1102), while
- * streaming the rewrite straight to the client truncated (a strict client
- * gunzip then fails with "unexpected end of file"). This decompresses ONCE into
- * a single buffer, rewrites `package/package.json` IN PLACE (no second copy of
- * the ~48MB binary), then recompresses to a normal-size gzip. Returning a
- * complete buffer means the response carries a Content-Length and is never
- * truncated. Integrity is not pinned for these packages (see `buildMetaLight`).
- */
-async function buildPlatformTarball(
+async function buildPlatformTarballStream(
   env: Env,
   name: string,
   version: string,
-): Promise<Uint8Array> {
+): Promise<ReadableStream<Uint8Array>> {
   const url = toPkgPrNewUrl(env, name, version)
   if (!url) throw new HttpError(400, `Invalid preview version: ${version}`)
 
-  const tar = await decompressToBuffer(
-    await fetchUpstreamTarball(url, maxTarballBytes(env)),
-  )
-
-  rewriteTarEntryInPlace(
-    tar,
+  const upstream = await fetchUpstreamTarballStream(url, maxTarballBytes(env))
+  return rewriteTarballEntryStream(
+    upstream,
     PACKAGE_JSON_NAMES,
     (data) => {
       let pkg: Record<string, any>
@@ -87,20 +55,80 @@ async function buildPlatformTarball(
     },
     assertSafeTarballPath,
   )
+}
 
-  const tarball = new Uint8Array(
-    await new Response(
-      new Response(tar).body!.pipeThrough(new CompressionStream('gzip')),
-    ).arrayBuffer(),
+function mergeChunks(chunks: Uint8Array[], total: number): Uint8Array {
+  if (chunks.length === 1) return chunks[0]
+  const out = new Uint8Array(total)
+  let off = 0
+  for (const c of chunks) {
+    out.set(c, off)
+    off += c.byteLength
+  }
+  return out
+}
+
+/**
+ * Build a platform-binary tarball into R2 via a multipart upload, then leave it
+ * to be served straight from R2.
+ *
+ * This is the only shape that satisfies both constraints: the build STREAMS
+ * (the stored-gzip consumer keeps pace with the decompressor, so the ~tens-of-MB
+ * payload is never held whole, which a buffered re-tar/re-gzip would and OOM at
+ * Cloudflare 1102), and the upload is chunked into bounded ~10MB parts (so it
+ * never buffers the whole object the way a single put of an unsized stream
+ * would). Serving the finished object from R2 is a plain byte passthrough with a
+ * Content-Length, so it cannot be truncated the way a Worker-generated transform
+ * response can. The work is awaited inside the handler so the Worker pumps it to
+ * completion. Integrity is not pinned for these packages (see `buildMetaLight`).
+ */
+async function buildPlatformTarballToR2(
+  env: Env,
+  name: string,
+  version: string,
+): Promise<void> {
+  const stream = await buildPlatformTarballStream(env, name, version)
+  const upload = await env.TARBALL_CACHE.createMultipartUpload(
+    tarballKey(name, version),
+    {
+      httpMetadata: {
+        contentType: 'application/gzip',
+        cacheControl: tarballCacheControl(),
+      },
+    },
   )
 
-  await env.TARBALL_CACHE.put(tarballKey(name, version), tarball, {
-    httpMetadata: {
-      contentType: 'application/gzip',
-      cacheControl: tarballCacheControl(),
-    },
-  })
-  return tarball
+  try {
+    const parts: R2UploadedPart[] = []
+    let pending: Uint8Array[] = []
+    let pendingLen = 0
+    const reader = stream.getReader()
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      pending.push(value)
+      pendingLen += value.byteLength
+      while (pendingLen >= PART_SIZE) {
+        const merged = mergeChunks(pending, pendingLen)
+        parts.push(
+          await upload.uploadPart(parts.length + 1, merged.subarray(0, PART_SIZE)),
+        )
+        const rest = merged.slice(PART_SIZE) // copy so the 10MB buffer is freed
+        pending = rest.byteLength ? [rest] : []
+        pendingLen = rest.byteLength
+      }
+    }
+    // The final part may be smaller than PART_SIZE.
+    if (pendingLen > 0 || parts.length === 0) {
+      parts.push(
+        await upload.uploadPart(parts.length + 1, mergeChunks(pending, pendingLen)),
+      )
+    }
+    await upload.complete(parts)
+  } catch (err) {
+    await upload.abort()
+    throw err
+  }
 }
 
 /**
@@ -222,20 +250,23 @@ export async function getPreviewTarballBody(
   name: string,
   version: string,
 ): Promise<PreviewTarballBody> {
-  // Serve a cached build straight from R2: a plain byte passthrough with a
-  // Content-Length, which streams large objects reliably.
-  const cached = await env.TARBALL_CACHE.get(tarballKey(name, version))
-  if (cached) return { body: cached.body, contentLength: cached.size }
-
-  // Platform binaries: build as a complete buffer (rewrite package.json in
-  // place, no second copy of the binary) and return it whole, so the response
-  // carries a Content-Length and is never truncated.
+  // Platform binaries: stream the build into R2 first (bounded memory), then
+  // fall through to serving it from R2 (a passthrough with a Content-Length
+  // that cannot be truncated). Streaming the transform straight to the client
+  // truncates, and buffering it OOMs (Cloudflare 1102).
   if (!isPreviewPackage(name)) {
-    const tarball = await buildPlatformTarball(env, name, version)
-    return { body: tarball, contentLength: tarball.byteLength }
+    let cached = await env.TARBALL_CACHE.get(tarballKey(name, version))
+    if (!cached) {
+      await buildPlatformTarballToR2(env, name, version)
+      cached = await env.TARBALL_CACHE.get(tarballKey(name, version))
+      if (!cached) throw new HttpError(500, 'Failed to persist generated tarball')
+    }
+    return { body: cached.body, contentLength: cached.size }
   }
 
   // Small preview packages keep the buffered+cached+integrity path.
+  const cached = await env.TARBALL_CACHE.get(tarballKey(name, version))
+  if (cached) return { body: cached.body, contentLength: cached.size }
   const tarball = (await buildAndStore(env, name, version)).tarball
   return { body: tarball, contentLength: tarball.byteLength }
 }
