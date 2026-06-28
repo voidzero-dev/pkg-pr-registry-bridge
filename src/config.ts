@@ -31,10 +31,9 @@ export interface Env {
    * Durable store for preview tarballs and their metadata. Artifacts are built
    * and hashed in CI (the publish action) and uploaded here; the Worker only
    * serves them, so it never decompresses or hashes a large payload itself.
+   * Also holds the runtime-registered refs index (see getConfiguredRefs).
    */
   TARBALL_CACHE: R2Bucket
-  /** Dynamic preview-ref registry (refs added at runtime, no redeploy). */
-  PREVIEW_REFS?: KVNamespace
   /** Token for GitHub PR/commit existence checks (secret). */
   GITHUB_TOKEN?: string
   /** Bearer token guarding the admin endpoints (`/-/refs`, `/-/purge`, etc.). */

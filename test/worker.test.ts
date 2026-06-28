@@ -385,7 +385,7 @@ describe('admin: refs', () => {
     expect(body.refs.some((r) => r.ref === 'commit.a832a55')).toBe(true)
   })
 
-  it('registers a ref in KV and injects it into the packument', async () => {
+  it('registers a ref and injects it into the packument', async () => {
     const add = await SELF.fetch(`${BASE}/-/refs`, {
       method: 'POST',
       headers: { ...AUTH, 'content-type': 'application/json' },

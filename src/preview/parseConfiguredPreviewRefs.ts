@@ -1,6 +1,6 @@
 /**
- * Parses the configured preview refs (from `VITE_PLUS_PREVIEW_REFS` or KV) that
- * should be injected into packuments.
+ * Parses the configured preview refs (from `VITE_PLUS_PREVIEW_REFS` or the
+ * runtime R2 refs index) that should be injected into packuments.
  *
  * Only immutable commit refs are supported:
  *   commit.<sha>

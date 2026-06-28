@@ -126,7 +126,8 @@ The tarball endpoint, by contrast, accepts any valid preview version without
 configuration; only packument-based discovery needs the list.
 
 The static `VITE_PLUS_PREVIEW_REFS` var is one source; refs can also be added at
-runtime via the admin endpoint below (stored in KV), with no redeploy. Both
+runtime via the admin endpoint below (stored in a single R2 index object read
+with a cheap `get`, not a rate-limited KV `list`), with no redeploy. Both
 sources are merged.
 
 ## Admin endpoints
@@ -136,7 +137,7 @@ with `wrangler secret put`); without it configured the write endpoints return
 503. `GET /-/refs` is a public read.
 
 ```bash
-# List configured refs (static env + runtime KV) - no auth required
+# List configured refs (static env + runtime R2 index) - no auth required
 curl https://.../-/refs
 
 # Register a ref at runtime (no redeploy). If GITHUB_TOKEN is set, the ref is
@@ -189,8 +190,7 @@ Set via `wrangler.toml` `[vars]` (tokens via `wrangler secret`):
 
 Bindings/secrets:
 
-- `TARBALL_CACHE` (R2) - generated tarballs + rewritten metadata (incl. integrity). A 90-day expiry lifecycle rule bounds storage (`wrangler r2 bucket lifecycle add ... --expire-days 90`).
-- `PREVIEW_REFS` (KV) - runtime-registered refs.
+- `TARBALL_CACHE` (R2) - generated tarballs, rewritten metadata (incl. integrity), and the runtime-registered refs index. A 90-day expiry lifecycle rule bounds storage (`wrangler r2 bucket lifecycle add ... --expire-days 90`).
 - `ADMIN_TOKEN` (secret) - guards the admin endpoints.
 - `GITHUB_TOKEN` (secret, optional) - enables commit existence checks on `/-/refs`.
 
@@ -225,6 +225,7 @@ asserts the alias/override resolves to the synthetic version). Use
 Deployed: default-registry bridge with npm redirect fallback, `commit.<sha>`
 preview injection, R2-served tarballs with SHA-512/SHA-1 integrity, CI-side
 build/hash/upload via the [publish action](#publishing-from-ci) (the Worker
-never decompresses or hashes), KV-backed dynamic refs, authenticated admin
+never decompresses or hashes), R2-backed dynamic refs (a single index object, no
+rate-limited KV list), authenticated admin
 endpoints (`/-/refs`, `/-/purge`, `/-/publish`, `/-/tarball`), and optional
 GitHub existence checks, plus a bun end-to-end check.

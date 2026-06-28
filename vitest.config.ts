@@ -12,7 +12,6 @@ export default defineConfig({
           VITE_PLUS_PREVIEW_REFS: 'commit.a832a55',
           ADMIN_TOKEN: 'test-admin-token',
         },
-        kvNamespaces: ['PREVIEW_REFS'],
       },
     }),
   ],

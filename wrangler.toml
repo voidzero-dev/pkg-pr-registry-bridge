@@ -37,11 +37,6 @@ MAX_TARBALL_BYTES = "67108864"
 binding = "TARBALL_CACHE"
 bucket_name = "pkg-pr-registry-bridge-tarballs"
 
-# Dynamic preview-ref registry: refs added via POST /-/refs (no redeploy).
-[[kv_namespaces]]
-binding = "PREVIEW_REFS"
-id = "e8473fe4e0674f27a62399028a6604fd"
-
 # Secrets (set with `wrangler secret put`, not here):
 #   ADMIN_TOKEN  - bearer token guarding the admin endpoints (/-/refs, /-/purge,
 #                  /-/publish, /-/tarball)
