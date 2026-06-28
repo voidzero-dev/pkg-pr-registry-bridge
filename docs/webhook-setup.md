@@ -83,3 +83,7 @@ If you control the publish workflow, call the admin endpoint right after
   stale ones with `POST /-/purge` if the packument grows too large.
 - Enable strict ref validation by also setting `GITHUB_TOKEN` (read access to the
   repo): `POST /-/refs` then rejects refs that do not exist in the repo.
+- Registering only exposes the ref; the platform-binary tarballs are still built
+  on first install (heavy, and occasionally needs a retry for the largest). To
+  pre-build a commit so installs are served from cache on the first try, run
+  `PKG_PR_BRIDGE_ADMIN_TOKEN=… pnpm warm <sha>` (registers + warms in one step).

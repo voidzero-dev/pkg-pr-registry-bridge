@@ -152,6 +152,22 @@ A registered ref is reflected immediately and built into the packument on the
 next request (and into R2 on first fetch). This is the no-redeploy path for
 exposing new pkg.pr.new builds.
 
+### Register and pre-build a commit (`pnpm warm <sha>`)
+
+To make a specific commit install-reliable on the first try, register it **and**
+pre-build all its tarballs (including the large platform binaries, whose cold
+build is heavy) into R2 in one step:
+
+```bash
+PKG_PR_BRIDGE_ADMIN_TOKEN=… pnpm warm <commit-sha>      # or commit.<sha>
+```
+
+This registers the ref via `POST /-/refs`, then warms `vite-plus`,
+`@voidzero-dev/vite-plus-core`, and every platform binary in vite-plus's
+`optionalDependencies` (with retries). After it finishes, installs of that commit
+are served entirely from the R2 cache. With no arguments, `pnpm warm` warms the
+refs configured in `wrangler.toml` (this also runs as part of `pnpm run deploy`).
+
 ### Auto-register via webhook
 
 `POST /-/webhook` is a GitHub webhook receiver (HMAC-verified with
