@@ -51,6 +51,7 @@ async function serveTarball(
   env: Env,
   name: string,
   version: string,
+  requestUrl: string,
 ): Promise<Response> {
   if (!isWorkspacePackage(name, env)) {
     throw new HttpError(404, `Unknown preview package: ${name}`)
@@ -58,15 +59,22 @@ async function serveTarball(
   if (!parsePreviewVersion(version)) {
     throw new HttpError(400, `Invalid preview version: ${version}`)
   }
-  const { body, contentLength } = await getPreviewTarballBody(env, name, version)
+  const result = await getPreviewTarballBody(env, name, version)
+  if (result.kind === 'redirect') {
+    // Just built into R2; redirect to the same URL so the cached path serves it.
+    return new Response(null, {
+      status: 302,
+      headers: { location: requestUrl, 'cache-control': 'no-store' },
+    })
+  }
   const headers: Record<string, string> = {
     'content-type': 'application/gzip',
     'cache-control': tarballCacheControl(),
   }
-  if (contentLength !== undefined) {
-    headers['content-length'] = String(contentLength)
+  if (result.contentLength !== undefined) {
+    headers['content-length'] = String(result.contentLength)
   }
-  return new Response(body, { headers })
+  return new Response(result.body, { headers })
 }
 
 /**
@@ -78,7 +86,7 @@ app.get('/tarballs/*', async (c) => {
   if (!parsed) throw new HttpError(404, 'Not found')
   // `await` so a thrown HttpError unwinds inside this handler's frame and is
   // routed to onError, rather than rejecting the returned promise unhandled.
-  return await serveTarball(c.env, parsed.name, parsed.version)
+  return await serveTarball(c.env, parsed.name, parsed.version, c.req.url)
 })
 
 /** List the configured preview refs (static env + runtime KV). Public read. */
@@ -242,7 +250,7 @@ app.get('*', async (c) => {
     isWorkspacePackage(npmTarball.name, c.env) &&
     parsePreviewVersion(npmTarball.version)
   ) {
-    return await serveTarball(c.env, npmTarball.name, npmTarball.version)
+    return await serveTarball(c.env, npmTarball.name, npmTarball.version, c.req.url)
   }
 
   const pkgReq = parsePackagePath(pathname)

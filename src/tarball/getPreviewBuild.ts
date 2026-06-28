@@ -238,35 +238,35 @@ export async function getPreviewMeta(
  * The generated tarball bytes for a preview version, served from R2 when
  * present.
  */
-export interface PreviewTarballBody {
-  body: ReadableStream<Uint8Array> | Uint8Array
-  /** Set when the size is known up front, so the response carries a
-   * Content-Length and clients can detect a truncated transfer. */
-  contentLength?: number
-}
+export type PreviewTarball =
+  | { kind: 'body'; body: ReadableStream<Uint8Array> | Uint8Array; contentLength?: number }
+  /** The platform binary was just built into R2; the caller should redirect to
+   * the same URL so the (cheap) cached path serves it. Building AND serving the
+   * ~48MB payload in one request exceeds the Worker limit (Cloudflare 1102), so
+   * the work is split across two requests. */
+  | { kind: 'redirect' }
 
 export async function getPreviewTarballBody(
   env: Env,
   name: string,
   version: string,
-): Promise<PreviewTarballBody> {
-  // Platform binaries: stream the build into R2 first (bounded memory), then
-  // fall through to serving it from R2 (a passthrough with a Content-Length
-  // that cannot be truncated). Streaming the transform straight to the client
-  // truncates, and buffering it OOMs (Cloudflare 1102).
+): Promise<PreviewTarball> {
+  // Platform binaries: serve from R2 if present (a passthrough with a
+  // Content-Length that cannot be truncated), else build into R2 and redirect.
   if (!isPreviewPackage(name)) {
-    let cached = await env.TARBALL_CACHE.get(tarballKey(name, version))
-    if (!cached) {
-      await buildPlatformTarballToR2(env, name, version)
-      cached = await env.TARBALL_CACHE.get(tarballKey(name, version))
-      if (!cached) throw new HttpError(500, 'Failed to persist generated tarball')
+    const cached = await env.TARBALL_CACHE.get(tarballKey(name, version))
+    if (cached) {
+      return { kind: 'body', body: cached.body, contentLength: cached.size }
     }
-    return { body: cached.body, contentLength: cached.size }
+    await buildPlatformTarballToR2(env, name, version)
+    return { kind: 'redirect' }
   }
 
   // Small preview packages keep the buffered+cached+integrity path.
   const cached = await env.TARBALL_CACHE.get(tarballKey(name, version))
-  if (cached) return { body: cached.body, contentLength: cached.size }
+  if (cached) {
+    return { kind: 'body', body: cached.body, contentLength: cached.size }
+  }
   const tarball = (await buildAndStore(env, name, version)).tarball
-  return { body: tarball, contentLength: tarball.byteLength }
+  return { kind: 'body', body: tarball, contentLength: tarball.byteLength }
 }
