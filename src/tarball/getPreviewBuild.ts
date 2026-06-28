@@ -7,7 +7,7 @@ import { metaKey, tarballKey } from '../cache/r2Cache'
 import { tarballCacheControl } from '../cache/headers'
 import { rewritePackageJson } from './rewritePackageJson'
 import { assertSafeTarballPath } from '../security/validateTarballPath'
-import { rewriteTarballEntryStream } from './rewriteTarballStream'
+import { rewriteTarEntryInPlace } from './rewriteTarballBuffer'
 import {
   buildPreviewTarball,
   encodePackageJson,
@@ -16,92 +16,91 @@ import {
   type PreviewBuild,
   type PreviewMeta,
 } from './buildPreviewTarball'
-import {
-  fetchUpstreamTarball,
-  fetchUpstreamTarballStream,
-} from './fetchUpstreamTarball'
+import { fetchUpstreamTarball } from './fetchUpstreamTarball'
 
 /**
- * Build the rewritten tarball for a large non-preview package (a platform
- * binary) as a stream: swap only `package/package.json` and pass the multi-MB
- * native binary straight through, re-emitting gzip "stored" (uncompressed)
- * blocks. Nothing is materialized whole, so it stays within the Worker's 128MB
- * memory limit (buffering the ~tens-of-MB decompressed payload to re-tar/re-gzip
- * it returns Cloudflare 1102). A fresh upstream fetch is started per call so the
- * stream can be (re)built for the two-pass store below.
+ * Decompress a gzipped tar into a single right-sized buffer. The buffer is
+ * presized from the gzip ISIZE trailer (decompressed length, valid for the
+ * <4GB single-member tarballs npm produces) so there is no doubling from a
+ * growing collector. The compressed input goes out of scope on return.
  */
-async function buildPlatformTarballStream(
-  env: Env,
-  name: string,
-  version: string,
-): Promise<ReadableStream<Uint8Array>> {
-  const url = toPkgPrNewUrl(env, name, version)
-  if (!url) throw new HttpError(400, `Invalid preview version: ${version}`)
+async function decompressToBuffer(gzipped: Uint8Array): Promise<Uint8Array> {
+  const isize = new DataView(
+    gzipped.buffer,
+    gzipped.byteOffset + gzipped.length - 4,
+    4,
+  ).getUint32(0, true)
 
-  const upstream = await fetchUpstreamTarballStream(url, maxTarballBytes(env))
-  const rewrite = (data: Uint8Array): Uint8Array => {
-    let pkg: Record<string, any>
-    try {
-      pkg = JSON.parse(new TextDecoder().decode(data))
-    } catch {
-      throw new HttpError(422, 'Invalid package/package.json in upstream tarball')
-    }
-    return encodePackageJson(rewritePackageJson(pkg, name, version, env))
-  }
-
-  return rewriteTarballEntryStream(
-    upstream,
-    PACKAGE_JSON_NAMES,
-    rewrite,
-    assertSafeTarballPath,
-  )
-}
-
-/**
- * Build a platform-binary tarball and persist it to R2 without ever holding it
- * whole. Streaming the rewrite to the client directly turned out to truncate
- * (a Worker response stream produced by post-handler transform work gets cut,
- * and the client's strict gunzip then fails with "unexpected end of file"). So
- * instead we build it INTO R2 while the handler is still running and awaiting
- * (the Worker actively pumps it to completion), then serve it from R2, which is
- * a plain byte passthrough that streams large objects reliably with a
- * Content-Length.
- *
- * R2 needs a known length to store a stream, so this makes two streaming passes:
- * one to measure the exact output length, one to write it through a
- * `FixedLengthStream`. Both passes are bounded (the stored-gzip consumer keeps
- * pace with the decompressor, so the payload never accumulates). Deterministic
- * stored-gzip output makes the two passes' lengths identical.
- */
-async function buildAndStorePlatformTarball(
-  env: Env,
-  name: string,
-  version: string,
-): Promise<void> {
-  // Pass 1: measure the exact output length (stream and discard).
-  let length = 0
-  const reader = (await buildPlatformTarballStream(env, name, version)).getReader()
+  const out = new Uint8Array(isize)
+  let pos = 0
+  const reader = new Response(gzipped)
+    .body!.pipeThrough(new DecompressionStream('gzip'))
+    .getReader()
   try {
     for (;;) {
       const { done, value } = await reader.read()
       if (done) break
-      length += value.byteLength
+      out.set(value, pos)
+      pos += value.byteLength
     }
   } finally {
     reader.releaseLock()
   }
+  return pos === isize ? out : out.subarray(0, pos)
+}
 
-  // Pass 2: stream the same bytes into R2 with the now-known length.
-  const fixed = new FixedLengthStream(length)
-  const source = await buildPlatformTarballStream(env, name, version)
-  const pumped = source.pipeTo(fixed.writable)
-  await env.TARBALL_CACHE.put(tarballKey(name, version), fixed.readable, {
+/**
+ * Build a large non-preview tarball (a platform binary) as a complete buffer.
+ *
+ * Earlier attempts failed two ways: buffering the decompressed payload AND a
+ * re-tarred copy exceeded the 128MB Worker limit (Cloudflare 1102), while
+ * streaming the rewrite straight to the client truncated (a strict client
+ * gunzip then fails with "unexpected end of file"). This decompresses ONCE into
+ * a single buffer, rewrites `package/package.json` IN PLACE (no second copy of
+ * the ~48MB binary), then recompresses to a normal-size gzip. Returning a
+ * complete buffer means the response carries a Content-Length and is never
+ * truncated. Integrity is not pinned for these packages (see `buildMetaLight`).
+ */
+async function buildPlatformTarball(
+  env: Env,
+  name: string,
+  version: string,
+): Promise<Uint8Array> {
+  const url = toPkgPrNewUrl(env, name, version)
+  if (!url) throw new HttpError(400, `Invalid preview version: ${version}`)
+
+  const tar = await decompressToBuffer(
+    await fetchUpstreamTarball(url, maxTarballBytes(env)),
+  )
+
+  rewriteTarEntryInPlace(
+    tar,
+    PACKAGE_JSON_NAMES,
+    (data) => {
+      let pkg: Record<string, any>
+      try {
+        pkg = JSON.parse(new TextDecoder().decode(data))
+      } catch {
+        throw new HttpError(422, 'Invalid package/package.json in upstream tarball')
+      }
+      return encodePackageJson(rewritePackageJson(pkg, name, version, env))
+    },
+    assertSafeTarballPath,
+  )
+
+  const tarball = new Uint8Array(
+    await new Response(
+      new Response(tar).body!.pipeThrough(new CompressionStream('gzip')),
+    ).arrayBuffer(),
+  )
+
+  await env.TARBALL_CACHE.put(tarballKey(name, version), tarball, {
     httpMetadata: {
       contentType: 'application/gzip',
       cacheControl: tarballCacheControl(),
     },
   })
-  await pumped
+  return tarball
 }
 
 /**
@@ -223,22 +222,20 @@ export async function getPreviewTarballBody(
   name: string,
   version: string,
 ): Promise<PreviewTarballBody> {
-  let cached = await env.TARBALL_CACHE.get(tarballKey(name, version))
-
-  // Large platform binaries decompress to tens of MB; buffering them to re-tar
-  // or re-gzip exceeds the Worker memory budget (Cloudflare 1102), and streaming
-  // the transform straight to the client truncates. Build them into R2 first
-  // (see buildAndStorePlatformTarball), then serve from R2 below.
-  if (!cached && !isPreviewPackage(name)) {
-    await buildAndStorePlatformTarball(env, name, version)
-    cached = await env.TARBALL_CACHE.get(tarballKey(name, version))
-    if (!cached) throw new HttpError(500, 'Failed to persist generated tarball')
-  }
-
   // Serve a cached build straight from R2: a plain byte passthrough with a
   // Content-Length, which streams large objects reliably.
+  const cached = await env.TARBALL_CACHE.get(tarballKey(name, version))
   if (cached) return { body: cached.body, contentLength: cached.size }
 
+  // Platform binaries: build as a complete buffer (rewrite package.json in
+  // place, no second copy of the binary) and return it whole, so the response
+  // carries a Content-Length and is never truncated.
+  if (!isPreviewPackage(name)) {
+    const tarball = await buildPlatformTarball(env, name, version)
+    return { body: tarball, contentLength: tarball.byteLength }
+  }
+
   // Small preview packages keep the buffered+cached+integrity path.
-  return { body: (await buildAndStore(env, name, version)).tarball }
+  const tarball = (await buildAndStore(env, name, version)).tarball
+  return { body: tarball, contentLength: tarball.byteLength }
 }
