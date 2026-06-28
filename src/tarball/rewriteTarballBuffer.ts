@@ -18,6 +18,8 @@ const SIZE_OFF = 124
 const SIZE_LEN = 12
 const CHKSUM_OFF = 148
 const CHKSUM_LEN = 8
+// The checksum field is 6 octal digits, then NUL, then space (8 bytes total).
+const CHKSUM_DIGITS = 6
 const MAGIC_OFF = 257
 const PREFIX_OFF = 345
 const PREFIX_LEN = 155
@@ -74,10 +76,10 @@ function writeHeader(tar: Uint8Array, off: number, newSize: number): void {
   for (let i = 0; i < CHKSUM_LEN; i++) tar[off + CHKSUM_OFF + i] = 0x20
   let sum = 0
   for (let i = 0; i < BLOCK; i++) sum += tar[off + i]
-  const chk = sum.toString(8).padStart(6, '0')
-  for (let i = 0; i < 6; i++) tar[off + CHKSUM_OFF + i] = chk.charCodeAt(i)
-  tar[off + CHKSUM_OFF + 6] = 0
-  tar[off + CHKSUM_OFF + 7] = 0x20
+  const chk = sum.toString(8).padStart(CHKSUM_DIGITS, '0')
+  for (let i = 0; i < CHKSUM_DIGITS; i++) tar[off + CHKSUM_OFF + i] = chk.charCodeAt(i)
+  tar[off + CHKSUM_OFF + CHKSUM_DIGITS] = 0
+  tar[off + CHKSUM_OFF + CHKSUM_DIGITS + 1] = 0x20
 }
 
 /**

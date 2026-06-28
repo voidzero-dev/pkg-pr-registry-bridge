@@ -1,7 +1,7 @@
 import type { Env } from '../config'
 import { maxTarballBytes } from '../config'
 import { HttpError } from '../httpError'
-import { isPreviewPackage } from '../preview/packages'
+import { isPreviewPackage, isWorkspacePackage } from '../preview/packages'
 import { toPkgPrNewUrl } from '../preview/toPkgPrNewUrl'
 import { metaKey, tarballKey } from '../cache/r2Cache'
 import { tarballCacheControl } from '../cache/headers'
@@ -64,7 +64,12 @@ async function decompressToBuffer(gzipped: Uint8Array): Promise<Uint8Array> {
   } finally {
     reader.releaseLock()
   }
-  return pos === isize ? out : out.subarray(0, pos)
+  if (pos !== isize) {
+    // The gzip ISIZE trailer disagreed with what we decompressed: a truncated
+    // or otherwise corrupt upstream. Fail loudly rather than serve a partial.
+    throw new HttpError(502, 'Upstream tarball decompressed to an unexpected size')
+  }
+  return out
 }
 
 /**
@@ -178,9 +183,12 @@ export async function prewarmVersion(env: Env, version: string): Promise<void> {
     console.warn(`prewarm core@${version}:`, err)
   }
 
+  // The platform binaries are the workspace packages among vite-plus's
+  // optionalDependencies that are not the preview packages themselves, derived
+  // from the WORKSPACE_PACKAGES allowlist so adding one needs no code change.
   const platforms = Object.keys(
     (vitePlus.packageJson.optionalDependencies as Record<string, string>) ?? {},
-  ).filter((n) => n.startsWith('@voidzero-dev/vite-plus-'))
+  ).filter((n) => isWorkspacePackage(n, env) && !isPreviewPackage(n))
 
   const start = Date.now()
   for (const pkg of platforms) {
