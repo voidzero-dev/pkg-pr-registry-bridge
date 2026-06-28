@@ -140,8 +140,7 @@ return 503. `GET /-/refs` is a public read.
 # List configured refs (static env + runtime R2 index) - no auth required
 curl https://.../-/refs
 
-# Register a ref at runtime (no redeploy). If GITHUB_TOKEN is set, the ref is
-# verified to exist in voidzero-dev/vite-plus first.
+# Register a ref at runtime (no redeploy).
 curl -X POST -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \
   -d '{"ref":"commit.a832a55"}' https://.../-/refs
 
@@ -194,7 +193,6 @@ Bindings/secrets:
 
 - `STORAGE` (R2) - generated tarballs, rewritten metadata (incl. integrity), and the runtime-registered refs index. Auto-provisioned by Void on deploy (no manual bucket creation); the binding is declared in `void.json` (`inference.bindings.storage`). The runtime refs index self-expires after 90 days (in-code TTL).
 - `ADMIN_TOKEN` (secret) - guards the admin endpoints. Set with `void secret put ADMIN_TOKEN`.
-- `GITHUB_TOKEN` (secret, optional) - enables commit existence checks on `/-/refs`. Set with `void secret put GITHUB_TOKEN`.
 
 ## Develop
 
@@ -210,8 +208,7 @@ pnpm test          # vitest, runs the worker in workerd (Miniflare)
 pnpm dev           # `vite dev` (local worker via Miniflare, http://localhost:5173)
 ```
 
-For local admin/secret testing, put `ADMIN_TOKEN=…` (and optionally
-`GITHUB_TOKEN=…`) in `.env.local` (gitignored).
+For local admin testing, put `ADMIN_TOKEN=…` in `.env.local` (gitignored).
 
 ## Deploy
 
@@ -223,7 +220,6 @@ needed).
 # One-time: authenticate and set the admin secret on the project.
 void auth login
 void secret put ADMIN_TOKEN              # guards the admin write endpoints
-void secret put GITHUB_TOKEN             # optional: ref existence checks
 
 # Deploy, warm the caches, and run the end-to-end bun install check.
 # Use `pnpm run deploy` (not `pnpm deploy`, which is pnpm's built-in command).

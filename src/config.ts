@@ -34,8 +34,6 @@ export interface Env {
    * Also holds the runtime-registered refs index (see getConfiguredRefs).
    */
   STORAGE: R2Bucket
-  /** Token for GitHub PR/commit existence checks (secret). */
-  GITHUB_TOKEN?: string
   /** Bearer token guarding the admin endpoints (`/-/refs`, `/-/purge`, etc.). */
   ADMIN_TOKEN?: string
 }

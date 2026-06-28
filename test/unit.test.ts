@@ -1,5 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { verifyRefExists } from '../src/github/verifyRef'
+import { describe, expect, it } from 'vitest'
 import {
   isPreviewVersion,
   parsePreviewVersion,
@@ -352,40 +351,5 @@ describe('computeDigests', () => {
     expect(d.integrity).toMatch(/^sha512-[A-Za-z0-9+/]+=*$/)
     const again = await computeDigests(data)
     expect(again.integrity).toBe(d.integrity)
-  })
-})
-
-describe('verifyRefExists', () => {
-  afterEach(() => vi.unstubAllGlobals())
-
-  it('hits the commits endpoint and maps 200/404', async () => {
-    const calls: string[] = []
-    vi.stubGlobal('fetch', (url: string) => {
-      calls.push(url)
-      const status = url.endsWith('/commits/abcdef0') ? 200 : 404
-      return Promise.resolve(new Response('', { status }))
-    })
-    const ghEnv = { PREVIEW_OWNER: 'voidzero-dev', PREVIEW_REPO: 'vite-plus' } as Env
-
-    expect(
-      await verifyRefExists(ghEnv, {
-        type: 'commit',
-        ref: 'abcdef0',
-        version: '0.0.0-commit.abcdef0',
-        tag: 'commit-abcdef0',
-      }),
-    ).toBe(true)
-    expect(calls[0]).toBe(
-      'https://api.github.com/repos/voidzero-dev/vite-plus/commits/abcdef0',
-    )
-
-    expect(
-      await verifyRefExists(ghEnv, {
-        type: 'commit',
-        ref: 'deadbee',
-        version: '0.0.0-commit.deadbee',
-        tag: 'commit-deadbee',
-      }),
-    ).toBe(false)
   })
 })
