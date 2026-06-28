@@ -178,6 +178,62 @@ async function buildPlatformTarballToR2(
   }
 }
 
+/**
+ * Compute a tarball's SHA-512 integrity by streaming the cached R2 object
+ * through the hash (bounded memory; never holds the tens-of-MB payload).
+ */
+async function integrityFromCachedTarball(
+  env: Env,
+  name: string,
+  version: string,
+): Promise<string | null> {
+  const obj = await env.TARBALL_CACHE.get(tarballKey(name, version))
+  if (!obj) return null
+  const hash = sha512.create()
+  const reader = obj.body.getReader()
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      hash.update(value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  return `sha512-${toBase64(hash.digest().buffer as ArrayBuffer)}`
+}
+
+/**
+ * Backfill integrity for a platform binary whose tarball is cached but whose
+ * meta predates integrity. Called from prewarmVersion, so the multi-MB hash runs
+ * off the request path and one-at-a-time (the packument path injects refs
+ * concurrently, so hashing there piled up and OOM'd).
+ */
+async function backfillIntegrity(
+  env: Env,
+  name: string,
+  version: string,
+): Promise<void> {
+  const cached = await env.TARBALL_CACHE.get(metaKey(name, version))
+  if (!cached) return
+  const stored = await cached.json<Record<string, any>>()
+  const meta: PreviewMeta =
+    stored && typeof stored === 'object' && 'packageJson' in stored
+      ? (stored as PreviewMeta)
+      : { packageJson: stored, shasum: '', integrity: '' }
+  if (meta.integrity) return
+
+  const integrity = await integrityFromCachedTarball(env, name, version)
+  if (!integrity) return
+  meta.integrity = integrity
+  await env.TARBALL_CACHE.put(metaKey(name, version), JSON.stringify(meta), {
+    httpMetadata: {
+      contentType: 'application/json',
+      cacheControl: tarballCacheControl(),
+    },
+  })
+}
+
 // Default soft wall-clock budget for a `ctx.waitUntil` prewarm (its lifetime is
 // short). Date.now() in a Worker only advances on I/O, which is where the build
 // spends its time, so it is a usable bound for the loop (not a precise timer).
@@ -234,6 +290,7 @@ export async function prewarmVersion(
     try {
       const existing = await env.TARBALL_CACHE.head(tarballKey(pkg, depVersion))
       if (!existing) await buildPlatformTarballToR2(env, pkg, depVersion)
+      else await backfillIntegrity(env, pkg, depVersion)
     } catch (err) {
       console.warn(`prewarm ${pkg}@${depVersion}:`, err)
     }
@@ -313,32 +370,6 @@ async function buildMetaLight(
 }
 
 /**
- * Compute a tarball's SHA-512 integrity by streaming the cached R2 object
- * through the hash (bounded memory; never holds the tens-of-MB payload). Used to
- * backfill integrity for platform binaries cached before it was stored.
- */
-async function integrityFromCachedTarball(
-  env: Env,
-  name: string,
-  version: string,
-): Promise<string | null> {
-  const obj = await env.TARBALL_CACHE.get(tarballKey(name, version))
-  if (!obj) return null
-  const hash = sha512.create()
-  const reader = obj.body.getReader()
-  try {
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      hash.update(value)
-    }
-  } finally {
-    reader.releaseLock()
-  }
-  return `sha512-${toBase64(hash.digest().buffer as ArrayBuffer)}`
-}
-
-/**
  * The cached metadata (rewritten package.json + integrity) for a preview
  * version, served from R2 when present. This is the cheap artifact the
  * packument endpoint needs (no gzip) once cached.
@@ -352,26 +383,10 @@ export async function getPreviewMeta(
   if (cached) {
     const stored = await cached.json<Record<string, any>>()
     // Tolerate the pre-integrity meta format (a bare package.json object).
-    const meta: PreviewMeta =
-      stored && typeof stored === 'object' && 'packageJson' in stored
-        ? (stored as PreviewMeta)
-        : { packageJson: stored, shasum: '', integrity: '' }
-
-    // Backfill integrity for a platform binary cached before it was computed,
-    // by hashing the cached tarball; new builds already carry it.
-    if (!meta.integrity && !isPreviewPackage(name)) {
-      const integrity = await integrityFromCachedTarball(env, name, version)
-      if (integrity) {
-        meta.integrity = integrity
-        await env.TARBALL_CACHE.put(metaKey(name, version), JSON.stringify(meta), {
-          httpMetadata: {
-            contentType: 'application/json',
-            cacheControl: tarballCacheControl(),
-          },
-        })
-      }
+    if (stored && typeof stored === 'object' && 'packageJson' in stored) {
+      return stored as PreviewMeta
     }
-    return meta
+    return { packageJson: stored, shasum: '', integrity: '' }
   }
 
   // Large non-preview binaries: build meta without re-gzipping (the full
