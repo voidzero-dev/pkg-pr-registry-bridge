@@ -42,6 +42,21 @@ bucket_name = "pkg-pr-registry-bridge-tarballs"
 binding = "PREVIEW_REFS"
 id = "e8473fe4e0674f27a62399028a6604fd"
 
+# Off-request pre-build queue. Registering a ref enqueues its version; the
+# consumer builds the tarballs into R2, retrying durably so a flaky cold build
+# (an in-Worker OOM is a hard 1102 that cannot be caught/retried in-request)
+# eventually succeeds. Concurrency 1 so two heavy builds never overlap.
+[[queues.producers]]
+binding = "PREBUILD_QUEUE"
+queue = "pkg-pr-registry-bridge-prebuild"
+
+[[queues.consumers]]
+queue = "pkg-pr-registry-bridge-prebuild"
+max_batch_size = 1
+max_concurrency = 1
+max_retries = 8
+max_batch_timeout = 5
+
 # Secrets (set with `wrangler secret put`, not here):
 #   ADMIN_TOKEN           - bearer token guarding /-/refs and /-/purge
 #   GITHUB_TOKEN          - optional, PR/commit existence checks on /-/refs

@@ -153,23 +153,29 @@ async function buildPlatformTarballToR2(
   }
 }
 
-// Soft wall-clock budget for an off-request prewarm. Date.now() in a Worker only
-// advances on I/O, which is exactly where the build spends its time, so it is a
-// usable bound for the build loop (not a precise timer).
-const PREWARM_BUDGET_MS = 20_000
+// Default soft wall-clock budget for a `ctx.waitUntil` prewarm (its lifetime is
+// short). Date.now() in a Worker only advances on I/O, which is where the build
+// spends its time, so it is a usable bound for the loop (not a precise timer).
+// The queue consumer passes a much larger budget since it can run long and
+// retries durably.
+export const PREWARM_BUDGET_MS = 20_000
 
 /**
  * Pre-build a version's tarballs into R2 so installs are served from cache.
  *
- * Meant to run OFF the request path (via `ctx.waitUntil`) when a ref is
- * registered, so the heavy platform-binary build never blocks a user's install.
- * Best-effort and time-bounded: every step is isolated, already-cached tarballs
- * are skipped, and whatever does not finish within the budget is still built
- * reliably on demand. Builds the two preview packages first (also to enumerate
- * the platform binaries from vite-plus's rewritten optionalDependencies), then
- * each platform binary.
+ * Meant to run OFF the request path (via the prebuild queue, or `ctx.waitUntil`
+ * as a fallback) when a ref is registered, so the heavy platform-binary build
+ * never blocks a user's install. Best-effort and time-bounded: every step is
+ * isolated, already-cached tarballs are skipped, and whatever does not finish is
+ * still built reliably on demand (the queue also retries). Builds the two
+ * preview packages first (also to enumerate the platform binaries from
+ * vite-plus's rewritten optionalDependencies), then each platform binary.
  */
-export async function prewarmVersion(env: Env, version: string): Promise<void> {
+export async function prewarmVersion(
+  env: Env,
+  version: string,
+  budgetMs: number = PREWARM_BUDGET_MS,
+): Promise<void> {
   let vitePlus: PreviewBuild
   try {
     vitePlus = await buildAndStore(env, 'vite-plus', version)
@@ -192,7 +198,7 @@ export async function prewarmVersion(env: Env, version: string): Promise<void> {
 
   const start = Date.now()
   for (const pkg of platforms) {
-    if (Date.now() - start > PREWARM_BUDGET_MS) break
+    if (Date.now() - start > budgetMs) break
     try {
       const existing = await env.TARBALL_CACHE.head(tarballKey(pkg, version))
       if (!existing) await buildPlatformTarballToR2(env, pkg, version)

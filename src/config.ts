@@ -31,12 +31,23 @@ export interface Env {
   TARBALL_CACHE: R2Bucket
   /** Dynamic preview-ref registry (refs added at runtime, no redeploy). */
   PREVIEW_REFS?: KVNamespace
+  /**
+   * Queue for pre-building a registered version's tarballs off the request
+   * path. A flaky cold build (an in-Worker OOM that returns Cloudflare 1102
+   * cannot be caught/retried in-request) is retried durably by the queue.
+   */
+  PREBUILD_QUEUE?: Queue<PrebuildMessage>
   /** Token for GitHub PR/commit existence checks (secret). */
   GITHUB_TOKEN?: string
   /** Bearer token guarding the admin endpoints (`/-/refs`, `/-/purge`). */
   ADMIN_TOKEN?: string
   /** Shared secret for verifying GitHub webhook payloads (`/-/webhook`). */
   GITHUB_WEBHOOK_SECRET?: string
+}
+
+/** A request to pre-build all of a version's tarballs into R2. */
+export interface PrebuildMessage {
+  version: string
 }
 
 const DEFAULT_MAX_TARBALL_BYTES = 64 * 1024 * 1024

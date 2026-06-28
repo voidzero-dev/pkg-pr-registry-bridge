@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
-import type { Env } from './config'
+import type { Env, PrebuildMessage } from './config'
 import { HttpError } from './httpError'
 import { isWorkspacePackage } from './preview/packages'
 import { parsePreviewVersion } from './preview/parsePreviewVersion'
@@ -44,6 +44,22 @@ app.get('/_health', (c) => c.json({ status: 'ok' }))
 
 const admin = (c: { req: { header: (k: string) => string | undefined }; env: Env }) =>
   requireAdmin({ env: c.env, authorization: c.req.header('authorization') })
+
+/**
+ * Pre-build a version's tarballs off the request path. Prefer the durable
+ * prebuild queue (a flaky cold build is retried until it succeeds); fall back to
+ * `ctx.waitUntil` when the queue is not bound (e.g. local dev / tests).
+ */
+function schedulePrebuild(
+  c: { env: Env; executionCtx: { waitUntil: (p: Promise<unknown>) => void } },
+  version: string,
+): void {
+  if (c.env.PREBUILD_QUEUE) {
+    c.executionCtx.waitUntil(c.env.PREBUILD_QUEUE.send({ version }))
+  } else {
+    c.executionCtx.waitUntil(prewarmVersion(c.env, version))
+  }
+}
 
 /**
  * Serve a generated preview tarball from R2 (built together with the meta
@@ -144,7 +160,7 @@ app.post('/-/refs', async (c) => {
   }
   // Pre-build the tarballs (incl. the heavy platform binaries) off the request
   // path, so the first install of this commit is served from cache.
-  c.executionCtx.waitUntil(prewarmVersion(c.env, parsed.version))
+  schedulePrebuild(c, parsed.version)
   return c.json({ added: ref, version: parsed.version, tag: parsed.tag }, 201)
 })
 
@@ -199,7 +215,7 @@ app.post('/-/webhook', async (c) => {
       const parsed = await registerRef(c.env, ref)
       registered.push(parsed.version)
       // Pre-build off the request path so installs hit the cache (see above).
-      c.executionCtx.waitUntil(prewarmVersion(c.env, parsed.version))
+      schedulePrebuild(c, parsed.version)
     } catch (err) {
       console.warn(`Webhook failed to register ref ${ref}:`, err)
     }
@@ -320,4 +336,22 @@ app.onError((err, c) => {
   return c.json({ error: 'Internal error' }, 500)
 })
 
-export default app
+export default {
+  fetch: app.fetch,
+
+  /**
+   * Prebuild queue consumer. Builds a registered version's tarballs into R2 with
+   * a generous budget. If a build OOMs (a hard 1102 that kills the isolate
+   * uncatchably), the message is not acked and the queue retries it; the
+   * per-tarball cache check makes each retry skip what already built, so it
+   * converges. Catchable failures are isolated inside `prewarmVersion`, so the
+   * message still acks (no pointless retries for, say, a 404 upstream).
+   */
+  async queue(batch: MessageBatch<PrebuildMessage>, env: Env): Promise<void> {
+    for (const message of batch.messages) {
+      await prewarmVersion(env, message.body.version, 5 * 60_000)
+      message.ack()
+    }
+  },
+} satisfies ExportedHandler<Env, PrebuildMessage>
+
