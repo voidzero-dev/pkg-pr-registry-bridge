@@ -148,6 +148,52 @@ async function buildPlatformTarballToR2(
   }
 }
 
+// Soft wall-clock budget for an off-request prewarm. Date.now() in a Worker only
+// advances on I/O, which is exactly where the build spends its time, so it is a
+// usable bound for the build loop (not a precise timer).
+const PREWARM_BUDGET_MS = 20_000
+
+/**
+ * Pre-build a version's tarballs into R2 so installs are served from cache.
+ *
+ * Meant to run OFF the request path (via `ctx.waitUntil`) when a ref is
+ * registered, so the heavy platform-binary build never blocks a user's install.
+ * Best-effort and time-bounded: every step is isolated, already-cached tarballs
+ * are skipped, and whatever does not finish within the budget is still built
+ * reliably on demand. Builds the two preview packages first (also to enumerate
+ * the platform binaries from vite-plus's rewritten optionalDependencies), then
+ * each platform binary.
+ */
+export async function prewarmVersion(env: Env, version: string): Promise<void> {
+  let vitePlus: PreviewBuild
+  try {
+    vitePlus = await buildAndStore(env, 'vite-plus', version)
+  } catch (err) {
+    console.warn(`prewarm vite-plus@${version}:`, err)
+    return
+  }
+  try {
+    await buildAndStore(env, '@voidzero-dev/vite-plus-core', version)
+  } catch (err) {
+    console.warn(`prewarm core@${version}:`, err)
+  }
+
+  const platforms = Object.keys(
+    (vitePlus.packageJson.optionalDependencies as Record<string, string>) ?? {},
+  ).filter((n) => n.startsWith('@voidzero-dev/vite-plus-'))
+
+  const start = Date.now()
+  for (const pkg of platforms) {
+    if (Date.now() - start > PREWARM_BUDGET_MS) break
+    try {
+      const existing = await env.TARBALL_CACHE.head(tarballKey(pkg, version))
+      if (!existing) await buildPlatformTarballToR2(env, pkg, version)
+    } catch (err) {
+      console.warn(`prewarm ${pkg}@${version}:`, err)
+    }
+  }
+}
+
 /**
  * Download the upstream tarball, rewrite it, and durably persist BOTH the
  * rewritten package.json (small "meta") and the generated tarball to R2.

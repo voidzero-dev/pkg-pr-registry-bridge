@@ -55,15 +55,16 @@ for a runnable example.
   those packages too, so they resolve through the bridge like the other preview
   packages, and the package manager downloads only the binary for the current
   platform (reading os/cpu from the packument) instead of all of them. These
-  native binaries are large (tens of MB decompressed), too large to buffer
-  within the Worker's 128MB limit, and streaming a generated response truncates.
-  So the build **streams** (decompress, swap only `package.json`, re-emit as
-  gzip "stored"/uncompressed blocks) into R2 as bounded multipart parts, and the
-  cold request returns a 302 to itself so the retry serves the finished object
-  straight from R2 with a Content-Length (a plain passthrough that cannot be
-  truncated). The deploy-time warm step pre-builds them so installs hit the
-  cache. The preview packages themselves are small and keep the buffered,
-  R2-cached, integrity path.
+  native binaries are large (tens of MB decompressed). The build decompresses
+  the upstream **once** into a buffer, rewrites only `package.json` in place (so
+  the binary is never copied again), and frames the buffer as gzip
+  "stored"/uncompressed blocks into an R2 **multipart** upload. The cold request
+  returns a 302 to itself so the retry serves the finished object straight from
+  R2 with a Content-Length (a plain passthrough that cannot be truncated; a
+  Worker-generated transform response could be). Registering a ref (admin or
+  webhook) pre-builds these off the request path, and the deploy-time warm step
+  does too, so installs hit the cache. The preview packages themselves are small
+  and keep the buffered, R2-cached, integrity path.
 - **Everything else**: 302-redirected to `registry.npmjs.org`, so the client
   fetches the hundreds of normal packages in a typical install directly from
   npm's CDN. The Worker stays out of the data path for everything it doesn't

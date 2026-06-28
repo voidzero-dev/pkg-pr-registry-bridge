@@ -18,7 +18,11 @@ import {
 import { fetchNpmPackument } from './registry/fetchNpmPackument'
 import { buildVersionMetadata } from './registry/buildVersionMetadata'
 import { redirectToNpm } from './registry/redirectToNpm'
-import { getPreviewMeta, getPreviewTarballBody } from './tarball/getPreviewBuild'
+import {
+  getPreviewMeta,
+  getPreviewTarballBody,
+  prewarmVersion,
+} from './tarball/getPreviewBuild'
 import { metaKey, tarballKey } from './cache/r2Cache'
 import { requireAdmin } from './security/auth'
 import { verifyRefExists } from './github/verifyRef'
@@ -138,6 +142,9 @@ app.post('/-/refs', async (c) => {
   } catch (err) {
     throw new HttpError(503, String(err))
   }
+  // Pre-build the tarballs (incl. the heavy platform binaries) off the request
+  // path, so the first install of this commit is served from cache.
+  c.executionCtx.waitUntil(prewarmVersion(c.env, parsed.version))
   return c.json({ added: ref, version: parsed.version, tag: parsed.tag }, 201)
 })
 
@@ -191,6 +198,8 @@ app.post('/-/webhook', async (c) => {
     try {
       const parsed = await registerRef(c.env, ref)
       registered.push(parsed.version)
+      // Pre-build off the request path so installs hit the cache (see above).
+      c.executionCtx.waitUntil(prewarmVersion(c.env, parsed.version))
     } catch (err) {
       console.warn(`Webhook failed to register ref ${ref}:`, err)
     }
