@@ -15,6 +15,7 @@
     "test:e2e": "node scripts/e2e-bun.mjs"
   },
   "dependencies": {
+    "@noble/hashes": "2.2.0",
     "hono": "^4.12.27",
     "nanotar": "^0.3.0"
   },

@@ -301,6 +301,30 @@ describe('integrity', () => {
     expect(dist.integrity).toMatch(/^sha512-[A-Za-z0-9+/]+=*$/)
     expect(dist.shasum).toMatch(/^[0-9a-f]{40}$/)
   })
+
+  it('advertises a platform binary integrity matching the served tarball', async () => {
+    const ver = `0.0.0-commit.${PLATFORM_SHA}`
+    const pkg = '@voidzero-dev/vite-plus-darwin-arm64'
+
+    // Building the tarball also stores its meta with the streamed SHA-512.
+    const tres = await SELF.fetch(`${BASE}/tarballs/${pkg}/${ver}.tgz`)
+    expect(tres.status).toBe(200)
+    const tarball = new Uint8Array(await tres.arrayBuffer())
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-512', tarball))
+    const expected = `sha512-${btoa(String.fromCharCode(...digest))}`
+
+    // Register the ref so the packument injects this version, then read it.
+    await SELF.fetch(`${BASE}/-/refs`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({ ref: `commit.${PLATFORM_SHA}` }),
+    })
+    const pres = await SELF.fetch(`${BASE}/@voidzero-dev%2Fvite-plus-darwin-arm64`, {
+      headers: { accept: 'application/vnd.npm.install-v1+json' },
+    })
+    const body = (await pres.json()) as Record<string, any>
+    expect(body.versions[ver].dist.integrity).toBe(expected)
+  })
 })
 
 const AUTH = { authorization: 'Bearer test-admin-token' }
