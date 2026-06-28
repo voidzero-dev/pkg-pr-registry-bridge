@@ -61,10 +61,14 @@ for a runnable example.
   "stored"/uncompressed blocks into an R2 **multipart** upload. The cold request
   returns a 302 to itself so the retry serves the finished object straight from
   R2 with a Content-Length (a plain passthrough that cannot be truncated; a
-  Worker-generated transform response could be). Registering a ref (admin or
-  webhook) pre-builds these off the request path, and the deploy-time warm step
-  does too, so installs hit the cache. The preview packages themselves are small
-  and keep the buffered, R2-cached, integrity path.
+  Worker-generated transform response could be). A cold build is close to the
+  Worker memory limit and occasionally OOMs (a hard 1102 that cannot be caught
+  in-request), so registering a ref (admin or webhook) enqueues it on a
+  **prebuild queue**: a consumer builds the tarballs into R2 off the request
+  path with concurrency 1 and durable retries, so a flaky build is retried until
+  it succeeds and installs hit the cache. The deploy-time warm step pre-builds
+  too. The preview packages themselves are small and keep the buffered,
+  R2-cached, integrity path.
 - **Everything else**: 302-redirected to `registry.npmjs.org`, so the client
   fetches the hundreds of normal packages in a typical install directly from
   npm's CDN. The Worker stays out of the data path for everything it doesn't
