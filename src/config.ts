@@ -2,7 +2,7 @@
  * Worker environment bindings.
  *
  * Configuration that the source design read from `process.env` is delivered
- * here as Cloudflare Worker bindings (`[vars]`, R2/KV bindings, secrets).
+ * here as Cloudflare Worker bindings (`[vars]`, the R2 bucket, secrets).
  */
 export interface Env {
   /** Public origin of this bridge, used to build `dist.tarball` URLs. */

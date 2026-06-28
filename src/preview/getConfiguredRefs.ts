@@ -4,7 +4,7 @@ import {
   parseConfiguredPreviewRefsSafe,
   type ConfiguredPreviewRef,
 } from './parseConfiguredPreviewRefs'
-import { refsIndexKey } from '../cache/r2Cache'
+import { REFS_INDEX_KEY } from '../cache/r2Cache'
 
 // Runtime-registered refs live in ONE R2 object, read on every packument request
 // with a cheap `get`. The earlier design stored one KV key per ref and read them
@@ -26,7 +26,7 @@ function canonical(ref: ConfiguredPreviewRef): string {
 async function readRefIndex(
   env: Env,
 ): Promise<{ index: RefIndex; etag: string | null }> {
-  const obj = await env.TARBALL_CACHE.get(refsIndexKey())
+  const obj = await env.TARBALL_CACHE.get(REFS_INDEX_KEY)
   if (!obj) return { index: {}, etag: null }
   const index = await obj.json<RefIndex>().catch(() => ({}) as RefIndex)
   return { index, etag: obj.etag }
@@ -50,7 +50,7 @@ async function mutateRefIndex(
     }
     mutate(index)
     const written = await env.TARBALL_CACHE.put(
-      refsIndexKey(),
+      REFS_INDEX_KEY,
       JSON.stringify(index),
       {
         onlyIf: etag ? { etagMatches: etag } : { etagDoesNotMatch: '*' },

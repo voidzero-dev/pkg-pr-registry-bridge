@@ -15,14 +15,15 @@
  * version differs from what it resolved, so an as-is upload (version 0.2.1) would
  * fail there even though npm/yarn/bun tolerate it.
  */
-import {
-  buildPreviewTarball,
-} from '../../../../src/tarball/buildPreviewTarball'
+import { buildPreviewTarball } from '../../../../src/tarball/buildPreviewTarball'
 import { toPkgPrNewUrl } from '../../../../src/preview/toPkgPrNewUrl'
-import { isPreviewPackage, isWorkspacePackage } from '../../../../src/preview/packages'
+import {
+  isPreviewPackage,
+  isWorkspacePackage,
+  PREVIEW_PACKAGES,
+} from '../../../../src/preview/packages'
+import { parseConfiguredPreviewRefs } from '../../../../src/preview/parseConfiguredPreviewRefs'
 import type { RewriteEnv } from '../../../../src/tarball/rewritePackageJson'
-
-const PREVIEW_PACKAGES = ['vite-plus', '@voidzero-dev/vite-plus-core']
 
 interface PublishPackage {
   name: string
@@ -36,13 +37,6 @@ function input(name: string, required = false): string {
   const value = (process.env[`INPUT_${name.toUpperCase()}`] ?? '').trim()
   if (required && !value) throw new Error(`missing required input: ${name}`)
   return value
-}
-
-function normalizeSha(raw: string): { ref: string; sha: string } {
-  const m = raw.match(/^(?:commit\.)?([0-9a-f]{7,40})$/i)
-  if (!m) throw new Error(`invalid sha "${raw}" (expected a hex sha or commit.<sha>)`)
-  const sha = m[1].toLowerCase()
-  return { ref: `commit.${sha}`, sha }
 }
 
 async function withRetry<T>(label: string, fn: () => Promise<T>, attempts = 4): Promise<T> {
@@ -63,7 +57,7 @@ async function fetchUpstream(
   name: string,
   version: string,
 ): Promise<Uint8Array> {
-  const url = toPkgPrNewUrl(env as any, name, version)
+  const url = toPkgPrNewUrl(env, name, version)
   if (!url) throw new Error(`cannot build pkg.pr.new url for ${name}@${version}`)
   return withRetry(`download ${name}`, async () => {
     const res = await fetch(url)
@@ -90,10 +84,14 @@ async function uploadTarball(
 }
 
 async function main(): Promise<void> {
-  const { ref, sha } = normalizeSha(input('sha', true))
+  // Accept a bare sha or `commit.<sha>`; reuse the Worker's parser to validate it
+  // and produce the canonical ref + synthetic version (one source of truth).
+  const rawSha = input('sha', true).toLowerCase().replace(/^commit\./, '')
+  const [parsed] = parseConfiguredPreviewRefs(`commit.${rawSha}`)
+  const ref = `commit.${parsed.ref}`
+  const version = parsed.version
   const bridge = (input('bridge-url') || 'https://pkg-pr-registry-bridge.render.vip').replace(/\/+$/, '')
   const token = input('admin-token', true)
-  const version = `0.0.0-commit.${sha}`
   const env: RewriteEnv = {
     PUBLIC_BASE_URL: bridge,
     PKG_PR_NEW_BASE: (input('pkg-pr-new-base') || 'https://pkg.pr.new').replace(/\/+$/, ''),

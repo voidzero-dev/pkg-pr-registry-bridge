@@ -21,3 +21,9 @@ export function refToVersion(ref) {
   const commit = ref.match(/^commit\.([0-9a-f]{7,40})$/i)
   return commit ? `0.0.0-commit.${commit[1]}` : null
 }
+
+/** Normalize a `<sha>` or `commit.<sha>` token to a bare lowercase sha, or null. */
+export function normalizeSha(input) {
+  const m = input.match(/^(?:commit\.)?([0-9a-f]{7,40})$/i)
+  return m ? m[1].toLowerCase() : null
+}

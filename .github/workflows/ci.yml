@@ -35,6 +35,13 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # The publish action bundles the Worker's own modules; re-bundle and fail
+      # if the committed dist drifts (or an import it pulls in broke).
+      - name: Verify action bundle is up to date
+        run: |
+          pnpm build:action
+          git diff --exit-code -- .github/actions/publish-preview/dist
+
       # vitest runs the Worker in workerd (Miniflare); no network or secrets.
       # The deploy-time checks (warm + bun e2e) need a live deployment and run
       # from `pnpm run deploy`, not here.

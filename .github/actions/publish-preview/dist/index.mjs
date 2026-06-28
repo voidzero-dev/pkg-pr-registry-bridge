@@ -349,9 +349,19 @@ function isWorkspacePackage(name, env) {
   return false;
 }
 
+// src/preview/parsePreviewVersion.ts
+function commitVersion(sha) {
+  return `0.0.0-commit.${sha}`;
+}
+function parsePreviewVersion(version) {
+  const commit = version.match(/^0\.0\.0-commit\.([0-9a-f]{7,40})$/i);
+  if (commit) return { type: "commit", ref: commit[1] };
+  return null;
+}
+
 // src/tarball/rewritePackageJson.ts
 function refToVersion(ref) {
-  if (/^[0-9a-f]{7,40}$/i.test(ref)) return `0.0.0-commit.${ref}`;
+  if (/^[0-9a-f]{7,40}$/i.test(ref)) return commitVersion(ref);
   return null;
 }
 function pkgPrNewUrlToVersion(spec, env) {
@@ -480,13 +490,6 @@ async function buildPreviewTarball(gzippedTarball, packageName, version, env) {
   return { tarball, packageJson: rewritten, shasum, integrity };
 }
 
-// src/preview/parsePreviewVersion.ts
-function parsePreviewVersion(version) {
-  const commit = version.match(/^0\.0\.0-commit\.([0-9a-f]{7,40})$/i);
-  if (commit) return { type: "commit", ref: commit[1] };
-  return null;
-}
-
 // src/preview/toPkgPrNewUrl.ts
 function toPkgPrNewUrl(env, packageName, version) {
   const preview = parsePreviewVersion(version);
@@ -494,18 +497,38 @@ function toPkgPrNewUrl(env, packageName, version) {
   return `${env.PKG_PR_NEW_BASE}/${env.PREVIEW_OWNER}/${env.PREVIEW_REPO}/${packageName}@${preview.ref}`;
 }
 
+// src/preview/parseConfiguredPreviewRefs.ts
+function parseSingleRef(value) {
+  const commit = value.match(/^commit\.([0-9a-f]{7,40})$/i);
+  if (!commit) return null;
+  return {
+    type: "commit",
+    ref: commit[1],
+    version: commitVersion(commit[1]),
+    tag: `commit-${commit[1]}`
+  };
+}
+function splitRefs(input2) {
+  if (!input2) return [];
+  return input2.split(",").map((s) => s.trim()).filter(Boolean);
+}
+function parseConfiguredPreviewRefs(input2) {
+  return splitRefs(input2).map((value) => {
+    const ref = parseSingleRef(value);
+    if (!ref) {
+      throw new Error(
+        `Invalid preview ref (only commit.<sha> is supported): ${value}`
+      );
+    }
+    return ref;
+  });
+}
+
 // .github/actions/publish-preview/src/index.ts
-var PREVIEW_PACKAGES2 = ["vite-plus", "@voidzero-dev/vite-plus-core"];
 function input(name, required = false) {
   const value = (process.env[`INPUT_${name.toUpperCase()}`] ?? "").trim();
   if (required && !value) throw new Error(`missing required input: ${name}`);
   return value;
-}
-function normalizeSha(raw) {
-  const m = raw.match(/^(?:commit\.)?([0-9a-f]{7,40})$/i);
-  if (!m) throw new Error(`invalid sha "${raw}" (expected a hex sha or commit.<sha>)`);
-  const sha = m[1].toLowerCase();
-  return { ref: `commit.${sha}`, sha };
 }
 async function withRetry(label, fn, attempts = 4) {
   let lastErr;
@@ -539,10 +562,12 @@ async function uploadTarball(bridge, token, name, version, bytes) {
   });
 }
 async function main() {
-  const { ref, sha } = normalizeSha(input("sha", true));
+  const rawSha = input("sha", true).toLowerCase().replace(/^commit\./, "");
+  const [parsed] = parseConfiguredPreviewRefs(`commit.${rawSha}`);
+  const ref = `commit.${parsed.ref}`;
+  const version = parsed.version;
   const bridge = (input("bridge-url") || "https://pkg-pr-registry-bridge.render.vip").replace(/\/+$/, "");
   const token = input("admin-token", true);
-  const version = `0.0.0-commit.${sha}`;
   const env = {
     PUBLIC_BASE_URL: bridge,
     PKG_PR_NEW_BASE: (input("pkg-pr-new-base") || "https://pkg.pr.new").replace(/\/+$/, ""),
@@ -566,7 +591,7 @@ async function main() {
     };
   };
   let vitePlusPackageJson;
-  for (const name of PREVIEW_PACKAGES2) {
+  for (const name of PREVIEW_PACKAGES) {
     const pkg = await buildAndUpload(name, version);
     packages.push(pkg);
     if (name === "vite-plus") vitePlusPackageJson = pkg.packageJson;

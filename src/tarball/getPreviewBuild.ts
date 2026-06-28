@@ -113,7 +113,7 @@ export async function getPreviewMeta(
  * is the supported one; the redirect just avoids a hard 404 in the gap.
  */
 export type PreviewTarball =
-  | { kind: 'body'; body: ReadableStream<Uint8Array> | Uint8Array; contentLength?: number }
+  | { kind: 'body'; body: ReadableStream<Uint8Array> | Uint8Array; contentLength: number }
   | { kind: 'redirect'; location: string }
 
 export async function getPreviewTarballBody(

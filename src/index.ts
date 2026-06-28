@@ -42,6 +42,24 @@ const admin = (c: { req: { header: (k: string) => string | undefined }; env: Env
   requireAdmin({ env: c.env, authorization: c.req.header('authorization') })
 
 /**
+ * Validate a preview (name, version) target. `unknownStatus` is 404 on the serve
+ * paths (the resource isn't found) and 400 on the admin write paths (bad input).
+ */
+function assertPreviewTarget(
+  env: Env,
+  name: string,
+  version: string,
+  unknownStatus = 404,
+): void {
+  if (!isWorkspacePackage(name, env)) {
+    throw new HttpError(unknownStatus, `Unknown preview package: ${name || '(empty)'}`)
+  }
+  if (!parsePreviewVersion(version)) {
+    throw new HttpError(400, `Invalid preview version: ${version || '(empty)'}`)
+  }
+}
+
+/**
  * Serve a preview tarball from R2, the single source of truth (never the
  * per-colo Cache API: an edge-cached tarball can outlive a content change and
  * then mismatch the integrity advertised in the packument). A platform binary
@@ -52,12 +70,7 @@ async function serveTarball(
   name: string,
   version: string,
 ): Promise<Response> {
-  if (!isWorkspacePackage(name, env)) {
-    throw new HttpError(404, `Unknown preview package: ${name}`)
-  }
-  if (!parsePreviewVersion(version)) {
-    throw new HttpError(400, `Invalid preview version: ${version}`)
-  }
+  assertPreviewTarget(env, name, version)
   const result = await getPreviewTarballBody(env, name, version)
   if (result.kind === 'redirect') {
     return new Response(null, {
@@ -65,14 +78,13 @@ async function serveTarball(
       headers: { location: result.location, 'cache-control': 'no-store' },
     })
   }
-  const headers: Record<string, string> = {
-    'content-type': 'application/gzip',
-    'cache-control': tarballCacheControl(),
-  }
-  if (result.contentLength !== undefined) {
-    headers['content-length'] = String(result.contentLength)
-  }
-  return new Response(result.body, { headers })
+  return new Response(result.body, {
+    headers: {
+      'content-type': 'application/gzip',
+      'cache-control': tarballCacheControl(),
+      'content-length': String(result.contentLength),
+    },
+  })
 }
 
 /** Preview tarball endpoint: serve from R2, else (platform) redirect upstream. */
@@ -95,12 +107,7 @@ app.put('/-/tarball/*', async (c) => {
   const parsed = parseUploadPath(new URL(c.req.url).pathname)
   if (!parsed) throw new HttpError(404, 'Not found')
   const { name, version } = parsed
-  if (!isWorkspacePackage(name, c.env)) {
-    throw new HttpError(404, `Unknown preview package: ${name}`)
-  }
-  if (!parsePreviewVersion(version)) {
-    throw new HttpError(400, `Invalid preview version: ${version}`)
-  }
+  assertPreviewTarget(c.env, name, version)
   if (!c.req.raw.body) throw new HttpError(400, 'Missing request body')
   await c.env.TARBALL_CACHE.put(tarballKey(name, version), c.req.raw.body, {
     httpMetadata: {
@@ -135,41 +142,40 @@ app.post('/-/publish', async (c) => {
   if (!ref) throw new HttpError(400, 'Missing ref')
   if (packages.length === 0) throw new HttpError(400, 'Missing packages')
 
-  const published: string[] = []
+  // Validate everything up front (so a bad package can't leave half-written
+  // metas), then write the independent meta keys in parallel.
   for (const pkg of packages) {
-    const name = pkg.name ?? ''
-    const version = pkg.version ?? ''
-    if (!isWorkspacePackage(name, c.env)) {
-      throw new HttpError(400, `Unknown preview package: ${name || '(empty)'}`)
-    }
-    if (!parsePreviewVersion(version)) {
-      throw new HttpError(400, `Invalid preview version: ${version || '(empty)'}`)
-    }
-    const meta: PreviewMeta = {
-      packageJson: pkg.packageJson ?? { name, version },
-      shasum: pkg.shasum ?? '',
-      integrity: pkg.integrity ?? '',
-    }
-    await c.env.TARBALL_CACHE.put(metaKey(name, version), JSON.stringify(meta), {
-      httpMetadata: {
-        contentType: 'application/json',
-        cacheControl: tarballCacheControl(),
-      },
-    })
-    published.push(`${name}@${version}`)
+    assertPreviewTarget(c.env, pkg.name ?? '', pkg.version ?? '', 400)
   }
+  const published = await Promise.all(
+    packages.map((pkg) => {
+      const name = pkg.name!
+      const version = pkg.version!
+      const meta: PreviewMeta = {
+        packageJson: pkg.packageJson ?? { name, version },
+        shasum: pkg.shasum ?? '',
+        integrity: pkg.integrity ?? '',
+      }
+      return c.env.TARBALL_CACHE.put(metaKey(name, version), JSON.stringify(meta), {
+        httpMetadata: {
+          contentType: 'application/json',
+          cacheControl: tarballCacheControl(),
+        },
+      }).then(() => `${name}@${version}`)
+    }),
+  )
 
   let parsed
   try {
-    ;[parsed] = parseConfiguredPreviewRefs(ref)
-    await registerRef(c.env, ref)
+    // registerRef parses + validates the ref and returns it.
+    parsed = await registerRef(c.env, ref)
   } catch (err) {
     throw new HttpError(400, `Invalid or unregisterable ref: ${ref} (${err})`)
   }
   return c.json({ ref, version: parsed.version, published }, 201)
 })
 
-/** List the configured preview refs (static env + runtime KV). Public read. */
+/** List the configured preview refs (static env + runtime R2 index). Public read. */
 app.get('/-/refs', async (c) => {
   const refs = await getConfiguredRefs(c.env)
   return c.json({
@@ -298,7 +304,11 @@ app.get('*', async (c) => {
   const { name } = pkgReq
   if (!isWorkspacePackage(name, c.env)) return redirectToNpm(c.env, c.req.raw)
 
-  const base = await fetchNpmPackument(c.env, name)
+  // The npm fetch and the refs read are independent; overlap them.
+  const [base, refs] = await Promise.all([
+    fetchNpmPackument(c.env, name),
+    getConfiguredRefs(c.env),
+  ])
 
   const packument: Record<string, any> =
     base.status === 200 && base.data
@@ -313,7 +323,6 @@ app.get('*', async (c) => {
   // concurrently; each writes a distinct version/tag key, and a failing ref is
   // isolated so it can't break installs of the package's other versions. After
   // the deploy-time warm step these are R2 hits and don't touch the upstream.
-  const refs = await getConfiguredRefs(c.env)
   await Promise.all(
     refs.map(async (ref) => {
       try {

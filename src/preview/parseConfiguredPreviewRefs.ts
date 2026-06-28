@@ -8,6 +8,8 @@
  * PR-number refs (`pr.<n>`) are rejected: a PR ref is mutable, so its metadata
  * would be overwritten as the PR advances.
  */
+import { commitVersion } from './parsePreviewVersion'
+
 export type ConfiguredPreviewRef = {
   type: 'commit'
   ref: string
@@ -22,7 +24,7 @@ function parseSingleRef(value: string): ConfiguredPreviewRef | null {
   return {
     type: 'commit',
     ref: commit[1],
-    version: `0.0.0-commit.${commit[1]}`,
+    version: commitVersion(commit[1]),
     tag: `commit-${commit[1]}`,
   }
 }

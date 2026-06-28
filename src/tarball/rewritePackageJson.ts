@@ -1,4 +1,5 @@
 import { isWorkspacePackage, PREVIEW_PACKAGES } from '../preview/packages'
+import { commitVersion } from '../preview/parsePreviewVersion'
 
 /** Config needed to rebuild pkg.pr.new URLs as bridge URLs. */
 export interface RewriteEnv {
@@ -12,7 +13,7 @@ export interface RewriteEnv {
 function refToVersion(ref: string): string | null {
   // Only immutable commit refs are routed through the bridge. A PR-number URL
   // (a mutable ref) is left as the original direct pkg.pr.new URL.
-  if (/^[0-9a-f]{7,40}$/i.test(ref)) return `0.0.0-commit.${ref}`
+  if (/^[0-9a-f]{7,40}$/i.test(ref)) return commitVersion(ref)
   return null
 }
 

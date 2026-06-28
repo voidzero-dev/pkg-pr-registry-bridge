@@ -24,7 +24,13 @@ const LIBC: Record<string, string> = { gnu: 'glibc', musl: 'musl' }
 const SUFFIX =
   /-(darwin|linux|win32|freebsd|android)-(x64|arm64|ia32|arm)(?:-(gnu|musl|msvc|eabihf|eabi))?$/
 
-/** Parse os/cpu/libc from a platform-binary name, or null if it doesn't match. */
+/**
+ * Parse os/cpu/libc from a platform-binary name, or null if it doesn't match.
+ * Fails closed: an unrecognized triple yields null, so the packument entry gets
+ * no os/cpu and the package manager won't filter on platform, rather than a
+ * wrong guess. This is only the pre-publish fallback; CI uploads the exact
+ * values from each binary's own package.json.
+ */
 export function platformInfoFromName(name: string): PlatformInfo | null {
   const m = SUFFIX.exec(name)
   if (!m) return null

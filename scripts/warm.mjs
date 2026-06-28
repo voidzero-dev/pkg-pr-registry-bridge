@@ -12,18 +12,12 @@
 import { spawn } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { readWrangler } from './lib/wrangler.mjs'
+import { readWrangler, normalizeSha } from './lib/wrangler.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ACTION = path.join(root, '.github/actions/publish-preview/dist/index.mjs')
 const ADMIN_TOKEN =
   process.env.PKG_PR_BRIDGE_ADMIN_TOKEN || process.env.ADMIN_TOKEN || ''
-
-/** Normalize a CLI arg (`<sha>` or `commit.<sha>`) to a bare sha. */
-function normalizeSha(input) {
-  const m = input.match(/^(?:commit\.)?([0-9a-f]{7,40})$/i)
-  return m ? m[1].toLowerCase() : null
-}
 
 function publish(sha, bridge) {
   return new Promise((resolve, reject) => {
