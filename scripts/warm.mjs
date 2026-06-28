@@ -106,14 +106,14 @@ for (const version of versions) {
     }
   }
 
-  // Warm the platform binaries (core's optionalDependencies). Their first-build
-  // is heavy (a ~tens-of-MB native binary, streamed into R2) and can need a
-  // retry, so do it here with extra attempts rather than on a user's install.
+  // Warm the platform binaries (vite-plus's optionalDependencies). Their
+  // first-build is heavy (a ~tens-of-MB native binary, streamed into R2) and can
+  // need a retry, so do it here with extra attempts rather than on a user's
+  // install.
   try {
-    const res = await getWithRetry(
-      `${base}/@voidzero-dev%2Fvite-plus-core`,
-      { headers: { accept: 'application/vnd.npm.install-v1+json' } },
-    )
+    const res = await getWithRetry(`${base}/vite-plus`, {
+      headers: { accept: 'application/vnd.npm.install-v1+json' },
+    })
     const packument = await res.json()
     const meta = (packument.versions && packument.versions[version]) || {}
     const platformPkgs = Object.keys(meta.optionalDependencies || {}).filter(
