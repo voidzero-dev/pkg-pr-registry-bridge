@@ -182,7 +182,13 @@ describe('packument endpoint', () => {
       `${BASE}/tarballs/@voidzero-dev/vite-plus-darwin-arm64/0.0.0-commit.${PLATFORM_SHA}.tgz`,
     )
     expect(res.status).toBe(200)
-    const files = await parseTarGzip(new Uint8Array(await res.arrayBuffer()))
+    // Served from R2 with a Content-Length so a truncated transfer is
+    // detectable (a streamed transform response was silently truncated, which
+    // surfaced to clients as a gunzip "unexpected end of file").
+    const bytes = new Uint8Array(await res.arrayBuffer())
+    expect(res.headers.get('content-length')).toBe(String(bytes.byteLength))
+
+    const files = await parseTarGzip(bytes)
     const pkg = JSON.parse(
       new TextDecoder().decode(
         files.find((f) => f.name === 'package/package.json')!.data,
@@ -192,6 +198,13 @@ describe('packument endpoint', () => {
     expect(pkg.version).toBe(`0.0.0-commit.${PLATFORM_SHA}`)
     expect(pkg.os).toEqual(['darwin']) // platform fields preserved
     expect(pkg.cpu).toEqual(['arm64'])
+
+    // Second fetch is served from the R2 cache (built once).
+    const again = await SELF.fetch(
+      `${BASE}/tarballs/@voidzero-dev/vite-plus-darwin-arm64/0.0.0-commit.${PLATFORM_SHA}.tgz`,
+    )
+    expect(again.status).toBe(200)
+    expect(again.headers.get('content-length')).toBe(String(bytes.byteLength))
   })
 
   it('redirects non-allowlisted packages to npm', async () => {

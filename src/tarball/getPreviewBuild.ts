@@ -22,17 +22,13 @@ import {
 } from './fetchUpstreamTarball'
 
 /**
- * Stream a large non-preview tarball (a platform binary): swap only
- * `package/package.json` and pass the multi-MB native binary straight through.
- *
- * The payload is never materialized whole, not even to store it: a Worker
- * cannot hold a ~tens-of-MB decompressed binary plus the working set within the
- * 128MB memory limit (cold builds return Cloudflare 1102; CPU is not the
- * constraint, re-gzip is ~700ms). So this returns a stream piped straight to the
- * client and does NOT cache to R2 (which would require buffering the whole
- * payload to get a known length). Integrity is not pinned for these packages
- * (see `buildMetaLight`), so the package manager computes it from the bytes it
- * downloads, and the output uses gzip "stored" blocks (no recompression).
+ * Build the rewritten tarball for a large non-preview package (a platform
+ * binary) as a stream: swap only `package/package.json` and pass the multi-MB
+ * native binary straight through, re-emitting gzip "stored" (uncompressed)
+ * blocks. Nothing is materialized whole, so it stays within the Worker's 128MB
+ * memory limit (buffering the ~tens-of-MB decompressed payload to re-tar/re-gzip
+ * it returns Cloudflare 1102). A fresh upstream fetch is started per call so the
+ * stream can be (re)built for the two-pass store below.
  */
 async function buildPlatformTarballStream(
   env: Env,
@@ -59,6 +55,53 @@ async function buildPlatformTarballStream(
     rewrite,
     assertSafeTarballPath,
   )
+}
+
+/**
+ * Build a platform-binary tarball and persist it to R2 without ever holding it
+ * whole. Streaming the rewrite to the client directly turned out to truncate
+ * (a Worker response stream produced by post-handler transform work gets cut,
+ * and the client's strict gunzip then fails with "unexpected end of file"). So
+ * instead we build it INTO R2 while the handler is still running and awaiting
+ * (the Worker actively pumps it to completion), then serve it from R2, which is
+ * a plain byte passthrough that streams large objects reliably with a
+ * Content-Length.
+ *
+ * R2 needs a known length to store a stream, so this makes two streaming passes:
+ * one to measure the exact output length, one to write it through a
+ * `FixedLengthStream`. Both passes are bounded (the stored-gzip consumer keeps
+ * pace with the decompressor, so the payload never accumulates). Deterministic
+ * stored-gzip output makes the two passes' lengths identical.
+ */
+async function buildAndStorePlatformTarball(
+  env: Env,
+  name: string,
+  version: string,
+): Promise<void> {
+  // Pass 1: measure the exact output length (stream and discard).
+  let length = 0
+  const reader = (await buildPlatformTarballStream(env, name, version)).getReader()
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      length += value.byteLength
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  // Pass 2: stream the same bytes into R2 with the now-known length.
+  const fixed = new FixedLengthStream(length)
+  const source = await buildPlatformTarballStream(env, name, version)
+  const pumped = source.pipeTo(fixed.writable)
+  await env.TARBALL_CACHE.put(tarballKey(name, version), fixed.readable, {
+    httpMetadata: {
+      contentType: 'application/gzip',
+      cacheControl: tarballCacheControl(),
+    },
+  })
+  await pumped
 }
 
 /**
@@ -168,22 +211,34 @@ export async function getPreviewMeta(
  * The generated tarball bytes for a preview version, served from R2 when
  * present.
  */
+export interface PreviewTarballBody {
+  body: ReadableStream<Uint8Array> | Uint8Array
+  /** Set when the size is known up front, so the response carries a
+   * Content-Length and clients can detect a truncated transfer. */
+  contentLength?: number
+}
+
 export async function getPreviewTarballBody(
   env: Env,
   name: string,
   version: string,
-): Promise<ReadableStream<Uint8Array> | Uint8Array> {
-  // Serve a cached build by streaming it from R2 (bounded memory; the cached
-  // platform binaries are tens of MB).
-  const cached = await env.TARBALL_CACHE.get(tarballKey(name, version))
-  if (cached) return cached.body
+): Promise<PreviewTarballBody> {
+  let cached = await env.TARBALL_CACHE.get(tarballKey(name, version))
 
-  // Large platform binaries decompress to tens of MB; buffering them to re-tar,
-  // re-gzip, or even to store exceeds the Worker memory budget (Cloudflare
-  // 1102). Stream those straight to the client instead (no R2 cache). The small
-  // preview packages (which also pin integrity) keep the buffered+cached path.
-  if (!isPreviewPackage(name)) {
-    return buildPlatformTarballStream(env, name, version)
+  // Large platform binaries decompress to tens of MB; buffering them to re-tar
+  // or re-gzip exceeds the Worker memory budget (Cloudflare 1102), and streaming
+  // the transform straight to the client truncates. Build them into R2 first
+  // (see buildAndStorePlatformTarball), then serve from R2 below.
+  if (!cached && !isPreviewPackage(name)) {
+    await buildAndStorePlatformTarball(env, name, version)
+    cached = await env.TARBALL_CACHE.get(tarballKey(name, version))
+    if (!cached) throw new HttpError(500, 'Failed to persist generated tarball')
   }
-  return (await buildAndStore(env, name, version)).tarball
+
+  // Serve a cached build straight from R2: a plain byte passthrough with a
+  // Content-Length, which streams large objects reliably.
+  if (cached) return { body: cached.body, contentLength: cached.size }
+
+  // Small preview packages keep the buffered+cached+integrity path.
+  return { body: (await buildAndStore(env, name, version)).tarball }
 }

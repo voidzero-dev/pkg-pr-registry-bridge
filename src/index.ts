@@ -58,13 +58,15 @@ async function serveTarball(
   if (!parsePreviewVersion(version)) {
     throw new HttpError(400, `Invalid preview version: ${version}`)
   }
-  const body = await getPreviewTarballBody(env, name, version)
-  return new Response(body, {
-    headers: {
-      'content-type': 'application/gzip',
-      'cache-control': tarballCacheControl(),
-    },
-  })
+  const { body, contentLength } = await getPreviewTarballBody(env, name, version)
+  const headers: Record<string, string> = {
+    'content-type': 'application/gzip',
+    'cache-control': tarballCacheControl(),
+  }
+  if (contentLength !== undefined) {
+    headers['content-length'] = String(contentLength)
+  }
+  return new Response(body, { headers })
 }
 
 /**
