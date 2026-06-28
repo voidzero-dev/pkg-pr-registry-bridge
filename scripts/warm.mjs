@@ -105,6 +105,34 @@ for (const version of versions) {
       console.error(`  ✗ packument ${pkg}: ${err.message}`)
     }
   }
+
+  // Warm the platform binaries (core's optionalDependencies). Their first-build
+  // is heavy (a ~tens-of-MB native binary, streamed into R2) and can need a
+  // retry, so do it here with extra attempts rather than on a user's install.
+  try {
+    const res = await getWithRetry(
+      `${base}/@voidzero-dev%2Fvite-plus-core`,
+      { headers: { accept: 'application/vnd.npm.install-v1+json' } },
+    )
+    const packument = await res.json()
+    const meta = (packument.versions && packument.versions[version]) || {}
+    const platformPkgs = Object.keys(meta.optionalDependencies || {}).filter(
+      (n) => n.startsWith('@voidzero-dev/vite-plus-'),
+    )
+    for (const pkg of platformPkgs) {
+      const url = `${base}/tarballs/${pkg}/${version}.tgz`
+      try {
+        const r = await getWithRetry(url, undefined, 6)
+        const buf = Buffer.from(await r.arrayBuffer())
+        console.log(`  ✓ platform ${pkg}@${version} (${buf.length} bytes)`)
+      } catch (err) {
+        failed = true
+        console.error(`  ✗ platform ${pkg}@${version}: ${err.message}`)
+      }
+    }
+  } catch (err) {
+    console.warn(`  ! could not enumerate platform binaries: ${err.message}`)
+  }
 }
 
 process.exit(failed ? 1 : 0)

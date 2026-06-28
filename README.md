@@ -56,12 +56,14 @@ for a runnable example.
   packages, and the package manager downloads only the binary for the current
   platform (reading os/cpu from the packument) instead of all of them. These
   native binaries are large (tens of MB decompressed), too large to buffer
-  within the Worker's 128MB memory limit. So the packument is built without
-  re-gzipping the payload, and the tarball is **streamed** to the client
-  (decompress, swap only `package.json`, re-emit as gzip "stored"/uncompressed
-  blocks) without ever holding it whole or caching it in R2. The preview
-  packages themselves are small and keep the buffered, R2-cached, integrity
-  path.
+  within the Worker's 128MB limit, and streaming a generated response truncates.
+  So the build **streams** (decompress, swap only `package.json`, re-emit as
+  gzip "stored"/uncompressed blocks) into R2 as bounded multipart parts, and the
+  cold request returns a 302 to itself so the retry serves the finished object
+  straight from R2 with a Content-Length (a plain passthrough that cannot be
+  truncated). The deploy-time warm step pre-builds them so installs hit the
+  cache. The preview packages themselves are small and keep the buffered,
+  R2-cached, integrity path.
 - **Everything else**: 302-redirected to `registry.npmjs.org`, so the client
   fetches the hundreds of normal packages in a typical install directly from
   npm's CDN. The Worker stays out of the data path for everything it doesn't
