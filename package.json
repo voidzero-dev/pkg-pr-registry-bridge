@@ -5,9 +5,11 @@
   "type": "module",
   "description": "Version-gated npm registry bridge for pkg.pr.new Vite+ preview builds, running on Cloudflare Workers",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy && node scripts/warm.mjs && node scripts/e2e-bun.mjs",
-    "deploy:only": "wrangler deploy",
+    "dev": "vite dev",
+    "build": "vite build",
+    "prepare": "void prepare",
+    "deploy": "void deploy && node scripts/warm.mjs && node scripts/e2e-bun.mjs",
+    "deploy:only": "void deploy",
     "warm": "node scripts/warm.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -21,10 +23,11 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.16.20",
-    "@cloudflare/workers-types": "^4.20260626.1",
     "esbuild": "^0.28.1",
     "typescript": "^5.9.0",
+    "vite": "^8.1.0",
     "vitest": "^4.1.0",
+    "void": "^0.9.3",
     "wrangler": "^4.105.0"
   },
   "devEngines": {

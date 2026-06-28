@@ -34,7 +34,7 @@ import {
 
 type HonoEnv = { Bindings: Env }
 
-const app = new Hono<HonoEnv>()
+export const app = new Hono<HonoEnv>()
 
 app.get('/_health', (c) => c.json({ status: 'ok' }))
 
@@ -109,7 +109,7 @@ app.put('/-/tarball/*', async (c) => {
   const { name, version } = parsed
   assertPreviewTarget(c.env, name, version)
   if (!c.req.raw.body) throw new HttpError(400, 'Missing request body')
-  await c.env.TARBALL_CACHE.put(tarballKey(name, version), c.req.raw.body, {
+  await c.env.STORAGE.put(tarballKey(name, version), c.req.raw.body, {
     httpMetadata: {
       contentType: 'application/gzip',
       cacheControl: tarballCacheControl(),
@@ -156,7 +156,7 @@ app.post('/-/publish', async (c) => {
         shasum: pkg.shasum ?? '',
         integrity: pkg.integrity ?? '',
       }
-      return c.env.TARBALL_CACHE.put(metaKey(name, version), JSON.stringify(meta), {
+      return c.env.STORAGE.put(metaKey(name, version), JSON.stringify(meta), {
         httpMetadata: {
           contentType: 'application/json',
           cacheControl: tarballCacheControl(),
@@ -264,8 +264,8 @@ app.post('/-/purge', async (c) => {
   }
 
   await Promise.all([
-    c.env.TARBALL_CACHE.delete(tarballKey(name, version)),
-    c.env.TARBALL_CACHE.delete(metaKey(name, version)),
+    c.env.STORAGE.delete(tarballKey(name, version)),
+    c.env.STORAGE.delete(metaKey(name, version)),
     caches.default.delete(
       new Request(`${c.env.PUBLIC_BASE_URL}/tarballs/${name}/${version}.tgz`),
     ),

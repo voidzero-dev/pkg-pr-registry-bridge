@@ -11,7 +11,7 @@ inputs:
   bridge-url:
     description: 'Base URL of the registry bridge.'
     required: false
-    default: 'https://pkg-pr-registry-bridge.render.vip'
+    default: 'https://pkg-pr-registry-bridge.void.app'
   admin-token:
     description: 'Bridge ADMIN_TOKEN (store as a secret).'
     required: true

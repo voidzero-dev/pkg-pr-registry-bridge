@@ -5,14 +5,14 @@
 // static refs as part of `pnpm deploy`.
 //
 // Usage:
-//   node scripts/warm.mjs                    # publish the refs in wrangler.toml
+//   node scripts/warm.mjs                    # publish the refs in .env
 //   node scripts/warm.mjs <sha> [<sha>...]   # publish each commit
 //
 // Needs PKG_PR_BRIDGE_ADMIN_TOKEN (or ADMIN_TOKEN) in the environment.
 import { spawn } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { readWrangler, normalizeSha } from './lib/wrangler.mjs'
+import { readConfig, normalizeSha } from './lib/config.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ACTION = path.join(root, '.github/actions/publish-preview/dist/index.mjs')
@@ -36,7 +36,7 @@ function publish(sha, bridge) {
   })
 }
 
-const { baseUrl, refs } = readWrangler()
+const { baseUrl, refs } = readConfig()
 const bridge = (process.env.BRIDGE_URL || baseUrl || '').replace(/\/+$/, '')
 if (!bridge) {
   console.error('warm: could not determine bridge URL')

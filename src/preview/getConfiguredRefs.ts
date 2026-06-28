@@ -26,7 +26,7 @@ function canonical(ref: ConfiguredPreviewRef): string {
 async function readRefIndex(
   env: Env,
 ): Promise<{ index: RefIndex; etag: string | null }> {
-  const obj = await env.TARBALL_CACHE.get(REFS_INDEX_KEY)
+  const obj = await env.STORAGE.get(REFS_INDEX_KEY)
   if (!obj) return { index: {}, etag: null }
   const index = await obj.json<RefIndex>().catch(() => ({}) as RefIndex)
   return { index, etag: obj.etag }
@@ -49,7 +49,7 @@ async function mutateRefIndex(
       if (index[key].expiresAt <= now) delete index[key]
     }
     mutate(index)
-    const written = await env.TARBALL_CACHE.put(
+    const written = await env.STORAGE.put(
       REFS_INDEX_KEY,
       JSON.stringify(index),
       {
