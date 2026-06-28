@@ -22,6 +22,4 @@ export default defineEnv({
   MAX_TARBALL_BYTES: string().default('67108864'),
   // Bearer token guarding the admin endpoints. Secret: `void secret put ADMIN_TOKEN`.
   ADMIN_TOKEN: string().secret().optional(),
-  // Optional GitHub token for PR/commit existence checks on `/-/refs`.
-  GITHUB_TOKEN: string().secret().optional(),
 })

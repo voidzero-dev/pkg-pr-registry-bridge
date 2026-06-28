@@ -26,7 +26,6 @@ import {
 import type { PreviewMeta } from './tarball/buildPreviewTarball'
 import { metaKey, tarballKey } from './cache/r2Cache'
 import { requireAdmin } from './security/auth'
-import { verifyRefExists } from './github/verifyRef'
 import {
   packumentCacheControl,
   tarballCacheControl,
@@ -189,8 +188,7 @@ app.get('/-/refs', async (c) => {
 
 /**
  * Register a preview ref at runtime (no redeploy). Body:
- * `{ "ref": "commit.<sha>" }`. When `GITHUB_TOKEN` is set, the ref is
- * verified to exist in the repo before being accepted.
+ * `{ "ref": "commit.<sha>" }`.
  */
 app.post('/-/refs', async (c) => {
   admin(c)
@@ -202,21 +200,6 @@ app.post('/-/refs', async (c) => {
     ;[parsed] = parseConfiguredPreviewRefs(ref)
   } catch {
     throw new HttpError(400, `Invalid ref: ${ref || '(empty)'}`)
-  }
-
-  if (c.env.GITHUB_TOKEN) {
-    let exists: boolean
-    try {
-      exists = await verifyRefExists(c.env, parsed)
-    } catch (err) {
-      throw new HttpError(502, `Could not verify ref with GitHub: ${err}`)
-    }
-    if (!exists) {
-      throw new HttpError(
-        404,
-        `Ref not found in ${c.env.PREVIEW_OWNER}/${c.env.PREVIEW_REPO}: ${ref}`,
-      )
-    }
   }
 
   try {

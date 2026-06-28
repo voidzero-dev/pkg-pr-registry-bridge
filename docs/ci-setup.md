@@ -56,5 +56,3 @@ curl https://pkg-pr-registry-bridge.void.app/-/refs
   `PKG_PR_BRIDGE_ADMIN_TOKEN=… pnpm warm <sha>`.
 - A long-lived PR accumulates one `commit.<sha>` ref per pushed commit. Purge
   stale ones with `POST /-/purge` if the packument grows too large.
-- Enable strict ref validation by setting `GITHUB_TOKEN` (read access to the
-  repo): `POST /-/refs` then rejects refs that do not exist in the repo.
