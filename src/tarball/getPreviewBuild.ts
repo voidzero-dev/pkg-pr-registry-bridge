@@ -192,18 +192,20 @@ export async function prewarmVersion(
   // The platform binaries are the workspace packages among vite-plus's
   // optionalDependencies that are not the preview packages themselves, derived
   // from the WORKSPACE_PACKAGES allowlist so adding one needs no code change.
-  const platforms = Object.keys(
+  // Build each at the version vite-plus declares for it (what the package
+  // manager will request), not at the parent version.
+  const platforms = Object.entries(
     (vitePlus.packageJson.optionalDependencies as Record<string, string>) ?? {},
-  ).filter((n) => isWorkspacePackage(n, env) && !isPreviewPackage(n))
+  ).filter(([name]) => isWorkspacePackage(name, env) && !isPreviewPackage(name))
 
   const start = Date.now()
-  for (const pkg of platforms) {
+  for (const [pkg, depVersion] of platforms) {
     if (Date.now() - start > budgetMs) break
     try {
-      const existing = await env.TARBALL_CACHE.head(tarballKey(pkg, version))
-      if (!existing) await buildPlatformTarballToR2(env, pkg, version)
+      const existing = await env.TARBALL_CACHE.head(tarballKey(pkg, depVersion))
+      if (!existing) await buildPlatformTarballToR2(env, pkg, depVersion)
     } catch (err) {
-      console.warn(`prewarm ${pkg}@${version}:`, err)
+      console.warn(`prewarm ${pkg}@${depVersion}:`, err)
     }
   }
 }

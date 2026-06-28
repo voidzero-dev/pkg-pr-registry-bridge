@@ -1,6 +1,7 @@
-import { SELF } from 'cloudflare:test'
+import { SELF, env } from 'cloudflare:test'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createTarGzip, parseTarGzip } from 'nanotar'
+import worker from '../src/index'
 
 const BASE = 'https://bridge.example.com'
 
@@ -496,6 +497,44 @@ describe('admin: webhook', () => {
     })
     expect(res.status).toBe(200)
     expect((await res.json()) as any).toEqual({ ok: true })
+  })
+})
+
+describe('prebuild queue consumer', () => {
+  it('builds a version into R2 and acks the message', async () => {
+    let acked = false
+    let retried = false
+    const batch = {
+      queue: 'pkg-pr-registry-bridge-prebuild',
+      messages: [
+        {
+          id: '1',
+          timestamp: new Date(0),
+          attempts: 1,
+          body: { version: '0.0.0-commit.a832a55' },
+          ack: () => {
+            acked = true
+          },
+          retry: () => {
+            retried = true
+          },
+        },
+      ],
+    }
+
+    await worker.queue!(batch as any, env as any)
+
+    expect(acked).toBe(true)
+    expect(retried).toBe(false)
+    // The platform binary vite-plus declares (darwin-arm64@PLATFORM_SHA) is now
+    // built and served from R2 without a cold build.
+    const res = await SELF.fetch(
+      `${BASE}/tarballs/@voidzero-dev/vite-plus-darwin-arm64/0.0.0-commit.${PLATFORM_SHA}.tgz`,
+    )
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-length')).toBe(
+      String((await res.arrayBuffer()).byteLength),
+    )
   })
 })
 
