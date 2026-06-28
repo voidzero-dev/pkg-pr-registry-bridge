@@ -27,39 +27,18 @@ export interface Env {
   WORKSPACE_PACKAGES: string
   /** Max upstream tarball size in bytes (string-typed var). */
   MAX_TARBALL_BYTES: string
-  /** Durable cache for generated tarballs and rewritten package.json. */
+  /**
+   * Durable store for preview tarballs and their metadata. Artifacts are built
+   * and hashed in CI (the publish action) and uploaded here; the Worker only
+   * serves them, so it never decompresses or hashes a large payload itself.
+   */
   TARBALL_CACHE: R2Bucket
   /** Dynamic preview-ref registry (refs added at runtime, no redeploy). */
   PREVIEW_REFS?: KVNamespace
-  /**
-   * Queue for pre-building a registered version's tarballs off the request
-   * path. A flaky cold build (an in-Worker OOM that returns Cloudflare 1102
-   * cannot be caught/retried in-request) is retried durably by the queue.
-   */
-  PREBUILD_QUEUE?: Queue<PrebuildMessage>
   /** Token for GitHub PR/commit existence checks (secret). */
   GITHUB_TOKEN?: string
-  /** Bearer token guarding the admin endpoints (`/-/refs`, `/-/purge`). */
+  /** Bearer token guarding the admin endpoints (`/-/refs`, `/-/purge`, etc.). */
   ADMIN_TOKEN?: string
-  /** Shared secret for verifying GitHub webhook payloads (`/-/webhook`). */
-  GITHUB_WEBHOOK_SECRET?: string
-}
-
-/**
- * A prebuild queue task, in one of three shapes so each invocation does a single
- * bounded pass over the ~48MB payload (a flaky one retries only itself):
- * - `{version}` — version task: build the preview packages, fan out one build
- *   task per platform binary.
- * - `{version, name}` — build task: build that binary into R2, then enqueue its
- *   hash task.
- * - `{version, name, hash}` — hash task: compute the binary's integrity over the
- *   finished R2 object. Separate from the build because the build's CRC32 and
- *   the SHA-512 are each a full pass, and together exceed the CPU limit.
- */
-export interface PrebuildMessage {
-  version: string
-  name?: string
-  hash?: boolean
 }
 
 const DEFAULT_MAX_TARBALL_BYTES = 64 * 1024 * 1024

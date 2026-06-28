@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
-import type { Env, PrebuildMessage } from './config'
+import type { Env } from './config'
 import { HttpError } from './httpError'
 import { isWorkspacePackage } from './preview/packages'
 import { parsePreviewVersion } from './preview/parsePreviewVersion'
@@ -14,26 +14,19 @@ import {
   parseNpmTarballPath,
   parsePackagePath,
   parseTarballPath,
+  parseUploadPath,
 } from './registry/parsePackageName'
 import { fetchNpmPackument } from './registry/fetchNpmPackument'
 import { buildVersionMetadata } from './registry/buildVersionMetadata'
 import { redirectToNpm } from './registry/redirectToNpm'
 import {
-  fanOutVersion,
   getPreviewMeta,
   getPreviewTarballBody,
-  prebuildPlatformBuild,
-  prebuildPlatformHash,
-  prewarmVersion,
 } from './tarball/getPreviewBuild'
+import type { PreviewMeta } from './tarball/buildPreviewTarball'
 import { metaKey, tarballKey } from './cache/r2Cache'
 import { requireAdmin } from './security/auth'
 import { verifyRefExists } from './github/verifyRef'
-import {
-  isPkgPrNewComment,
-  refsFromBotComment,
-  verifyGitHubSignature,
-} from './github/webhook'
 import {
   packumentCacheControl,
   tarballCacheControl,
@@ -49,32 +42,15 @@ const admin = (c: { req: { header: (k: string) => string | undefined }; env: Env
   requireAdmin({ env: c.env, authorization: c.req.header('authorization') })
 
 /**
- * Pre-build a version's tarballs off the request path. Prefer the durable
- * prebuild queue (a flaky cold build is retried until it succeeds); fall back to
- * `ctx.waitUntil` when the queue is not bound (e.g. local dev / tests).
- */
-function schedulePrebuild(
-  c: { env: Env; executionCtx: { waitUntil: (p: Promise<unknown>) => void } },
-  version: string,
-): void {
-  if (c.env.PREBUILD_QUEUE) {
-    c.executionCtx.waitUntil(c.env.PREBUILD_QUEUE.send({ version }))
-  } else {
-    c.executionCtx.waitUntil(prewarmVersion(c.env, version))
-  }
-}
-
-/**
- * Serve a generated preview tarball from R2 (built together with the meta
- * integrity), never the per-colo Cache API. An edge-cached tarball can outlive a
- * content change and then mismatch the integrity advertised in the packument
- * (IntegrityCheckFailed). R2 is the single source of truth.
+ * Serve a preview tarball from R2, the single source of truth (never the
+ * per-colo Cache API: an edge-cached tarball can outlive a content change and
+ * then mismatch the integrity advertised in the packument). A platform binary
+ * not yet uploaded by CI redirects to pkg.pr.new, which serves identical bytes.
  */
 async function serveTarball(
   env: Env,
   name: string,
   version: string,
-  requestUrl: string,
 ): Promise<Response> {
   if (!isWorkspacePackage(name, env)) {
     throw new HttpError(404, `Unknown preview package: ${name}`)
@@ -84,10 +60,9 @@ async function serveTarball(
   }
   const result = await getPreviewTarballBody(env, name, version)
   if (result.kind === 'redirect') {
-    // Just built into R2; redirect to the same URL so the cached path serves it.
     return new Response(null, {
       status: 302,
-      headers: { location: requestUrl, 'cache-control': 'no-store' },
+      headers: { location: result.location, 'cache-control': 'no-store' },
     })
   }
   const headers: Record<string, string> = {
@@ -100,16 +75,98 @@ async function serveTarball(
   return new Response(result.body, { headers })
 }
 
-/**
- * Preview tarball endpoint. Serves a generated tarball from R2, then by
- * generating it from pkg.pr.new.
- */
+/** Preview tarball endpoint: serve from R2, else (platform) redirect upstream. */
 app.get('/tarballs/*', async (c) => {
   const parsed = parseTarballPath(new URL(c.req.url).pathname)
   if (!parsed) throw new HttpError(404, 'Not found')
   // `await` so a thrown HttpError unwinds inside this handler's frame and is
   // routed to onError, rather than rejecting the returned promise unhandled.
-  return await serveTarball(c.env, parsed.name, parsed.version, c.req.url)
+  return await serveTarball(c.env, parsed.name, parsed.version)
+})
+
+/**
+ * Upload a prebuilt tarball (admin). The publish action builds and hashes the
+ * artifacts in CI (no per-invocation CPU/memory limit there) and PUTs the bytes
+ * here; the Worker streams the request body straight into R2, a passthrough that
+ * never buffers or hashes the payload, so it cannot OOM regardless of size.
+ */
+app.put('/-/tarball/*', async (c) => {
+  admin(c)
+  const parsed = parseUploadPath(new URL(c.req.url).pathname)
+  if (!parsed) throw new HttpError(404, 'Not found')
+  const { name, version } = parsed
+  if (!isWorkspacePackage(name, c.env)) {
+    throw new HttpError(404, `Unknown preview package: ${name}`)
+  }
+  if (!parsePreviewVersion(version)) {
+    throw new HttpError(400, `Invalid preview version: ${version}`)
+  }
+  if (!c.req.raw.body) throw new HttpError(400, 'Missing request body')
+  await c.env.TARBALL_CACHE.put(tarballKey(name, version), c.req.raw.body, {
+    httpMetadata: {
+      contentType: 'application/gzip',
+      cacheControl: tarballCacheControl(),
+    },
+  })
+  return c.json({ uploaded: { package: name, version } }, 201)
+})
+
+/**
+ * Publish preview metadata and register the ref (admin), in one call. Body:
+ * `{ "ref": "commit.<sha>", "packages": [{ name, version, packageJson,
+ * integrity, shasum }] }`. The publish action calls this AFTER uploading the
+ * tarballs, so a stored meta-with-integrity always has its bytes in R2. Each
+ * package's meta is what the packument serves (package.json fields + integrity).
+ */
+app.post('/-/publish', async (c) => {
+  admin(c)
+  const body = (await c.req.json().catch(() => ({}))) as {
+    ref?: string
+    packages?: Array<{
+      name?: string
+      version?: string
+      packageJson?: Record<string, any>
+      integrity?: string
+      shasum?: string
+    }>
+  }
+  const ref = (body.ref ?? '').trim()
+  const packages = Array.isArray(body.packages) ? body.packages : []
+  if (!ref) throw new HttpError(400, 'Missing ref')
+  if (packages.length === 0) throw new HttpError(400, 'Missing packages')
+
+  const published: string[] = []
+  for (const pkg of packages) {
+    const name = pkg.name ?? ''
+    const version = pkg.version ?? ''
+    if (!isWorkspacePackage(name, c.env)) {
+      throw new HttpError(400, `Unknown preview package: ${name || '(empty)'}`)
+    }
+    if (!parsePreviewVersion(version)) {
+      throw new HttpError(400, `Invalid preview version: ${version || '(empty)'}`)
+    }
+    const meta: PreviewMeta = {
+      packageJson: pkg.packageJson ?? { name, version },
+      shasum: pkg.shasum ?? '',
+      integrity: pkg.integrity ?? '',
+    }
+    await c.env.TARBALL_CACHE.put(metaKey(name, version), JSON.stringify(meta), {
+      httpMetadata: {
+        contentType: 'application/json',
+        cacheControl: tarballCacheControl(),
+      },
+    })
+    published.push(`${name}@${version}`)
+  }
+
+  let parsed
+  try {
+    ;[parsed] = parseConfiguredPreviewRefs(ref)
+    await registerRef(c.env, ref)
+  } catch (err) {
+    throw new HttpError(400, `Invalid or unregisterable ref: ${ref} (${err})`)
+  }
+  return c.json({ ref, version: parsed.version, published }, 201)
 })
 
 /** List the configured preview refs (static env + runtime KV). Public read. */
@@ -161,39 +218,10 @@ app.post('/-/refs', async (c) => {
   } catch (err) {
     throw new HttpError(503, String(err))
   }
-  // Pre-build the tarballs (incl. the heavy platform binaries) off the request
-  // path, so the first install of this commit is served from cache.
-  schedulePrebuild(c, parsed.version)
+  // The tarballs/integrity are built and uploaded by the publish action (CI);
+  // until then this ref's packument uses name-derived platform metas and the
+  // tarball endpoint redirects platform binaries to pkg.pr.new.
   return c.json({ added: ref, version: parsed.version, tag: parsed.tag }, 201)
-})
-
-/**
- * Enqueue a prebuild for a version (no redeploy, no re-registration). Body:
- * `{ "ref": "commit.<sha>" }` or `{ "version": "0.0.0-commit.<sha>" }`. The
- * consumer builds the version's tarballs into R2 with integrity off the request
- * path, retrying durably. Use this to (re)build an already-registered ref, e.g.
- * to backfill integrity onto binaries built before it was computed.
- */
-app.post('/-/prebuild', async (c) => {
-  admin(c)
-  const body = (await c.req.json().catch(() => ({}))) as {
-    ref?: string
-    version?: string
-  }
-  let version = (body.version ?? '').trim()
-  if (!version && body.ref) {
-    try {
-      const [parsed] = parseConfiguredPreviewRefs(body.ref.trim())
-      version = parsed.version
-    } catch {
-      throw new HttpError(400, `Invalid ref: ${body.ref}`)
-    }
-  }
-  if (!parsePreviewVersion(version)) {
-    throw new HttpError(400, `Invalid version: ${version || '(empty)'}`)
-  }
-  schedulePrebuild(c, version)
-  return c.json({ queued: version })
 })
 
 /** Unregister a runtime preview ref. Body: `{ "ref": "commit.<sha>" }`. */
@@ -207,52 +235,6 @@ app.delete('/-/refs', async (c) => {
     throw new HttpError(400, String(err))
   }
   return c.json({ removed: ref })
-})
-
-/**
- * GitHub webhook receiver. Configure a repo webhook (content-type
- * application/json, the `Issue comments` event) pointing here with a shared
- * secret. When the pkg.pr.new bot comments on a PR (i.e. a build was just
- * published), the PR ref and the build's commit refs are auto-registered, so
- * new previews become installable with no redeploy and no manual call.
- */
-app.post('/-/webhook', async (c) => {
-  const secret = c.env.GITHUB_WEBHOOK_SECRET
-  if (!secret) throw new HttpError(503, 'Webhook is not configured')
-
-  const raw = await c.req.text()
-  const signature = c.req.header('x-hub-signature-256') ?? ''
-  if (!(await verifyGitHubSignature(secret, raw, signature))) {
-    throw new HttpError(401, 'Invalid signature')
-  }
-
-  const event = c.req.header('x-github-event')
-  if (event === 'ping') return c.json({ ok: true })
-
-  let payload: any
-  try {
-    payload = JSON.parse(raw)
-  } catch {
-    throw new HttpError(400, 'Invalid JSON payload')
-  }
-
-  if (!isPkgPrNewComment(event, payload)) {
-    return c.json({ ignored: event ?? 'unknown' })
-  }
-
-  const refs = refsFromBotComment(payload.comment.body ?? '')
-  const registered: string[] = []
-  for (const ref of refs) {
-    try {
-      const parsed = await registerRef(c.env, ref)
-      registered.push(parsed.version)
-      // Pre-build off the request path so installs hit the cache (see above).
-      schedulePrebuild(c, parsed.version)
-    } catch (err) {
-      console.warn(`Webhook failed to register ref ${ref}:`, err)
-    }
-  }
-  return c.json({ registered })
 })
 
 /**
@@ -307,7 +289,7 @@ app.get('*', async (c) => {
     isWorkspacePackage(npmTarball.name, c.env) &&
     parsePreviewVersion(npmTarball.version)
   ) {
-    return await serveTarball(c.env, npmTarball.name, npmTarball.version, c.req.url)
+    return await serveTarball(c.env, npmTarball.name, npmTarball.version)
   }
 
   const pkgReq = parsePackagePath(pathname)
@@ -368,29 +350,4 @@ app.onError((err, c) => {
   return c.json({ error: 'Internal error' }, 500)
 })
 
-export default {
-  fetch: app.fetch,
-
-  /**
-   * Prebuild queue consumer. A version task fans out a build task per platform
-   * binary; a build task builds that one binary and enqueues its hash task; a
-   * hash task computes its integrity. Splitting build (CRC32) from hash
-   * (SHA-512) keeps each invocation to one ~48MB pass, under the CPU limit. If a
-   * build OOMs (a hard 1102 that kills the isolate uncatchably) the message is
-   * not acked and the queue retries just that binary. Catchable failures (e.g. a
-   * 404 upstream) are caught and acked, so they do not retry pointlessly.
-   */
-  async queue(batch: MessageBatch<PrebuildMessage>, env: Env): Promise<void> {
-    for (const message of batch.messages) {
-      const { version, name, hash } = message.body
-      try {
-        if (name && hash) await prebuildPlatformHash(env, name, version)
-        else if (name) await prebuildPlatformBuild(env, name, version)
-        else await fanOutVersion(env, version)
-      } catch (err) {
-        console.warn(`prebuild ${name ?? version}:`, err)
-      }
-      message.ack()
-    }
-  },
-} satisfies ExportedHandler<Env, PrebuildMessage>
+export default { fetch: app.fetch } satisfies ExportedHandler<Env>

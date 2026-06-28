@@ -51,17 +51,15 @@ export interface TarballRequest {
   version: string
 }
 
-/**
- * Parse the bridge's own preview tarball path:
- *   /tarballs/vite-plus/0.0.0-commit.a832a55.tgz
- *   /tarballs/@voidzero-dev/vite-plus-core/0.0.0-commit.a832a55.tgz
- */
-export function parseTarballPath(pathname: string): TarballRequest | null {
+/** Parse a `<prefix><name>/<version>.tgz` path (name may be scoped). */
+function parsePrefixedTarballPath(
+  pathname: string,
+  prefix: string,
+): TarballRequest | null {
   const decoded = decodePath(pathname)
-  if (!decoded || !decoded.startsWith('tarballs/')) return null
+  if (!decoded || !decoded.startsWith(prefix)) return null
 
-  const rest = decoded.slice('tarballs/'.length)
-  const segments = rest.split('/')
+  const segments = decoded.slice(prefix.length).split('/')
   const file = segments.pop()
   if (!file || !file.endsWith('.tgz')) return null
 
@@ -69,6 +67,24 @@ export function parseTarballPath(pathname: string): TarballRequest | null {
   const name = segments.join('/')
   if (!name || !version) return null
   return { name, version }
+}
+
+/**
+ * Parse the bridge's own preview tarball path:
+ *   /tarballs/vite-plus/0.0.0-commit.a832a55.tgz
+ *   /tarballs/@voidzero-dev/vite-plus-core/0.0.0-commit.a832a55.tgz
+ */
+export function parseTarballPath(pathname: string): TarballRequest | null {
+  return parsePrefixedTarballPath(pathname, 'tarballs/')
+}
+
+/**
+ * Parse the admin artifact-upload path (CI uploads a prebuilt tarball here):
+ *   /-/tarball/vite-plus/0.0.0-commit.a832a55.tgz
+ *   /-/tarball/@voidzero-dev/vite-plus-core/0.0.0-commit.a832a55.tgz
+ */
+export function parseUploadPath(pathname: string): TarballRequest | null {
+  return parsePrefixedTarballPath(pathname, '-/tarball/')
 }
 
 /**

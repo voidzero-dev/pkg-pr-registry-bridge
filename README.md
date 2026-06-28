@@ -41,34 +41,34 @@ for a runnable example.
   the npm packument (or synthesizes an empty one if the package is not on npm),
   injects the configured preview versions, and leaves existing versions and
   `latest` untouched.
-- **Tarball** (`GET /tarballs/<pkg>/<version>.tgz`): downloads the upstream
-  pkg.pr.new tarball, rewrites `package/package.json` (name, version,
-  dependencies), repacks, and serves it. Tarballs are cached in R2; the first
-  request per `(name, version)` builds/stores, and the deploy-time warm step
-  pre-populates the preview packages. The same build is also served at the
-  npm-convention path (`GET /<pkg>/-/<name>-<version>.tgz`) for clients and
-  lockfiles that synthesize that URL instead of reading `dist.tarball`;
-  non-preview packages/versions on that path are redirected to npm.
+- **Tarball** (`GET /tarballs/<pkg>/<version>.tgz`): served straight from R2,
+  the single source of truth. Artifacts are built and hashed **in CI** (the
+  publish action below) and uploaded, so the Worker only streams bytes, it never
+  decompresses or hashes a payload, so it cannot hit the Worker CPU/memory limits
+  regardless of size. The same object is served at the npm-convention path
+  (`GET /<pkg>/-/<name>-<version>.tgz`) for clients and lockfiles that synthesize
+  that URL instead of reading `dist.tarball`; non-preview packages/versions there
+  are redirected to npm.
 - **Transitive deps**: a preview build's `optionalDependencies` point at
   pkg.pr.new (the platform binaries). The bridge rewrites those URLs to
   synthetic **version strings** (`0.0.0-commit.<sha>`) and serves packuments for
   those packages too, so they resolve through the bridge like the other preview
   packages, and the package manager downloads only the binary for the current
-  platform (reading os/cpu from the packument) instead of all of them. These
-  native binaries are large (tens of MB decompressed). The build decompresses
-  the upstream **once** into a buffer, rewrites only `package.json` in place (so
-  the binary is never copied again), and frames the buffer as gzip
-  "stored"/uncompressed blocks into an R2 **multipart** upload. The cold request
-  returns a 302 to itself so the retry serves the finished object straight from
-  R2 with a Content-Length (a plain passthrough that cannot be truncated; a
-  Worker-generated transform response could be). A cold build is close to the
-  Worker memory limit and occasionally OOMs (a hard 1102 that cannot be caught
-  in-request), so registering a ref (admin or webhook) enqueues it on a
-  **prebuild queue**: a consumer builds the tarballs into R2 off the request
-  path with concurrency 1 and durable retries, so a flaky build is retried until
-  it succeeds and installs hit the cache. The deploy-time warm step pre-builds
-  too. The preview packages themselves are small and keep the buffered,
-  R2-cached, integrity path.
+  platform (reading os/cpu from the packument) instead of all of them. The
+  binaries are large (tens of MB), so they are repacked + hashed in CI (where
+  there is no per-request limit) and uploaded; the binary's `package.json`
+  version is rewritten to the synthetic version so it matches what the resolver
+  expects (pnpm's strict store check rejects a mismatch). A platform binary not
+  yet uploaded for a registered ref redirects to pkg.pr.new as a best-effort
+  fallback. The small preview packages can also be built in-Worker on demand as a
+  fallback (they are small enough to stay within the limits).
+- **Publishing** (`POST /-/publish`, `PUT /-/tarball/...`): the
+  [publish action](#publishing-from-ci) downloads each package from pkg.pr.new,
+  rewrites + re-packs + hashes it, `PUT`s the bytes, and `POST`s the metadata
+  (rewritten package.json + integrity) and registers the ref, all in one CI run.
+  Because integrity is computed over the exact bytes served, every package
+  manager that verifies it (npm, pnpm, yarn) gets a match, and bun/yarn-berry pin
+  it on first install.
 - **Everything else**: 302-redirected to `registry.npmjs.org`, so the client
   fetches the hundreds of normal packages in a typical install directly from
   npm's CDN. The Worker stays out of the data path for everything it doesn't
@@ -151,40 +151,27 @@ curl -X DELETE -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: applica
 # Purge a generated build from the caches (R2 + edge)
 curl -X POST -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \
   -d '{"package":"vite-plus","version":"0.0.0-commit.a832a55"}' https://.../-/purge
-
-# Enqueue a prebuild for a version (builds its tarballs into R2 with integrity,
-# off the request path, durably retried). Use to (re)build an already-registered
-# ref without re-registering.
-curl -X POST -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \
-  -d '{"ref":"commit.a832a55"}' https://.../-/prebuild
 ```
+
+Tarball upload (`PUT /-/tarball/<pkg>/<version>.tgz`) and publish
+(`POST /-/publish`, stores metadata + registers the ref) are also admin-guarded;
+they are driven by the [publish action](#publishing-from-ci), not by hand.
 
 A registered ref is reflected immediately and built into the packument on the
 next request (and into R2 on first fetch). This is the no-redeploy path for
 exposing new pkg.pr.new builds.
 
-### Register and pre-build a commit (`pnpm warm <sha>`)
+### Publishing from CI
 
-To make a specific commit install-reliable on the first try, register it **and**
-pre-build all its tarballs (including the large platform binaries, whose cold
-build is heavy) into R2 in one step:
+The heavy work (download, rewrite, re-pack, hash) runs in CI via a reusable
+action, so the Worker only serves. Wire it into vite-plus's pkg.pr.new workflow:
+see [`docs/ci-setup.md`](./docs/ci-setup.md). To publish by hand (same code
+path), run `PKG_PR_BRIDGE_ADMIN_TOKEN=… pnpm warm <sha>`; with no arguments it
+publishes the refs in `wrangler.toml` (also part of `pnpm run deploy`).
 
-```bash
-PKG_PR_BRIDGE_ADMIN_TOKEN=… pnpm warm <commit-sha>      # or commit.<sha>
-```
-
-This registers the ref via `POST /-/refs`, then warms `vite-plus`,
-`@voidzero-dev/vite-plus-core`, and every platform binary in vite-plus's
-`optionalDependencies` (with retries). After it finishes, installs of that commit
-are served entirely from the R2 cache. With no arguments, `pnpm warm` warms the
-refs configured in `wrangler.toml` (this also runs as part of `pnpm run deploy`).
-
-### Auto-register via webhook
-
-`POST /-/webhook` is a GitHub webhook receiver (HMAC-verified with
-`GITHUB_WEBHOOK_SECRET`). Point a repo `Issue comments` webhook at it: when the
-`pkg-pr-new[bot]` comments that a build was published, the bridge auto-registers
-the build's commit refs. Setup: [`docs/webhook-setup.md`](./docs/webhook-setup.md).
+The action's bundle is committed
+(`.github/actions/publish-preview/dist/index.mjs`); rebuild it with
+`pnpm build:action` after changing the action or any module it imports.
 
 ## Configuration
 
@@ -206,7 +193,6 @@ Bindings/secrets:
 - `PREVIEW_REFS` (KV) - runtime-registered refs.
 - `ADMIN_TOKEN` (secret) - guards the admin endpoints.
 - `GITHUB_TOKEN` (secret, optional) - enables commit existence checks on `/-/refs`.
-- `GITHUB_WEBHOOK_SECRET` (secret, optional) - verifies the `/-/webhook` receiver.
 
 ## Develop
 
@@ -228,18 +214,17 @@ pnpm exec wrangler r2 bucket create pkg-pr-registry-bridge-tarballs
 pnpm run deploy
 ```
 
-`pnpm run deploy` runs `wrangler deploy`, then `pnpm warm` (pre-builds the
-configured preview refs into R2 so installs are served from cache), then
-`pnpm test:e2e` (a real `bun install` against the live bridge that asserts the
-alias/override resolves to the synthetic version). Use `pnpm run deploy:only` to
-deploy without the post-deploy checks.
+`pnpm run deploy` runs `wrangler deploy`, then `pnpm warm` (publishes the
+configured preview refs into R2 via the action so installs are served from
+cache), then `pnpm test:e2e` (a real `bun install` against the live bridge that
+asserts the alias/override resolves to the synthetic version). Use
+`pnpm run deploy:only` to deploy without the post-deploy checks.
 
 ## Status
 
-MVP1 + MVP2 of the RFC, deployed: default-registry bridge with npm redirect
-fallback, `commit.<sha>` preview injection, tarball rewrite, R2 + edge
-caching, deploy-time warm, computed SHA-512/SHA-1 integrity, KV-backed dynamic
-refs, authenticated admin endpoints (`/-/refs`, `/-/purge`), optional GitHub
-existence checks, and the pkg.pr.new auto-register webhook (`/-/webhook`), plus a
-bun end-to-end check. Remaining (MVP3): more workspace packages via config and
-metrics.
+Deployed: default-registry bridge with npm redirect fallback, `commit.<sha>`
+preview injection, R2-served tarballs with SHA-512/SHA-1 integrity, CI-side
+build/hash/upload via the [publish action](#publishing-from-ci) (the Worker
+never decompresses or hashes), KV-backed dynamic refs, authenticated admin
+endpoints (`/-/refs`, `/-/purge`, `/-/publish`, `/-/tarball`), and optional
+GitHub existence checks, plus a bun end-to-end check.

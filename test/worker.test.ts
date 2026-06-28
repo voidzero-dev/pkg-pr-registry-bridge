@@ -1,7 +1,6 @@
-import { SELF, env } from 'cloudflare:test'
+import { SELF } from 'cloudflare:test'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createTarGzip, parseTarGzip } from 'nanotar'
-import worker from '../src/index'
 
 const BASE = 'https://bridge.example.com'
 
@@ -178,34 +177,44 @@ describe('packument endpoint', () => {
     )
   })
 
-  it('serves a platform-binary tarball rewritten to the synthetic version', async () => {
+  it('redirects an un-uploaded platform binary to pkg.pr.new', async () => {
+    // The Worker never builds platform binaries; until CI uploads one, the
+    // tarball endpoint redirects to pkg.pr.new (which serves identical bytes).
     const res = await SELF.fetch(
-      `${BASE}/tarballs/@voidzero-dev/vite-plus-darwin-arm64/0.0.0-commit.${PLATFORM_SHA}.tgz`,
+      `${BASE}/tarballs/@voidzero-dev/vite-plus-darwin-arm64/0.0.0-commit.deadbeefdeadbeefdeadbeefdeadbeefdeadbeef.tgz`,
+      { redirect: 'manual' },
     )
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe(
+      'https://pkg.pr.new/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-darwin-arm64@deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+    )
+  })
+
+  it('serves an uploaded platform binary from R2 with a Content-Length', async () => {
+    const ver = '0.0.0-commit.cafebabecafebabecafebabecafebabecafebabe'
+    const pkg = '@voidzero-dev/vite-plus-darwin-arm64'
+    const tarball = await makeTarball({ name: pkg, version: ver, os: ['darwin'], cpu: ['arm64'] })
+
+    const up = await SELF.fetch(`${BASE}/-/tarball/${pkg}/${ver}.tgz`, {
+      method: 'PUT',
+      headers: AUTH,
+      body: tarball,
+    })
+    expect(up.status).toBe(201)
+
+    const res = await SELF.fetch(`${BASE}/tarballs/${pkg}/${ver}.tgz`)
     expect(res.status).toBe(200)
-    // Served from R2 with a Content-Length so a truncated transfer is
-    // detectable (a streamed transform response was silently truncated, which
-    // surfaced to clients as a gunzip "unexpected end of file").
     const bytes = new Uint8Array(await res.arrayBuffer())
     expect(res.headers.get('content-length')).toBe(String(bytes.byteLength))
+    expect(bytes).toEqual(tarball)
+  })
 
-    const files = await parseTarGzip(bytes)
-    const pkg = JSON.parse(
-      new TextDecoder().decode(
-        files.find((f) => f.name === 'package/package.json')!.data,
-      ),
+  it('rejects an unauthenticated upload', async () => {
+    const res = await SELF.fetch(
+      `${BASE}/-/tarball/@voidzero-dev/vite-plus-darwin-arm64/0.0.0-commit.${PLATFORM_SHA}.tgz`,
+      { method: 'PUT', body: 'x' },
     )
-    expect(pkg.name).toBe('@voidzero-dev/vite-plus-darwin-arm64')
-    expect(pkg.version).toBe(`0.0.0-commit.${PLATFORM_SHA}`)
-    expect(pkg.os).toEqual(['darwin']) // platform fields preserved
-    expect(pkg.cpu).toEqual(['arm64'])
-
-    // Second fetch is served from the R2 cache (built once).
-    const again = await SELF.fetch(
-      `${BASE}/tarballs/@voidzero-dev/vite-plus-darwin-arm64/0.0.0-commit.${PLATFORM_SHA}.tgz`,
-    )
-    expect(again.status).toBe(200)
-    expect(again.headers.get('content-length')).toBe(String(bytes.byteLength))
+    expect(res.status).toBe(401)
   })
 
   it('redirects non-allowlisted packages to npm', async () => {
@@ -302,50 +311,54 @@ describe('integrity', () => {
     expect(dist.shasum).toMatch(/^[0-9a-f]{40}$/)
   })
 
-  it('advertises a platform binary integrity matching the served tarball', async () => {
+  it('advertises a CI-published platform binary integrity matching the served tarball', async () => {
     const ver = `0.0.0-commit.${PLATFORM_SHA}`
     const pkg = '@voidzero-dev/vite-plus-darwin-arm64'
+    const tarball = await makeTarball({ name: pkg, version: ver, os: ['darwin'], cpu: ['arm64'] })
+    const integrity = `sha512-${btoa(
+      String.fromCharCode(...new Uint8Array(await crypto.subtle.digest('SHA-512', tarball))),
+    )}`
 
-    // Build and hash are separate queue invocations (each one ~48MB pass). The
-    // test harness does not auto-run enqueued messages, so drive both: the build
-    // task writes the tarball, the hash task backfills integrity over it.
-    const runTask = (body: Record<string, unknown>) =>
-      worker.queue!(
-        {
-          queue: 'pkg-pr-registry-bridge-prebuild',
-          messages: [
-            {
-              id: '1',
-              timestamp: new Date(0),
-              attempts: 1,
-              body,
-              ack: () => {},
-              retry: () => {},
-            },
-          ],
-        } as any,
-        env as any,
-      )
-    await runTask({ version: ver, name: pkg })
-    await runTask({ version: ver, name: pkg, hash: true })
-
-    const tres = await SELF.fetch(`${BASE}/tarballs/${pkg}/${ver}.tgz`)
-    expect(tres.status).toBe(200)
-    const tarball = new Uint8Array(await tres.arrayBuffer())
-    const digest = new Uint8Array(await crypto.subtle.digest('SHA-512', tarball))
-    const expected = `sha512-${btoa(String.fromCharCode(...digest))}`
-
-    // Register the ref so the packument injects this version, then read it.
-    await SELF.fetch(`${BASE}/-/refs`, {
+    // CI uploads the tarball, then publishes its meta + registers the ref.
+    const up = await SELF.fetch(`${BASE}/-/tarball/${pkg}/${ver}.tgz`, {
+      method: 'PUT',
+      headers: AUTH,
+      body: tarball,
+    })
+    expect(up.status).toBe(201)
+    const pub = await SELF.fetch(`${BASE}/-/publish`, {
       method: 'POST',
       headers: { ...AUTH, 'content-type': 'application/json' },
-      body: JSON.stringify({ ref: `commit.${PLATFORM_SHA}` }),
+      body: JSON.stringify({
+        ref: `commit.${PLATFORM_SHA}`,
+        packages: [
+          {
+            name: pkg,
+            version: ver,
+            packageJson: { name: pkg, version: ver, os: ['darwin'], cpu: ['arm64'] },
+            integrity,
+            shasum: '',
+          },
+        ],
+      }),
     })
+    expect(pub.status).toBe(201)
+
+    // The tarball serves from R2, and the packument advertises an integrity that
+    // matches those exact served bytes.
+    const tres = await SELF.fetch(`${BASE}/tarballs/${pkg}/${ver}.tgz`)
+    expect(tres.status).toBe(200)
+    const served = new Uint8Array(await tres.arrayBuffer())
+    const servedIntegrity = `sha512-${btoa(
+      String.fromCharCode(...new Uint8Array(await crypto.subtle.digest('SHA-512', served))),
+    )}`
+    expect(servedIntegrity).toBe(integrity)
+
     const pres = await SELF.fetch(`${BASE}/@voidzero-dev%2Fvite-plus-darwin-arm64`, {
       headers: { accept: 'application/vnd.npm.install-v1+json' },
     })
     const body = (await pres.json()) as Record<string, any>
-    expect(body.versions[ver].dist.integrity).toBe(expected)
+    expect(body.versions[ver].dist.integrity).toBe(integrity)
   })
 })
 
@@ -469,155 +482,48 @@ describe('admin: purge', () => {
   })
 })
 
-describe('admin: prebuild', () => {
-  it('requires auth', async () => {
-    const res = await SELF.fetch(`${BASE}/-/prebuild`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ref: 'commit.a832a55' }),
-    })
-    expect(res.status).toBe(401)
-  })
-
-  it('enqueues a prebuild for a ref', async () => {
-    const res = await SELF.fetch(`${BASE}/-/prebuild`, {
-      method: 'POST',
-      headers: { ...AUTH, 'content-type': 'application/json' },
-      body: JSON.stringify({ ref: 'commit.a832a55' }),
-    })
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ queued: '0.0.0-commit.a832a55' })
-  })
-
-  it('rejects a non-preview version', async () => {
-    const res = await SELF.fetch(`${BASE}/-/prebuild`, {
-      method: 'POST',
-      headers: { ...AUTH, 'content-type': 'application/json' },
-      body: JSON.stringify({ version: '0.2.1' }),
-    })
-    expect(res.status).toBe(400)
-  })
-})
-
-async function sign(secret: string, body: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  )
-  const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body))
-  const hex = [...new Uint8Array(mac)]
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
-  return `sha256=${hex}`
-}
-
-describe('admin: webhook', () => {
-  const SECRET = 'test-webhook-secret'
-
-  it('rejects an invalid signature', async () => {
-    const res = await SELF.fetch(`${BASE}/-/webhook`, {
-      method: 'POST',
-      headers: {
-        'x-github-event': 'issue_comment',
-        'x-hub-signature-256': 'sha256=deadbeef',
-      },
-      body: '{}',
-    })
-    expect(res.status).toBe(401)
-  })
-
-  it('auto-registers refs from a pkg.pr.new bot comment', async () => {
-    const sha = '1234567890abcdef1234567890abcdef12345678'
-    const body = JSON.stringify({
-      action: 'created',
-      issue: { number: 1891, pull_request: { url: 'x' } },
-      comment: {
-        user: { login: 'pkg-pr-new[bot]' },
-        body: `vite-plus@1891 darwin-arm64@${sha}`,
-      },
-    })
-    const res = await SELF.fetch(`${BASE}/-/webhook`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-github-event': 'issue_comment',
-        'x-hub-signature-256': await sign(SECRET, body),
-      },
-      body,
-    })
-    expect(res.status).toBe(200)
-    const out = (await res.json()) as { registered: string[] }
-    // Only the commit sha is registered (the PR number is not a supported ref).
-    expect(out.registered).toEqual([`0.0.0-commit.${sha}`])
-
-    const list = (await (
-      await SELF.fetch(`${BASE}/-/refs`, {
-        headers: { authorization: 'Bearer test-admin-token' },
-      })
-    ).json()) as { refs: Array<{ ref: string }> }
-    expect(list.refs.some((r) => r.ref === `commit.${sha}`)).toBe(true)
-  })
-
-  it('ignores non-bot events and answers ping', async () => {
-    const body = '{"zen":"hi"}'
-    const res = await SELF.fetch(`${BASE}/-/webhook`, {
-      method: 'POST',
-      headers: {
-        'x-github-event': 'ping',
-        'x-hub-signature-256': await sign(SECRET, body),
-      },
-      body,
-    })
-    expect(res.status).toBe(200)
-    expect((await res.json()) as any).toEqual({ ok: true })
-  })
-})
-
-describe('prebuild queue consumer', () => {
-  function message(body: Record<string, unknown>, sink: { acked: boolean }) {
-    return {
-      queue: 'pkg-pr-registry-bridge-prebuild',
-      messages: [
-        {
-          id: '1',
-          timestamp: new Date(0),
-          attempts: 1,
-          body,
-          ack: () => {
-            sink.acked = true
-          },
-          retry: () => {},
-        },
-      ],
-    }
+describe('admin: publish', () => {
+  const ver = '0.0.0-commit.f00dface'
+  const body = {
+    ref: 'commit.f00dface',
+    packages: [
+      { name: 'vite-plus', version: ver, packageJson: { name: 'vite-plus', version: ver }, integrity: 'sha512-abc', shasum: 'def' },
+    ],
   }
 
-  it('builds a single platform binary into R2 and acks', async () => {
-    const ver = `0.0.0-commit.${PLATFORM_SHA}`
-    const pkg = '@voidzero-dev/vite-plus-darwin-arm64'
-    const sink = { acked: false }
-
-    // A binary task: one bounded build, the unit the version task fans out to.
-    await worker.queue!(message({ version: ver, name: pkg }, sink) as any, env as any)
-
-    expect(sink.acked).toBe(true)
-    const res = await SELF.fetch(`${BASE}/tarballs/${pkg}/${ver}.tgz`)
-    expect(res.status).toBe(200)
-    expect(res.headers.get('content-length')).toBe(
-      String((await res.arrayBuffer()).byteLength),
-    )
+  it('requires auth', async () => {
+    const res = await SELF.fetch(`${BASE}/-/publish`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    expect(res.status).toBe(401)
   })
 
-  it('acks a version task (fan-out)', async () => {
-    const sink = { acked: false }
-    await worker.queue!(
-      message({ version: '0.0.0-commit.a832a55' }, sink) as any,
-      env as any,
-    )
-    expect(sink.acked).toBe(true)
+  it('stores meta, registers the ref, and injects it into the packument', async () => {
+    const res = await SELF.fetch(`${BASE}/-/publish`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    expect(res.status).toBe(201)
+    expect(await res.json()).toMatchObject({ ref: 'commit.f00dface', version: ver })
+
+    const pack = await SELF.fetch(`${BASE}/vite-plus`, {
+      headers: { accept: 'application/vnd.npm.install-v1+json' },
+    })
+    const packument = (await pack.json()) as Record<string, any>
+    expect(packument.versions[ver].dist.integrity).toBe('sha512-abc')
+    expect(packument.versions[ver].dist.shasum).toBe('def')
+  })
+
+  it('rejects an unknown package', async () => {
+    const res = await SELF.fetch(`${BASE}/-/publish`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({ ref: 'commit.f00dface', packages: [{ name: 'react', version: ver }] }),
+    })
+    expect(res.status).toBe(400)
   })
 })
 

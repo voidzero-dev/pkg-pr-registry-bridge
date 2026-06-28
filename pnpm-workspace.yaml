@@ -1,0 +1,7 @@
+# pnpm 11 reads dependency build-script approvals here (the package.json `pnpm`
+# field is no longer honored). esbuild bundles the publish action; workerd runs
+# the Worker for tests/dev; sharp is a transitive dependency.
+allowBuilds:
+  esbuild: true
+  workerd: true
+  sharp: true

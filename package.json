@@ -12,25 +12,20 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "node scripts/e2e-bun.mjs"
+    "test:e2e": "node scripts/e2e-bun.mjs",
+    "build:action": "node scripts/build-action.mjs"
   },
   "dependencies": {
-    "@noble/hashes": "2.2.0",
     "hono": "^4.12.27",
     "nanotar": "^0.3.0"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.16.20",
     "@cloudflare/workers-types": "^4.20260626.1",
+    "esbuild": "^0.28.1",
     "typescript": "^5.9.0",
     "vitest": "^4.1.0",
     "wrangler": "^4.105.0"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "workerd"
-    ]
   },
   "devEngines": {
     "packageManager": {

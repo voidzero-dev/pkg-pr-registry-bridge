@@ -1,5 +1,8 @@
 node_modules/
 dist/
+# The publish-preview action ships its bundled output (committed so consumers
+# need no build/install step).
+!.github/actions/publish-preview/dist/
 .wrangler/
 .dev.vars
 *.log

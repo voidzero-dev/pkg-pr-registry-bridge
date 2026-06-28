@@ -14,7 +14,7 @@ import {
 const KV_PREFIX = 'ref:'
 
 // Bound KV growth, aligned with the R2 tarball lifecycle (90 days). Re-running
-// the webhook on a new commit re-registers and refreshes the TTL.
+// the publish action on a new commit re-registers and refreshes the TTL.
 const REF_TTL_SECONDS = 90 * 24 * 60 * 60
 
 function canonical(ref: ConfiguredPreviewRef): string {

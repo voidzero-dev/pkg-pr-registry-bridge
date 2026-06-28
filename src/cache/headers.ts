@@ -11,7 +11,7 @@ export function tarballCacheControl(): string {
 
 /**
  * Cache policy for a packument. Kept short-lived because the set of injected
- * refs can change at runtime (admin/webhook) and the merged npm versions move.
+ * refs can change at runtime (admin/publish) and the merged npm versions move.
  */
 export function packumentCacheControl(): string {
   return SHORT_MAX_AGE

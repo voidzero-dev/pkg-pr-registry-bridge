@@ -1,0 +1,39 @@
+name: 'Publish pkg.pr.new preview to the registry bridge'
+description: >-
+  Build and hash a commit's pkg.pr.new preview artifacts (the small preview
+  packages are rewritten and re-packed; the platform binaries are taken as-is)
+  and upload them, plus their integrity, to the pkg-pr-registry-bridge. Runs the
+  CPU-heavy work in CI so the Worker only serves.
+inputs:
+  sha:
+    description: 'The commit sha to publish (a 7-40 hex sha, or commit.<sha>).'
+    required: true
+  bridge-url:
+    description: 'Base URL of the registry bridge.'
+    required: false
+    default: 'https://pkg-pr-registry-bridge.render.vip'
+  admin-token:
+    description: 'Bridge ADMIN_TOKEN (store as a secret).'
+    required: true
+  pkg-pr-new-base:
+    description: 'pkg.pr.new base URL.'
+    required: false
+    default: 'https://pkg.pr.new'
+  owner:
+    description: 'Upstream repo owner.'
+    required: false
+    default: 'voidzero-dev'
+  repo:
+    description: 'Upstream repo name.'
+    required: false
+    default: 'vite-plus'
+  workspace-packages:
+    description: 'Allowlist (comma-separated exact names or prefix* patterns).'
+    required: false
+    default: 'vite-plus,@voidzero-dev/vite-plus-*'
+outputs:
+  version:
+    description: 'The synthetic version published (0.0.0-commit.<sha>).'
+runs:
+  using: 'node20'
+  main: 'dist/index.mjs'
