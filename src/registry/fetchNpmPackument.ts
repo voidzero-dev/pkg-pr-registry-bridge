@@ -25,6 +25,14 @@ const ABBREVIATED_ACCEPT = 'application/vnd.npm.install-v1+json'
 // reaches a package manager's HTTP/2 client.
 const FULL_ACCEPT = 'application/json'
 
+/** GET a package's metadata from the npm registry with the given Accept header. */
+function npmFetch(env: Env, name: string, accept: string): Promise<Response> {
+  return fetch(`${env.NPM_REGISTRY}/${encodeNpmPackageName(name)}`, {
+    headers: { accept },
+    redirect: 'follow',
+  })
+}
+
 /**
  * Fetch a packument from the npm registry. A 404 (package not published to
  * npm) is returned as `{ status: 404, data: null }` so the caller can still
@@ -34,10 +42,7 @@ export async function fetchNpmPackument(
   env: Env,
   name: string,
 ): Promise<NpmPackumentResult> {
-  const res = await fetch(`${env.NPM_REGISTRY}/${encodeNpmPackageName(name)}`, {
-    headers: { accept: ABBREVIATED_ACCEPT },
-    redirect: 'follow',
-  })
+  const res = await npmFetch(env, name, ABBREVIATED_ACCEPT)
 
   if (res.status === 404) return { status: 404, data: null }
   if (!res.ok) return { status: res.status, data: null }
@@ -62,10 +67,7 @@ export async function fetchNpmTime(
   // error return null and serve without npm's times (the injected preview
   // versions still get their own `time` entry from the caller).
   try {
-    const res = await fetch(`${env.NPM_REGISTRY}/${encodeNpmPackageName(name)}`, {
-      headers: { accept: FULL_ACCEPT },
-      redirect: 'follow',
-    })
+    const res = await npmFetch(env, name, FULL_ACCEPT)
 
     if (!res.ok) return null
 
