@@ -16,7 +16,7 @@ import {
   parseTarballPath,
   parseUploadPath,
 } from './registry/parsePackageName'
-import { fetchNpmPackument } from './registry/fetchNpmPackument'
+import { fetchNpmPackument, fetchNpmTime } from './registry/fetchNpmPackument'
 import { buildVersionMetadata } from './registry/buildVersionMetadata'
 import { redirectToNpm } from './registry/redirectToNpm'
 import {
@@ -287,9 +287,13 @@ app.get('*', async (c) => {
   const { name } = pkgReq
   if (!isWorkspacePackage(name, c.env)) return redirectToNpm(c.env, c.req.raw)
 
-  // The npm fetch and the refs read are independent; overlap them.
-  const [base, refs] = await Promise.all([
+  // The npm packument fetch, the npm `time` fetch, and the refs read are all
+  // independent; overlap them. `time` comes from npm's FULL packument (the
+  // abbreviated form we serve omits it) but is sourced separately so the served
+  // response keeps the compact abbreviated version docs.
+  const [base, npmTime, refs] = await Promise.all([
     fetchNpmPackument(c.env, name),
+    fetchNpmTime(c.env, name),
     getConfiguredRefs(c.env),
   ])
 
@@ -302,10 +306,20 @@ app.get('*', async (c) => {
   packument['dist-tags'] ??= {}
   packument.versions ??= {}
 
+  // pnpm's time-based resolution (`minimum-release-age`) hard-errors without a
+  // `time` map (ERR_PNPM_MISSING_TIME). Seed it from npm's real publish times,
+  // then add an entry for each injected preview version below. Exact-pinned
+  // `0.0.0-commit.*` prereleases aren't filtered by minimum-release-age, so the
+  // value just has to exist and be a valid ISO-8601 timestamp.
+  const time: Record<string, string> = { ...(npmTime ?? {}) }
+  packument.time = time
+  const previewTime =
+    time.modified ?? time.created ?? new Date().toISOString()
+
   // Inject each configured ref. The R2 meta reads are independent, so run them
-  // concurrently; each writes a distinct version/tag key, and a failing ref is
-  // isolated so it can't break installs of the package's other versions. After
-  // the deploy-time warm step these are R2 hits and don't touch the upstream.
+  // concurrently; each writes a distinct version/tag/time key, and a failing
+  // ref is isolated so it can't break installs of the package's other versions.
+  // After the deploy-time warm step these are R2 hits and don't touch upstream.
   await Promise.all(
     refs.map(async (ref) => {
       try {
@@ -317,6 +331,7 @@ app.get('*', async (c) => {
           preview,
         )
         packument['dist-tags'][ref.tag] = ref.version
+        time[ref.version] = previewTime
       } catch (err) {
         console.warn(`Failed to inject preview ref ${ref.version}:`, err)
       }
