@@ -13,6 +13,11 @@
 > overwritten and mismatch a consumer's lockfile. Read `pr.<n>` examples as
 > historical design; use `commit.<sha>` for current behavior.
 
+> Deployment note: the bridge has since migrated to the [Void](https://void.cloud)
+> framework and deploys via `void deploy`; the wrangler / own-Cloudflare-account
+> and `GITHUB_TOKEN` specifics below are historical. See [README.md](../README.md)
+> for the current implementation and deployment.
+
 ## 1. Summary
 
 This RFC specifies how to implement the version-gated pkg.pr.new registry
