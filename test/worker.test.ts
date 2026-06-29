@@ -46,6 +46,14 @@ function gzip(bytes: Uint8Array): Response {
   })
 }
 
+/** The `accept` header from a fetch init, whether a plain object or Headers. */
+function acceptOf(init?: RequestInit): string {
+  const h = init?.headers
+  return (
+    (h instanceof Headers ? h.get('accept') : (h as Record<string, string>)?.accept) ?? ''
+  )
+}
+
 /**
  * The worker-under-test (reached via SELF.fetch) runs in this same isolate, so
  * a `vi.stubGlobal('fetch', ...)` mock intercepts its outbound calls to npm and
@@ -92,11 +100,7 @@ beforeAll(async () => {
     if (url === 'https://registry.npmjs.org/vite-plus') {
       // Mimic npm: `time` is present only in the full packument, not the
       // abbreviated (install-v1) form. Branch on the Accept header.
-      const h = init?.headers
-      const accept = (
-        h instanceof Headers ? h.get('accept') : (h as Record<string, string>)?.accept
-      ) ?? ''
-      const abbreviated = accept.includes('install-v1')
+      const abbreviated = acceptOf(init).includes('install-v1')
       const body = abbreviated
         ? { ...NPM_VITE_PLUS, modified: NPM_VITE_PLUS_TIME.modified }
         : { ...NPM_VITE_PLUS, time: NPM_VITE_PLUS_TIME }
@@ -225,12 +229,7 @@ describe('packument endpoint', () => {
       (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
         const url = typeof input === 'string' ? input : input.toString()
         if (url.startsWith('https://registry.npmjs.org/vite-plus')) {
-          const h = init?.headers
-          const accept =
-            (h instanceof Headers
-              ? h.get('accept')
-              : (h as Record<string, string>)?.accept) ?? ''
-          return accept.includes('install-v1')
+          return acceptOf(init).includes('install-v1')
             ? Promise.resolve(json(NPM_VITE_PLUS)) // versions, no time
             : Promise.resolve(json({ error: 'boom' }, 500)) // time fetch fails
         }
