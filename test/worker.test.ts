@@ -46,12 +46,27 @@ function gzip(bytes: Uint8Array): Response {
   })
 }
 
+/** The `accept` header from a fetch init, whether a plain object or Headers. */
+function acceptOf(init?: RequestInit): string {
+  const h = init?.headers
+  return (
+    (h instanceof Headers ? h.get('accept') : (h as Record<string, string>)?.accept) ?? ''
+  )
+}
+
 /**
  * The worker-under-test (reached via SELF.fetch) runs in this same isolate, so
  * a `vi.stubGlobal('fetch', ...)` mock intercepts its outbound calls to npm and
  * pkg.pr.new, while SELF.fetch (a service binding) still routes normally.
  */
 const PLATFORM_SHA = '1234567890abcdef1234567890abcdef12345678'
+
+// Assigned in beforeAll so a test can re-stub `fetch` and delegate the URLs it
+// doesn't override back to the shared mock.
+let baseFetchMock: (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>
 
 beforeAll(async () => {
   const darwinBin = await makeTarball({
@@ -85,11 +100,7 @@ beforeAll(async () => {
     if (url === 'https://registry.npmjs.org/vite-plus') {
       // Mimic npm: `time` is present only in the full packument, not the
       // abbreviated (install-v1) form. Branch on the Accept header.
-      const h = init?.headers
-      const accept = (
-        h instanceof Headers ? h.get('accept') : (h as Record<string, string>)?.accept
-      ) ?? ''
-      const abbreviated = accept.includes('install-v1')
+      const abbreviated = acceptOf(init).includes('install-v1')
       const body = abbreviated
         ? { ...NPM_VITE_PLUS, modified: NPM_VITE_PLUS_TIME.modified }
         : { ...NPM_VITE_PLUS, time: NPM_VITE_PLUS_TIME }
@@ -113,6 +124,7 @@ beforeAll(async () => {
     return Promise.reject(new Error(`unexpected fetch: ${url}`))
   }
 
+  baseFetchMock = mockFetch
   vi.stubGlobal('fetch', mockFetch)
 })
 
@@ -205,6 +217,37 @@ describe('packument endpoint', () => {
     // server's time, not the bogus client value, and not the unpublished fallback
     expect(t1).not.toBe('2000-01-01T00:00:00.000Z')
     expect(Date.parse(t1)).toBeGreaterThanOrEqual(before)
+  })
+
+  it('marks the packument no-store when npm time could not be sourced', async () => {
+    // Simulate the separate full-packument (`time`) fetch failing: abbreviated
+    // versions are served but with no npm time. The response must still serve,
+    // but `no-store` so a transient hiccup can't poison the edge/client caches
+    // for the whole TTL and break time-based resolution.
+    vi.stubGlobal(
+      'fetch',
+      (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        const url = typeof input === 'string' ? input : input.toString()
+        if (url.startsWith('https://registry.npmjs.org/vite-plus')) {
+          return acceptOf(init).includes('install-v1')
+            ? Promise.resolve(json(NPM_VITE_PLUS)) // versions, no time
+            : Promise.resolve(json({ error: 'boom' }, 500)) // time fetch fails
+        }
+        return baseFetchMock(input, init)
+      },
+    )
+    try {
+      const res = await SELF.fetch(`${BASE}/vite-plus`, {
+        headers: { accept: 'application/json' },
+      })
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as Record<string, any>
+      expect(body.versions['0.2.1']).toBeTruthy() // still served
+      expect(body.time?.['0.2.1']).toBeFalsy() // npm time missing (degraded)
+      expect(res.headers.get('cache-control')).toBe('no-store') // so: not cached
+    } finally {
+      vi.stubGlobal('fetch', baseFetchMock) // restore for later tests
+    }
   })
 
   it('synthesizes a preview-only packument when npm has no such package', async () => {

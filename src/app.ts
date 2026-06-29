@@ -348,10 +348,16 @@ app.get('*', async (c) => {
     }),
   )
 
+  // If any served version lacks a `time` entry (e.g. the npm `time` fetch
+  // hiccupped), the response is degraded. Serve it, but `no-store` so it can't
+  // poison the edge/client caches for the full TTL and break time-based
+  // resolution (ERR_PNPM_MISSING_TIME) for everyone until it expires.
+  const timeComplete = Object.keys(packument.versions).every((v) => v in time)
+
   return new Response(JSON.stringify(packument), {
     headers: {
       'content-type': 'application/json; charset=utf-8',
-      'cache-control': packumentCacheControl(),
+      'cache-control': timeComplete ? packumentCacheControl() : 'no-store',
     },
   })
 })
