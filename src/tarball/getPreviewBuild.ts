@@ -26,7 +26,7 @@ async function buildAndStore(
   env: Env,
   name: string,
   version: string,
-): Promise<PreviewBuild> {
+): Promise<PreviewBuild & { publishedAt: string }> {
   const url = toPkgPrNewUrl(env, name, version)
   if (!url) throw new HttpError(400, `Invalid preview version: ${version}`)
 
@@ -34,10 +34,14 @@ async function buildAndStore(
   const build = await buildPreviewTarball(upstream, name, version, env)
   const cacheControl = tarballCacheControl()
 
+  // Stamp the build time server-side, so the on-demand path reports the same
+  // release date as a CI publish (and the same value on every later read).
+  const publishedAt = new Date().toISOString()
   const meta: PreviewMeta = {
     packageJson: build.packageJson,
     shasum: build.shasum,
     integrity: build.integrity,
+    publishedAt,
   }
   await Promise.all([
     env.STORAGE.put(tarballKey(name, version), build.tarball, {
@@ -48,7 +52,7 @@ async function buildAndStore(
     }),
   ])
 
-  return build
+  return { ...build, publishedAt }
 }
 
 /**
@@ -99,6 +103,7 @@ export async function getPreviewMeta(
     packageJson: build.packageJson,
     shasum: build.shasum,
     integrity: build.integrity,
+    publishedAt: build.publishedAt,
   }
 }
 

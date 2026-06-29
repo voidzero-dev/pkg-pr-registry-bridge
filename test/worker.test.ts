@@ -25,6 +25,14 @@ const NPM_VITE_PLUS = {
   },
 }
 
+// Real npm only returns the per-version `time` map in the FULL packument
+// (`Accept: application/json`), never in the abbreviated (install-v1) form.
+const NPM_VITE_PLUS_TIME = {
+  created: '2024-01-01T00:00:00.000Z',
+  modified: '2026-06-18T05:33:32.399Z',
+  '0.2.1': '2026-06-18T05:33:32.399Z',
+}
+
 function json(obj: unknown, status = 200): Response {
   return new Response(JSON.stringify(obj), {
     status,
@@ -68,11 +76,24 @@ beforeAll(async () => {
     dependencies: { 'vite-plus': 'a832a55' },
   })
 
-  const mockFetch = (input: RequestInfo | URL): Promise<Response> => {
+  const mockFetch = (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ): Promise<Response> => {
     const url = typeof input === 'string' ? input : input.toString()
 
     if (url === 'https://registry.npmjs.org/vite-plus') {
-      return Promise.resolve(json(NPM_VITE_PLUS))
+      // Mimic npm: `time` is present only in the full packument, not the
+      // abbreviated (install-v1) form. Branch on the Accept header.
+      const h = init?.headers
+      const accept = (
+        h instanceof Headers ? h.get('accept') : (h as Record<string, string>)?.accept
+      ) ?? ''
+      const abbreviated = accept.includes('install-v1')
+      const body = abbreviated
+        ? { ...NPM_VITE_PLUS, modified: NPM_VITE_PLUS_TIME.modified }
+        : { ...NPM_VITE_PLUS, time: NPM_VITE_PLUS_TIME }
+      return Promise.resolve(json(body))
     }
     if (url.startsWith('https://registry.npmjs.org/@voidzero-dev')) {
       return Promise.resolve(json({ error: 'Not found' }, 404))
@@ -125,6 +146,67 @@ describe('packument endpoint', () => {
     expect(res.headers.get('cache-control')).toContain('max-age=300')
   })
 
+  it('includes a `time` field with npm publish times and the preview version', async () => {
+    // Reproduces ERR_PNPM_MISSING_TIME: pnpm's time-based resolution (e.g.
+    // `minimum-release-age`) needs `time`. npm only exposes it in the full
+    // packument, and each injected preview version needs its own entry too.
+    const res = await SELF.fetch(`${BASE}/vite-plus`, {
+      headers: { accept: 'application/json' },
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as Record<string, any>
+
+    expect(body.time).toBeTruthy()
+    // npm's real publish time is preserved (requires sourcing the full packument).
+    expect(body.time['0.2.1']).toBe('2026-06-18T05:33:32.399Z')
+    // the injected preview version carries a time entry, or pnpm hard-errors.
+    expect(body.time['0.0.0-commit.a832a55']).toBeTruthy()
+  })
+
+  it('stamps the preview release date server-side at publish, stable across requests', async () => {
+    // The release date is stamped server-side once at publish, not npm's
+    // package-modified time, not a per-request clock, and not a client value.
+    const sha = 'feedfacefeedfacefeedfacefeedfacefeedface'
+    const ver = `0.0.0-commit.${sha}`
+    const before = Date.now()
+    const pub = await SELF.fetch(`${BASE}/-/publish`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ref: `commit.${sha}`,
+        // A client-reported time must be ignored in favor of the server's.
+        publishedAt: '2000-01-01T00:00:00.000Z',
+        packages: [
+          {
+            name: '@voidzero-dev/vite-plus-core',
+            version: ver,
+            packageJson: { name: '@voidzero-dev/vite-plus-core', version: ver },
+            integrity: 'sha512-test',
+            shasum: '',
+          },
+        ],
+      }),
+    })
+    expect(pub.status).toBe(201)
+
+    const timeFor = async () =>
+      (
+        (await (
+          await SELF.fetch(`${BASE}/@voidzero-dev%2Fvite-plus-core`, {
+            headers: { accept: 'application/json' },
+          })
+        ).json()) as Record<string, any>
+      ).time?.[ver]
+
+    const t1 = await timeFor()
+    const t2 = await timeFor()
+    expect(t1).toBeTruthy()
+    expect(t1).toBe(t2) // stamped once at publish, identical across requests
+    // server's time, not the bogus client value, and not the unpublished fallback
+    expect(t1).not.toBe('2000-01-01T00:00:00.000Z')
+    expect(Date.parse(t1)).toBeGreaterThanOrEqual(before)
+  })
+
   it('synthesizes a preview-only packument when npm has no such package', async () => {
     const res = await SELF.fetch(`${BASE}/@voidzero-dev%2Fvite-plus-core`, {
       headers: { accept: 'application/json' },
@@ -140,6 +222,9 @@ describe('packument endpoint', () => {
     expect(preview.dist.tarball).toBe(
       `${BASE}/tarballs/@voidzero-dev/vite-plus-core/0.0.0-commit.a832a55.tgz`,
     )
+    // A synthesized (not-on-npm) packument still needs `time` for the preview,
+    // or pnpm errors with ERR_PNPM_MISSING_TIME.
+    expect(body.time?.['0.0.0-commit.a832a55']).toBeTruthy()
   })
 
   it('rewrites pkg.pr.new optionalDependency URLs to version strings', async () => {

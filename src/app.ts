@@ -16,7 +16,7 @@ import {
   parseTarballPath,
   parseUploadPath,
 } from './registry/parsePackageName'
-import { fetchNpmPackument } from './registry/fetchNpmPackument'
+import { fetchNpmPackument, fetchNpmTime } from './registry/fetchNpmPackument'
 import { buildVersionMetadata } from './registry/buildVersionMetadata'
 import { redirectToNpm } from './registry/redirectToNpm'
 import {
@@ -30,6 +30,14 @@ import {
   packumentCacheControl,
   tarballCacheControl,
 } from './cache/headers'
+
+/**
+ * Fallback `time` (release date) for a preview registered but not yet published
+ * (or a platform binary before CI warms it). A fixed past date: deterministic
+ * across requests, and old enough that `minimum-release-age` never filters a
+ * pinned preview during that gap.
+ */
+const UNPUBLISHED_PREVIEW_TIME = '2020-01-01T00:00:00.000Z'
 
 type HonoEnv = { Bindings: Env }
 
@@ -146,6 +154,10 @@ app.post('/-/publish', async (c) => {
   for (const pkg of packages) {
     assertPreviewTarget(c.env, pkg.name ?? '', pkg.version ?? '', 400)
   }
+  // Stamp the publish time server-side (when the action submits), so every
+  // package in this run shares one immutable release date. Any client-reported
+  // time is ignored.
+  const publishedAt = new Date().toISOString()
   const published = await Promise.all(
     packages.map((pkg) => {
       const name = pkg.name!
@@ -154,6 +166,7 @@ app.post('/-/publish', async (c) => {
         packageJson: pkg.packageJson ?? { name, version },
         shasum: pkg.shasum ?? '',
         integrity: pkg.integrity ?? '',
+        publishedAt,
       }
       return c.env.STORAGE.put(metaKey(name, version), JSON.stringify(meta), {
         httpMetadata: {
@@ -287,9 +300,13 @@ app.get('*', async (c) => {
   const { name } = pkgReq
   if (!isWorkspacePackage(name, c.env)) return redirectToNpm(c.env, c.req.raw)
 
-  // The npm fetch and the refs read are independent; overlap them.
-  const [base, refs] = await Promise.all([
+  // The npm packument fetch, the npm `time` fetch, and the refs read are all
+  // independent; overlap them. `time` comes from npm's FULL packument (the
+  // abbreviated form we serve omits it) but is sourced separately so the served
+  // response keeps the compact abbreviated version docs.
+  const [base, npmTime, refs] = await Promise.all([
     fetchNpmPackument(c.env, name),
+    fetchNpmTime(c.env, name),
     getConfiguredRefs(c.env),
   ])
 
@@ -302,10 +319,17 @@ app.get('*', async (c) => {
   packument['dist-tags'] ??= {}
   packument.versions ??= {}
 
+  // pnpm's time-based resolution (`minimum-release-age`) hard-errors without a
+  // `time` map (ERR_PNPM_MISSING_TIME). Seed it from npm's real publish times;
+  // each injected preview version's entry is its server-stamped publish time
+  // (UNPUBLISHED_PREVIEW_TIME until published), added in the loop below.
+  const time: Record<string, string> = { ...(npmTime ?? {}) }
+  packument.time = time
+
   // Inject each configured ref. The R2 meta reads are independent, so run them
-  // concurrently; each writes a distinct version/tag key, and a failing ref is
-  // isolated so it can't break installs of the package's other versions. After
-  // the deploy-time warm step these are R2 hits and don't touch the upstream.
+  // concurrently; each writes a distinct version/tag/time key, and a failing
+  // ref is isolated so it can't break installs of the package's other versions.
+  // After the deploy-time warm step these are R2 hits and don't touch upstream.
   await Promise.all(
     refs.map(async (ref) => {
       try {
@@ -317,6 +341,7 @@ app.get('*', async (c) => {
           preview,
         )
         packument['dist-tags'][ref.tag] = ref.version
+        time[ref.version] = preview.publishedAt ?? UNPUBLISHED_PREVIEW_TIME
       } catch (err) {
         console.warn(`Failed to inject preview ref ${ref.version}:`, err)
       }
