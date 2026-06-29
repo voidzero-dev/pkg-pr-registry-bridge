@@ -240,13 +240,3 @@ add at your DNS provider) and set `PUBLIC_BASE_URL` to that host.
 Pushes to `main` auto-deploy via `.github/workflows/deploy.yml` (`pnpm exec void
 deploy`). Add a `VOID_TOKEN` repository secret (`void auth token` copies one to
 your clipboard); `VOID_PROJECT` is pinned in the workflow.
-
-## Status
-
-Deployed: default-registry bridge with npm redirect fallback, `commit.<sha>`
-preview injection, R2-served tarballs with SHA-512/SHA-1 integrity, CI-side
-build/hash/upload via the [publish action](#publishing-from-ci) (the Worker
-never decompresses or hashes), R2-backed dynamic refs (a single index object, no
-rate-limited KV list), authenticated admin
-endpoints (`/-/refs`, `/-/purge`, `/-/publish`, `/-/tarball`), and optional
-GitHub existence checks, plus a bun end-to-end check.
