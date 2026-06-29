@@ -227,6 +227,24 @@ describe('packument endpoint', () => {
     expect(body.time?.['0.0.0-commit.a832a55']).toBeTruthy()
   })
 
+  it('surfaces an npm registry error (non-200, non-404) instead of synthesizing', async () => {
+    // 404 means "not on npm" and is synthesized (above). Any other upstream
+    // error must propagate npm's status, not hide behind a 200 packument that
+    // silently drops the package's real versions.
+    const saved = globalThis.fetch
+    vi.stubGlobal('fetch', () =>
+      Promise.resolve(json({ error: 'upstream boom' }, 503)),
+    )
+    try {
+      const res = await SELF.fetch(`${BASE}/vite-plus`, {
+        headers: { accept: 'application/json' },
+      })
+      expect(res.status).toBe(503)
+    } finally {
+      vi.stubGlobal('fetch', saved)
+    }
+  })
+
   it('rewrites pkg.pr.new optionalDependency URLs to version strings', async () => {
     const res = await SELF.fetch(`${BASE}/vite-plus`, {
       headers: { accept: 'application/json' },
