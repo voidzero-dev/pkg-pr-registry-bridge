@@ -31,6 +31,14 @@ import {
   tarballCacheControl,
 } from './cache/headers'
 
+/**
+ * Fallback `time` (release date) for a preview registered but not yet published
+ * (or a platform binary before CI warms it). A fixed past date: deterministic
+ * across requests, and old enough that `minimum-release-age` never filters a
+ * pinned preview during that gap.
+ */
+const UNPUBLISHED_PREVIEW_TIME = '2020-01-01T00:00:00.000Z'
+
 type HonoEnv = { Bindings: Env }
 
 export const app = new Hono<HonoEnv>()
@@ -146,6 +154,10 @@ app.post('/-/publish', async (c) => {
   for (const pkg of packages) {
     assertPreviewTarget(c.env, pkg.name ?? '', pkg.version ?? '', 400)
   }
+  // Stamp the publish time server-side (when the action submits), so every
+  // package in this run shares one immutable release date. Any client-reported
+  // time is ignored.
+  const publishedAt = new Date().toISOString()
   const published = await Promise.all(
     packages.map((pkg) => {
       const name = pkg.name!
@@ -154,6 +166,7 @@ app.post('/-/publish', async (c) => {
         packageJson: pkg.packageJson ?? { name, version },
         shasum: pkg.shasum ?? '',
         integrity: pkg.integrity ?? '',
+        publishedAt,
       }
       return c.env.STORAGE.put(metaKey(name, version), JSON.stringify(meta), {
         httpMetadata: {
@@ -307,14 +320,11 @@ app.get('*', async (c) => {
   packument.versions ??= {}
 
   // pnpm's time-based resolution (`minimum-release-age`) hard-errors without a
-  // `time` map (ERR_PNPM_MISSING_TIME). Seed it from npm's real publish times,
-  // then add an entry for each injected preview version below. Exact-pinned
-  // `0.0.0-commit.*` prereleases aren't filtered by minimum-release-age, so the
-  // value just has to exist and be a valid ISO-8601 timestamp.
+  // `time` map (ERR_PNPM_MISSING_TIME). Seed it from npm's real publish times;
+  // each injected preview version's entry is its server-stamped publish time
+  // (UNPUBLISHED_PREVIEW_TIME until published), added in the loop below.
   const time: Record<string, string> = { ...(npmTime ?? {}) }
   packument.time = time
-  const previewTime =
-    time.modified ?? time.created ?? new Date().toISOString()
 
   // Inject each configured ref. The R2 meta reads are independent, so run them
   // concurrently; each writes a distinct version/tag/time key, and a failing
@@ -331,7 +341,7 @@ app.get('*', async (c) => {
           preview,
         )
         packument['dist-tags'][ref.tag] = ref.version
-        time[ref.version] = previewTime
+        time[ref.version] = preview.publishedAt ?? UNPUBLISHED_PREVIEW_TIME
       } catch (err) {
         console.warn(`Failed to inject preview ref ${ref.version}:`, err)
       }

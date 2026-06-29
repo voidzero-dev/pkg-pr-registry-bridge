@@ -32,6 +32,12 @@ export interface PreviewMeta {
   shasum: string
   /** SHA-512 SRI of the generated tarball, for `dist.integrity`. */
   integrity: string
+  /**
+   * ISO-8601 timestamp stamped server-side when this build was published, used
+   * as the version's `time` (release date) in the packument. Optional for
+   * back-compat with metas stored before this field existed.
+   */
+  publishedAt?: string
 }
 
 export interface PreviewBuild extends PreviewMeta {

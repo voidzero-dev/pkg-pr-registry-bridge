@@ -163,6 +163,50 @@ describe('packument endpoint', () => {
     expect(body.time['0.0.0-commit.a832a55']).toBeTruthy()
   })
 
+  it('stamps the preview release date server-side at publish, stable across requests', async () => {
+    // The release date is stamped server-side once at publish, not npm's
+    // package-modified time, not a per-request clock, and not a client value.
+    const sha = 'feedfacefeedfacefeedfacefeedfacefeedface'
+    const ver = `0.0.0-commit.${sha}`
+    const before = Date.now()
+    const pub = await SELF.fetch(`${BASE}/-/publish`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ref: `commit.${sha}`,
+        // A client-reported time must be ignored in favor of the server's.
+        publishedAt: '2000-01-01T00:00:00.000Z',
+        packages: [
+          {
+            name: '@voidzero-dev/vite-plus-core',
+            version: ver,
+            packageJson: { name: '@voidzero-dev/vite-plus-core', version: ver },
+            integrity: 'sha512-test',
+            shasum: '',
+          },
+        ],
+      }),
+    })
+    expect(pub.status).toBe(201)
+
+    const timeFor = async () =>
+      (
+        (await (
+          await SELF.fetch(`${BASE}/@voidzero-dev%2Fvite-plus-core`, {
+            headers: { accept: 'application/json' },
+          })
+        ).json()) as Record<string, any>
+      ).time?.[ver]
+
+    const t1 = await timeFor()
+    const t2 = await timeFor()
+    expect(t1).toBeTruthy()
+    expect(t1).toBe(t2) // stamped once at publish, identical across requests
+    // server's time, not the bogus client value, and not the unpublished fallback
+    expect(t1).not.toBe('2000-01-01T00:00:00.000Z')
+    expect(Date.parse(t1)).toBeGreaterThanOrEqual(before)
+  })
+
   it('synthesizes a preview-only packument when npm has no such package', async () => {
     const res = await SELF.fetch(`${BASE}/@voidzero-dev%2Fvite-plus-core`, {
       headers: { accept: 'application/json' },
