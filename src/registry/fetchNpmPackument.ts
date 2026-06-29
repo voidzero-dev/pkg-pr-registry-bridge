@@ -1,11 +1,6 @@
 import type { Env } from '../config'
 import { encodeNpmPackageName } from './parsePackageName'
-
-export interface NpmPackumentResult {
-  status: number
-  /** Parsed packument, or null when the upstream had no usable body. */
-  data: Record<string, any> | null
-}
+import { HttpError } from '../httpError'
 
 // Abbreviated packument format. Always request this from npm: it is an order
 // of magnitude smaller than the full packument (which some clients' Accept
@@ -34,49 +29,53 @@ function npmFetch(env: Env, name: string, accept: string): Promise<Response> {
 }
 
 /**
- * Fetch a packument from the npm registry. A 404 (package not published to
- * npm) is returned as `{ status: 404, data: null }` so the caller can still
- * synthesize a preview-only packument.
+ * Surface an npm upstream failure: throw npm's status + raw body on a non-2xx
+ * response. Callers handle 404 themselves first, since "not on npm" is not a
+ * failure.
+ */
+async function assertNpmOk(res: Response): Promise<void> {
+  if (!res.ok) throw new HttpError(res.status, await res.text())
+}
+
+/**
+ * Fetch a packument from the npm registry. A 404 (package not published to npm)
+ * returns null so the caller can still synthesize a preview-only packument. Any
+ * OTHER non-200 is an upstream failure: throw npm's status + raw body, rather
+ * than synthesize a misleading packument that drops the package's real versions.
  */
 export async function fetchNpmPackument(
   env: Env,
   name: string,
-): Promise<NpmPackumentResult> {
+): Promise<Record<string, any> | null> {
   const res = await npmFetch(env, name, ABBREVIATED_ACCEPT)
 
-  if (res.status === 404) return { status: 404, data: null }
-  if (!res.ok) return { status: res.status, data: null }
+  if (res.status === 404) return null
+  await assertNpmOk(res)
 
-  const data = (await res.json()) as Record<string, any>
-  return { status: 200, data }
+  return (await res.json()) as Record<string, any>
 }
 
 /**
- * Fetch ONLY the per-version `time` map from npm's FULL packument. Returns null
- * when the package is absent (404) or the upstream omits/has no usable `time`,
- * so the caller can still serve a synthesized packument (with `time` entries it
- * fills in for the injected preview versions). Keeping this separate from
- * fetchNpmPackument lets the served response carry the compact abbreviated
- * version docs while still preserving npm's real publish times.
+ * Fetch ONLY the per-version `time` map from npm's FULL packument. A 404
+ * (package not on npm) returns null so the caller can still synthesize a
+ * preview-only packument; any OTHER non-200 is an upstream failure and throws
+ * npm's status + raw body (so a transient hiccup surfaces as an error instead of
+ * a packument missing npm's publish times). A 200 with no usable `time` returns
+ * null. Kept separate from fetchNpmPackument so the served response carries the
+ * compact abbreviated version docs while still preserving npm's real times.
  */
 export async function fetchNpmTime(
   env: Env,
   name: string,
 ): Promise<Record<string, string> | null> {
-  // Fail soft: a hiccup sourcing `time` must not break the packument. On any
-  // error return null and serve without npm's times (the injected preview
-  // versions still get their own `time` entry from the caller).
-  try {
-    const res = await npmFetch(env, name, FULL_ACCEPT)
+  const res = await npmFetch(env, name, FULL_ACCEPT)
 
-    if (!res.ok) return null
+  if (res.status === 404) return null
+  await assertNpmOk(res)
 
-    const data = (await res.json()) as Record<string, any>
-    const time = data?.time
-    return time && typeof time === 'object'
-      ? (time as Record<string, string>)
-      : null
-  } catch {
-    return null
-  }
+  const data = (await res.json()) as Record<string, any>
+  const time = data?.time
+  return time && typeof time === 'object'
+    ? (time as Record<string, string>)
+    : null
 }
