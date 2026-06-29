@@ -2,12 +2,6 @@ import type { Env } from '../config'
 import { encodeNpmPackageName } from './parsePackageName'
 import { HttpError } from '../httpError'
 
-export interface NpmPackumentResult {
-  status: number
-  /** Parsed packument, or null when the upstream had no usable body. */
-  data: Record<string, any> | null
-}
-
 // Abbreviated packument format. Always request this from npm: it is an order
 // of magnitude smaller than the full packument (which some clients' Accept
 // headers, with q-values, otherwise coax npm into returning). A large response
@@ -35,23 +29,30 @@ function npmFetch(env: Env, name: string, accept: string): Promise<Response> {
 }
 
 /**
+ * Surface an npm upstream failure: throw npm's status + raw body on a non-2xx
+ * response. Callers handle 404 themselves first, since "not on npm" is not a
+ * failure.
+ */
+async function assertNpmOk(res: Response): Promise<void> {
+  if (!res.ok) throw new HttpError(res.status, await res.text())
+}
+
+/**
  * Fetch a packument from the npm registry. A 404 (package not published to npm)
- * is returned as `{ status: 404, data: null }` so the caller can still
- * synthesize a preview-only packument. Any OTHER non-200 is an upstream failure:
- * throw npm's status + raw body, rather than synthesize a misleading packument
- * that drops the package's real versions.
+ * returns null so the caller can still synthesize a preview-only packument. Any
+ * OTHER non-200 is an upstream failure: throw npm's status + raw body, rather
+ * than synthesize a misleading packument that drops the package's real versions.
  */
 export async function fetchNpmPackument(
   env: Env,
   name: string,
-): Promise<NpmPackumentResult> {
+): Promise<Record<string, any> | null> {
   const res = await npmFetch(env, name, ABBREVIATED_ACCEPT)
 
-  if (res.status === 404) return { status: 404, data: null }
-  if (!res.ok) throw new HttpError(res.status, await res.text())
+  if (res.status === 404) return null
+  await assertNpmOk(res)
 
-  const data = (await res.json()) as Record<string, any>
-  return { status: 200, data }
+  return (await res.json()) as Record<string, any>
 }
 
 /**
@@ -70,7 +71,7 @@ export async function fetchNpmTime(
   const res = await npmFetch(env, name, FULL_ACCEPT)
 
   if (res.status === 404) return null
-  if (!res.ok) throw new HttpError(res.status, await res.text())
+  await assertNpmOk(res)
 
   const data = (await res.json()) as Record<string, any>
   const time = data?.time

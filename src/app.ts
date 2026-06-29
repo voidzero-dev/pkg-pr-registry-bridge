@@ -311,9 +311,7 @@ app.get('*', async (c) => {
   ])
 
   const packument: Record<string, any> =
-    base.status === 200 && base.data
-      ? base.data
-      : { name, 'dist-tags': {}, versions: {} }
+    base ?? { name, 'dist-tags': {}, versions: {} }
 
   packument.name = name
   packument['dist-tags'] ??= {}
