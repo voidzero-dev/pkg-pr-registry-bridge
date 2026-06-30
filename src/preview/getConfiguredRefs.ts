@@ -72,14 +72,20 @@ async function mutateRefIndex(
  * Resolve the preview refs to inject into packuments: the static
  * `VITE_PLUS_PREVIEW_REFS` var merged with refs registered at runtime in R2.
  */
-export async function getConfiguredRefs(
+export async function getConfiguredRefsWithEtag(
   env: Env,
-): Promise<ConfiguredPreviewRef[]> {
+): Promise<{ refs: ConfiguredPreviewRef[]; etag: string | null }> {
   const fromEnv = parseConfiguredPreviewRefsSafe(env.VITE_PLUS_PREVIEW_REFS)
 
+  // The R2 index etag changes on every ref mutation (register/publish/unregister
+  // all rewrite the object), so it doubles as a cheap version stamp for callers
+  // that cache derived output and want to invalidate on any ref change. Null when
+  // the index is absent or unreadable.
+  let etag: string | null = null
   const fromR2: ConfiguredPreviewRef[] = []
   try {
-    const { index } = await readRefIndex(env)
+    const { index, etag: indexEtag } = await readRefIndex(env)
+    etag = indexEtag
     const now = Date.now()
     // Each index entry is already in hand here, so attach its runtime state
     // directly instead of re-deriving the key and looking it back up.
@@ -101,7 +107,13 @@ export async function getConfiguredRefs(
 
   const byVersion = new Map<string, ConfiguredPreviewRef>()
   for (const ref of [...fromEnv, ...fromR2]) byVersion.set(ref.version, ref)
-  return [...byVersion.values()]
+  return { refs: [...byVersion.values()], etag }
+}
+
+export async function getConfiguredRefs(
+  env: Env,
+): Promise<ConfiguredPreviewRef[]> {
+  return (await getConfiguredRefsWithEtag(env)).refs
 }
 
 /**

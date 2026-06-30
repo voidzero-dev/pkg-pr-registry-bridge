@@ -11,6 +11,7 @@ import {
 import { parseConfiguredPreviewRefs } from './preview/parseConfiguredPreviewRefs'
 import {
   getConfiguredRefs,
+  getConfiguredRefsWithEtag,
   latestVersionByPr,
   registerRef,
   unregisterRef,
@@ -47,6 +48,36 @@ import {
  * pinned preview during that gap.
  */
 const UNPUBLISHED_PREVIEW_TIME = '2020-01-01T00:00:00.000Z'
+
+// Output cache for the assembled packument. Void does not edge-cache the Worker
+// response, so without this the ~440KB packument is re-assembled and re-stringified
+// on every request. Keyed by the refs-index etag + a hash of the static env refs;
+// a short TTL bounds npm stable-version drift (preview freshness comes from the
+// etag, not the TTL).
+const PACKUMENT_OUT_PREFIX = 'pkgt/'
+const PACKUMENT_OUT_TTL_S = 60
+
+/**
+ * Stable short hash of the static env-configured refs (VITE_PLUS_PREVIEW_REFS),
+ * folded into the output-cache key. KV persists across deploys, so the key must
+ * change when these change; the R2 etag only covers runtime ref changes.
+ */
+function hashRefsEnv(refs: string | undefined): string {
+  let h = 5381
+  const s = refs ?? ''
+  for (let i = 0; i < s.length; i++) h = (Math.imul(h, 33) + s.charCodeAt(i)) | 0
+  return (h >>> 0).toString(36)
+}
+
+/** Build the packument HTTP response from an already-serialized body. */
+function packumentResponse(body: string): Response {
+  return new Response(body, {
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': packumentCacheControl(),
+    },
+  })
+}
 
 type HonoEnv = { Bindings: Env }
 
@@ -370,14 +401,27 @@ app.get('*', async (c) => {
   const { name } = pkgReq
   if (!isWorkspacePackage(name, c.env)) return redirectToNpm(c.env, c.req.raw)
 
-  // The npm packument fetch, the npm `time` fetch, and the refs read are all
-  // independent; overlap them. `time` comes from npm's FULL packument (the
-  // abbreviated form we serve omits it) but is sourced separately so the served
-  // response keeps the compact abbreviated version docs.
-  const [base, npmTime, refs] = await Promise.all([
+  // Read the refs first: its etag keys the output cache below, and the refs feed
+  // the assembly on a miss. Any ref change rewrites the index → new etag → the
+  // key changes → automatic invalidation (no explicit purge), and R2 is strongly
+  // consistent read-after-write, so a just-published preview shows up on the very
+  // next request.
+  const { refs, etag } = await getConfiguredRefsWithEtag(c.env)
+  const cacheKey = `${PACKUMENT_OUT_PREFIX}${name}/${etag ?? 'none'}.${hashRefsEnv(c.env.VITE_PLUS_PREVIEW_REFS)}`
+  try {
+    const cached = await c.env.KV.get(cacheKey, 'text')
+    if (cached !== null) return packumentResponse(cached)
+  } catch (err) {
+    console.warn(`packument cache read failed for ${name}:`, err)
+  }
+
+  // Miss: the npm packument fetch and the npm `time` fetch are independent, so
+  // overlap them. `time` comes from npm's FULL packument (the abbreviated form we
+  // serve omits it) but is sourced separately so the served response keeps the
+  // compact abbreviated version docs.
+  const [base, npmTime] = await Promise.all([
     getNpmPackumentCached(c.env, name),
     getNpmTimeCached(c.env, name),
-    getConfiguredRefs(c.env),
   ])
 
   const packument: Record<string, any> =
@@ -426,12 +470,14 @@ app.get('*', async (c) => {
     packument['dist-tags'][`pr-${prNum}`] = version
   }
 
-  return new Response(JSON.stringify(packument), {
-    headers: {
-      'content-type': 'application/json; charset=utf-8',
-      'cache-control': packumentCacheControl(),
-    },
-  })
+  const body = JSON.stringify(packument)
+  // Best-effort: a failed write just means the next request rebuilds.
+  try {
+    await c.env.KV.put(cacheKey, body, { expirationTtl: PACKUMENT_OUT_TTL_S })
+  } catch (err) {
+    console.warn(`packument cache write failed for ${name}:`, err)
+  }
+  return packumentResponse(body)
 })
 
 /** Non-GET methods fall through to npm. */
