@@ -14,7 +14,9 @@ export type ConfiguredPreviewRef = {
   type: 'commit'
   ref: string
   version: string
-  tag: string
+  /** Populated by getConfiguredRefs from the runtime refs index, when known. */
+  publishedAt?: string
+  prUrl?: string
 }
 
 /** Parse one trimmed ref token, or return null if it is not a commit ref. */
@@ -25,7 +27,6 @@ function parseSingleRef(value: string): ConfiguredPreviewRef | null {
     type: 'commit',
     ref: commit[1],
     version: commitVersion(commit[1]),
-    tag: `commit-${commit[1]}`,
   }
 }
 

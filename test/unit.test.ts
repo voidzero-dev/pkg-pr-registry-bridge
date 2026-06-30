@@ -72,13 +72,12 @@ describe('parsePreviewVersion', () => {
 })
 
 describe('parseConfiguredPreviewRefs', () => {
-  it('parses commit refs into versions and tags', () => {
+  it('parses commit refs into versions', () => {
     expect(parseConfiguredPreviewRefs('commit.a832a55')).toEqual([
       {
         type: 'commit',
         ref: 'a832a55',
         version: '0.0.0-commit.a832a55',
-        tag: 'commit-a832a55',
       },
     ])
   })
@@ -96,7 +95,6 @@ describe('parseConfiguredPreviewRefs', () => {
         type: 'commit',
         ref: 'abcdef0',
         version: '0.0.0-commit.abcdef0',
-        tag: 'commit-abcdef0',
       },
     ])
   })

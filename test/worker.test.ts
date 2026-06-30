@@ -132,7 +132,7 @@ describe('packument endpoint', () => {
     expect(body.versions['0.2.1']).toBeTruthy()
     expect(body['dist-tags'].latest).toBe('0.2.1')
 
-    // preview version + dist-tag injected.
+    // preview version injected.
     const preview = body.versions['0.0.0-commit.a832a55']
     expect(preview).toBeTruthy()
     expect(preview.version).toBe('0.0.0-commit.a832a55')
@@ -142,7 +142,6 @@ describe('packument endpoint', () => {
     expect(preview.dist.tarball).toBe(
       `${BASE}/tarballs/vite-plus/0.0.0-commit.a832a55.tgz`,
     )
-    expect(body['dist-tags']['commit-a832a55']).toBe('0.0.0-commit.a832a55')
     expect(res.headers.get('cache-control')).toContain('max-age=300')
   })
 
@@ -488,6 +487,80 @@ describe('admin: refs', () => {
     expect(body.refs.some((r) => r.ref === 'commit.a832a55')).toBe(true)
   })
 
+  it('surfaces the server-stamped publish time and PR url for a published ref', async () => {
+    const sha = 'deadbee'
+    const version = `0.0.0-commit.${sha}`
+    const prUrl = 'https://github.com/voidzero-dev/vite-plus/pull/123'
+    const pub = await SELF.fetch(`${BASE}/-/publish`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ref: `commit.${sha}`,
+        prUrl,
+        packages: [
+          {
+            name: 'vite-plus',
+            version,
+            packageJson: { name: 'vite-plus', version },
+            integrity: 'sha512-test',
+            shasum: '',
+          },
+        ],
+      }),
+    })
+    expect(pub.status).toBe(201)
+
+    const res = await SELF.fetch(`${BASE}/-/refs`)
+    const body = (await res.json()) as {
+      refs: Array<{
+        ref: string
+        version: string
+        publishedAt: string | null
+        prUrl: string | null
+      }>
+    }
+    const entry = body.refs.find((r) => r.ref === `commit.${sha}`)
+    expect(entry).toBeTruthy()
+    expect(entry!.version).toBe(version)
+    // server-stamped at publish, a valid ISO timestamp.
+    expect(typeof entry!.publishedAt).toBe('string')
+    expect(Number.isNaN(Date.parse(entry!.publishedAt!))).toBe(false)
+    expect(entry!.prUrl).toBe(prUrl)
+    // the old dist-tag field is gone.
+    expect(entry).not.toHaveProperty('tag')
+  })
+
+  it('omits the PR url for a ref published without one (push run)', async () => {
+    const sha = 'beefca0'
+    const version = `0.0.0-commit.${sha}`
+    const pub = await SELF.fetch(`${BASE}/-/publish`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ref: `commit.${sha}`,
+        packages: [
+          {
+            name: 'vite-plus',
+            version,
+            packageJson: { name: 'vite-plus', version },
+            integrity: 'sha512-test',
+            shasum: '',
+          },
+        ],
+      }),
+    })
+    expect(pub.status).toBe(201)
+
+    const res = await SELF.fetch(`${BASE}/-/refs`)
+    const body = (await res.json()) as {
+      refs: Array<{ ref: string; publishedAt: string | null; prUrl: string | null }>
+    }
+    const entry = body.refs.find((r) => r.ref === `commit.${sha}`)
+    expect(entry).toBeTruthy()
+    expect(typeof entry!.publishedAt).toBe('string')
+    expect(entry!.prUrl).toBeNull()
+  })
+
   it('registers a ref and injects it into the packument', async () => {
     const add = await SELF.fetch(`${BASE}/-/refs`, {
       method: 'POST',
@@ -505,7 +578,6 @@ describe('admin: refs', () => {
     })
     const body = (await pack.json()) as Record<string, any>
     expect(body.versions['0.0.0-commit.a832a55']).toBeTruthy()
-    expect(body['dist-tags']['commit-a832a55']).toBe('0.0.0-commit.a832a55')
   })
 
   it('rejects an invalid ref', async () => {

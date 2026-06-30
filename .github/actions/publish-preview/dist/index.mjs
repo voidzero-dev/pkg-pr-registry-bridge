@@ -504,8 +504,7 @@ function parseSingleRef(value) {
   return {
     type: "commit",
     ref: commit[1],
-    version: commitVersion(commit[1]),
-    tag: `commit-${commit[1]}`
+    version: commitVersion(commit[1])
   };
 }
 function splitRefs(input2) {
@@ -568,6 +567,7 @@ async function main() {
   const version = parsed.version;
   const bridge = (input("bridge-url") || "https://registry-bridge.viteplus.dev").replace(/\/+$/, "");
   const token = input("admin-token", true);
+  const prUrl = input("pr-url") || void 0;
   const env = {
     PUBLIC_BASE_URL: bridge,
     PKG_PR_NEW_BASE: (input("pkg-pr-new-base") || "https://pkg.pr.new").replace(/\/+$/, ""),
@@ -607,7 +607,7 @@ async function main() {
     const res = await fetch(`${bridge}/-/publish`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ ref, packages })
+      body: JSON.stringify({ ref, prUrl, packages })
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => "")}`);
   });

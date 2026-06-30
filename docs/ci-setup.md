@@ -33,6 +33,8 @@ Right after the pkg.pr.new build publishes:
   with:
     sha: ${{ github.event.pull_request.head.sha }}
     admin-token: ${{ secrets.PKG_PR_BRIDGE_ADMIN_TOKEN }}
+    # Optional: surfaced by /-/refs. Omit/empty on push runs (no PR).
+    pr-url: ${{ github.event.pull_request.html_url }}
     # bridge-url defaults to https://registry-bridge.viteplus.dev
 ```
 
