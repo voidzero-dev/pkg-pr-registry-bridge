@@ -1,7 +1,6 @@
 import type { Env } from '../config'
 import { encodeNpmPackageName } from './parsePackageName'
 import { HttpError } from '../httpError'
-import { npmTimeCacheControl } from '../cache/headers'
 
 // Abbreviated packument format. Always request this from npm: it is an order
 // of magnitude smaller than the full packument (which some clients' Accept
@@ -81,48 +80,37 @@ async function fetchNpmTime(
     : null
 }
 
+/** Cached npm `time` TTL: short, only to bound a brand-new version's lag. */
+const NPM_TIME_TTL_S = 5 * 60
+
 /**
- * npm's per-version `time` map, cached per-colo so the FULL packument (an order
- * of magnitude larger than the abbreviated one, e.g. ~1.4 MB for vite-plus) is
+ * npm's per-version `time` map, cached in KV so the FULL packument (an order of
+ * magnitude larger than the abbreviated one, e.g. ~1.4 MB for vite-plus) is
  * fetched and parsed rarely instead of on every request, the dominant hot-path
- * allocation. Past versions' times are immutable; the short TTL only bounds how
- * long a brand-new npm version's time lags, and such a version is younger than
- * any minimum-release-age threshold (so a momentarily-absent entry is filtered
- * out, not an ERR_PNPM_MISSING_TIME). Refs/versions stay fresh (read live), so
- * this adds no publish-visibility lag.
+ * allocation. KV's native TTL bounds how long a brand-new npm version's time
+ * lags, and such a version is younger than any minimum-release-age threshold (so
+ * a momentarily-absent entry is filtered out, not an ERR_PNPM_MISSING_TIME).
+ * Refs/versions stay fresh (read live), so this adds no publish-visibility lag.
+ * KV, not the Cache API, because the Void runtime forbids `caches.default`.
  */
 export async function getNpmTimeCached(
   env: Env,
   name: string,
 ): Promise<Record<string, string>> {
-  const key = new Request(
-    `${env.PUBLIC_BASE_URL}/-/npm-time/${encodeNpmPackageName(name)}`,
-  )
-  // The Cache API isn't guaranteed on every runtime this deploys to; degrade to
-  // a direct fetch on any cache error rather than failing the request.
+  const key = `npm-time/${name}`
+  // Degrade to a direct fetch on any cache error rather than failing the request.
   try {
-    const hit = await caches.default.match(key)
-    if (hit) return (await hit.json()) as Record<string, string>
+    const cached = await env.KV.get<Record<string, string>>(key, 'json')
+    if (cached) return cached
   } catch (err) {
     console.warn(`npm-time cache read failed for ${name}:`, err)
-    return (await fetchNpmTime(env, name)) ?? {}
   }
 
   // Store the small EXTRACTED map (not the multi-MB body); `{}` for a 404 so a
   // not-on-npm package isn't re-fetched in full every request.
   const time = (await fetchNpmTime(env, name)) ?? {}
   try {
-    // Awaited (not waitUntil) so it works without an ExecutionContext, which the
-    // managed runtime does not always provide; the write is fast and miss-only.
-    await caches.default.put(
-      key,
-      new Response(JSON.stringify(time), {
-        headers: {
-          'content-type': 'application/json',
-          'cache-control': npmTimeCacheControl(),
-        },
-      }),
-    )
+    await env.KV.put(key, JSON.stringify(time), { expirationTtl: NPM_TIME_TTL_S })
   } catch (err) {
     // Best-effort cache population; log so a failing runtime is visible.
     console.warn(`npm-time cache write failed for ${name}:`, err)

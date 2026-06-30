@@ -34,6 +34,11 @@ export interface Env {
    * Also holds the runtime-registered refs index (see getConfiguredRefs).
    */
   STORAGE: R2Bucket
+  /**
+   * KV namespace caching npm's per-version `time` map (small, TTL'd). Used
+   * instead of the Cache API, which the Void runtime forbids.
+   */
+  KV: KVNamespace
   /** Bearer token guarding the admin endpoints (`/-/refs`, `/-/purge`, etc.). */
   ADMIN_TOKEN?: string
 }

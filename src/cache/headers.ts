@@ -16,12 +16,3 @@ export function tarballCacheControl(): string {
 export function packumentCacheControl(): string {
   return SHORT_MAX_AGE
 }
-
-/**
- * Cache policy for the cached npm `time` map. Short for its OWN reason, bounding
- * how long a brand-new npm version's time lags, which is independent of the
- * packument TTL even though they currently share a value.
- */
-export function npmTimeCacheControl(): string {
-  return SHORT_MAX_AGE
-}

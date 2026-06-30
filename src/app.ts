@@ -296,7 +296,7 @@ app.delete('/-/refs', async (c) => {
 })
 
 /**
- * Purge a generated build from the caches. Body:
+ * Purge a generated build from R2. Body:
  * `{ "package": "vite-plus", "version": "0.0.0-commit.<sha>" }`.
  */
 app.post('/-/purge', async (c) => {
@@ -318,7 +318,6 @@ app.post('/-/purge', async (c) => {
   await Promise.all([
     c.env.STORAGE.delete(tarballKey(name, version)),
     c.env.STORAGE.delete(metaKey(name, version)),
-    caches.default.delete(new Request(tarballUrl(c.env, name, version))),
   ])
   return c.json({ purged: { package: name, version } })
 })
