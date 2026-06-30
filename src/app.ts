@@ -23,7 +23,7 @@ import {
   parseUploadPath,
 } from './registry/parsePackageName'
 import {
-  fetchNpmPackument,
+  getNpmPackumentCached,
   getNpmTimeCached,
 } from './registry/fetchNpmPackument'
 import { buildVersionMetadata } from './registry/buildVersionMetadata'
@@ -375,7 +375,7 @@ app.get('*', async (c) => {
   // abbreviated form we serve omits it) but is sourced separately so the served
   // response keeps the compact abbreviated version docs.
   const [base, npmTime, refs] = await Promise.all([
-    fetchNpmPackument(c.env, name),
+    getNpmPackumentCached(c.env, name),
     getNpmTimeCached(c.env, name),
     getConfiguredRefs(c.env),
   ])

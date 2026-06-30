@@ -117,3 +117,46 @@ export async function getNpmTimeCached(
   }
   return time
 }
+
+/** Cached abbreviated packument TTL: matches the served `cache-control` window. */
+const NPM_PACKUMENT_TTL_S = 5 * 60
+
+/**
+ * The abbreviated npm packument, cached in KV. The Void runtime does NOT
+ * edge-cache the assembled packument response (it forbids the Cache API), so
+ * without this every fresh client, e.g. each CI install, re-fetched the full
+ * abbreviated packument from npm cross-network, the dominant hot-path latency.
+ * Only npm-published versions are cached; preview versions are injected live
+ * from the refs index, so a newly published preview still appears immediately
+ * (the cache adds no publish-visibility lag, only an npm stable release lags up
+ * to the TTL, which the served `max-age=300` already allows). A 404 (not on npm)
+ * is not cached; a fresh per-call parse means the caller can mutate the result
+ * without corrupting the cache. KV, not the Cache API, per the Void ban.
+ */
+export async function getNpmPackumentCached(
+  env: Env,
+  name: string,
+): Promise<Record<string, any> | null> {
+  const key = `npm-packument/${name}`
+  // Degrade to a direct fetch on any cache error rather than failing the request.
+  try {
+    const cached = await env.KV.get<Record<string, any>>(key, 'json')
+    if (cached) return cached
+  } catch (err) {
+    console.warn(`npm-packument cache read failed for ${name}:`, err)
+  }
+
+  // A non-200/404 throws (surfaces the upstream error); a 404 returns null and is
+  // left uncached so a not-on-npm package stays cheap to re-probe.
+  const packument = await fetchNpmPackument(env, name)
+  if (packument) {
+    try {
+      await env.KV.put(key, JSON.stringify(packument), {
+        expirationTtl: NPM_PACKUMENT_TTL_S,
+      })
+    } catch (err) {
+      console.warn(`npm-packument cache write failed for ${name}:`, err)
+    }
+  }
+  return packument
+}
