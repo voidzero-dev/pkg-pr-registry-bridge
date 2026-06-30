@@ -101,25 +101,32 @@ const checks = [
 
 console.log(`smoke-testing ${base}`)
 
-// Wait for the new deployment to go live (edge propagation) before asserting.
-for (let i = 0; i < 10; i++) {
-  try {
-    const res = await fetch(`${base}/_health`)
-    if (res.status === 200) break
-  } catch {
-    // not up yet
-  }
-  await sleep(3000)
-}
-
+// Retry each check until it passes or a shared deadline, to ride out edge
+// propagation right after a deploy: a fresh `void deploy` returns before the new
+// worker is live on every edge node, and `/_health` is 200 on both old and new
+// code, so it alone can't tell them apart (this caused a false prod-smoke
+// failure where HEAD briefly hit an old node, x-commit-key=null). A genuinely
+// failing check exhausts the deadline; later checks then fail fast.
+const deadline = Date.now() + 60_000
 let failed = 0
 for (const check of checks) {
-  try {
-    await check.run()
-    console.log(`  ✓ ${check.name}`)
-  } catch (err) {
+  let err
+  for (;;) {
+    err = undefined
+    try {
+      await check.run() // logs the response on every attempt
+      break
+    } catch (e) {
+      err = e
+      if (Date.now() >= deadline) break
+      await sleep(4000)
+    }
+  }
+  if (err) {
     console.error(`  ✗ ${check.name}: ${err.message}`)
     failed++
+  } else {
+    console.log(`  ✓ ${check.name}`)
   }
 }
 
