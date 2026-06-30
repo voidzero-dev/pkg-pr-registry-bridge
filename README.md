@@ -149,10 +149,22 @@ curl -L https://registry-bridge.viteplus.dev/voidzero-dev/vite-plus@<sha>
 curl -L https://registry-bridge.viteplus.dev/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-core@1891
 ```
 
-It 302-redirects to the canonical `/tarballs/<pkg>/<version>.tgz`. Note the
-bridge rewrites a preview tarball's transitive deps to versions (not pkg.pr.new
-URLs), so for a full install of the meta-package with its platform binaries, use
-the registry + `pr-<n>` tag above rather than this URL as a bare dependency.
+A `GET` 302-redirects to the canonical `/tarballs/<pkg>/<version>.tgz`. A `HEAD`
+answers `200` (no body) and resolves the ref to its exact commit via
+pkg.pr.new-style headers, so a tool can pin a (mutable) PR number to a commit
+without downloading:
+
+```bash
+curl -I https://registry-bridge.viteplus.dev/voidzero-dev/vite-plus@1891
+# HTTP/2 200
+# x-commit-key: voidzero-dev:vite-plus:<sha>
+# x-pkg-name-key: vite-plus
+```
+
+Both `GET` and `HEAD` carry `x-commit-key`/`x-pkg-name-key`. Note the bridge
+rewrites a preview tarball's transitive deps to versions (not pkg.pr.new URLs),
+so for a full install of the meta-package with its platform binaries, use the
+registry + `pr-<n>` tag above rather than this URL as a bare dependency.
 
 ## Admin endpoints
 

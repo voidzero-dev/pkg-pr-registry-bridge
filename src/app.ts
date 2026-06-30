@@ -104,13 +104,17 @@ async function serveTarball(
 
 /**
  * Resolve a pkg.pr.new-style download (a PR number -> its latest commit
- * version, or a commit sha -> its synthetic version) and 302 to the canonical
- * tarball. A PR number's mapping is mutable (it moves with the PR), so this
- * redirect is not cached; the immutable tarball it points at is.
+ * version, or a commit sha -> its synthetic version). A GET 302s to the
+ * canonical tarball; a HEAD answers 200 with no body, so a client can map a
+ * (possibly mutable) PR/sha to its exact commit without downloading. Both carry
+ * pkg.pr.new-style `x-commit-key` (`<owner>:<repo>:<sha>`) and `x-pkg-name-key`.
+ * The PR mapping is mutable, so the response is not cached; the immutable
+ * tarball it points at is.
  */
 async function serveDownloadRedirect(
   env: Env,
   download: { pkg: string; ref: string },
+  head: boolean,
 ): Promise<Response> {
   if (!isWorkspacePackage(download.pkg, env)) {
     throw new HttpError(404, `Unknown package: ${download.pkg}`)
@@ -121,12 +125,21 @@ async function serveDownloadRedirect(
   if (!version) {
     throw new HttpError(404, `No preview build for ref ${download.ref}`)
   }
+  const sha = parsePreviewVersion(version)?.ref ?? ''
+  const headers: Record<string, string> = {
+    'x-commit-key': `${env.PREVIEW_OWNER}:${env.PREVIEW_REPO}:${sha}`,
+    'x-pkg-name-key': download.pkg,
+    'cache-control': 'no-store',
+  }
+  if (head) {
+    return new Response(null, {
+      status: 200,
+      headers: { ...headers, 'content-type': 'application/tar+gzip' },
+    })
+  }
   return new Response(null, {
     status: 302,
-    headers: {
-      location: tarballUrl(env, download.pkg, version),
-      'cache-control': 'no-store',
-    },
+    headers: { ...headers, location: tarballUrl(env, download.pkg, version) },
   })
 }
 
@@ -343,7 +356,9 @@ app.get('*', async (c) => {
     c.env.PREVIEW_OWNER,
     c.env.PREVIEW_REPO,
   )
-  if (download) return await serveDownloadRedirect(c.env, download)
+  if (download) {
+    return await serveDownloadRedirect(c.env, download, c.req.method === 'HEAD')
+  }
 
   const pkgReq = parsePackagePath(pathname)
   if (!pkgReq) return redirectToNpm(c.env, c.req.raw)
