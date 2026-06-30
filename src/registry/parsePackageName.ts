@@ -130,6 +130,40 @@ export function parseNpmTarballPath(pathname: string): TarballRequest | null {
   return { name, version }
 }
 
+/**
+ * Parse a pkg.pr.new-style direct-download path for the configured repo:
+ *   /<owner>/<repo>@<ref>        -> { pkg: <repo>, ref }   (repo's main package)
+ *   /<owner>/<repo>/<pkg>@<ref>  -> { pkg, ref }           (<pkg> may be scoped)
+ * Returns null when the path is not this form.
+ */
+export function parsePkgPrNewDownload(
+  pathname: string,
+  owner: string,
+  repo: string,
+): { pkg: string; ref: string } | null {
+  const decoded = decodePath(pathname)
+  const base = `${owner}/${repo}`
+  if (!decoded || !decoded.startsWith(base)) return null
+  const rest = decoded.slice(base.length)
+
+  let pkg: string
+  let ref: string
+  if (rest.startsWith('@')) {
+    pkg = repo
+    ref = rest.slice(1)
+  } else if (rest.startsWith('/')) {
+    // `<pkg>@<ref>`; lastIndexOf('@') keeps a scoped pkg name intact.
+    const seg = rest.slice(1)
+    const at = seg.lastIndexOf('@')
+    if (at <= 0) return null
+    pkg = seg.slice(0, at)
+    ref = seg.slice(at + 1)
+  } else {
+    return null
+  }
+  return ref && !ref.includes('/') ? { pkg, ref } : null
+}
+
 /** Encode a package name for an outbound npm registry URL. */
 export function encodeNpmPackageName(name: string): string {
   return name.startsWith('@') ? name.replace('/', '%2F') : name

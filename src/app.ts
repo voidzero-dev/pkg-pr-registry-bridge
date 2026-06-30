@@ -3,16 +3,21 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { Env } from './config'
 import { HttpError } from './httpError'
 import { isWorkspacePackage } from './preview/packages'
-import { parsePreviewVersion } from './preview/parsePreviewVersion'
+import {
+  parsePreviewVersion,
+  shaToVersion,
+} from './preview/parsePreviewVersion'
 import { parseConfiguredPreviewRefs } from './preview/parseConfiguredPreviewRefs'
 import {
   getConfiguredRefs,
+  latestVersionByPr,
   registerRef,
   unregisterRef,
 } from './preview/getConfiguredRefs'
 import {
   parseNpmTarballPath,
   parsePackagePath,
+  parsePkgPrNewDownload,
   parseTarballPath,
   parseUploadPath,
 } from './registry/parsePackageName'
@@ -24,7 +29,7 @@ import {
   getPreviewTarballBody,
 } from './tarball/getPreviewBuild'
 import type { PreviewMeta } from './tarball/buildPreviewTarball'
-import { metaKey, tarballKey } from './cache/r2Cache'
+import { metaKey, tarballKey, tarballUrl } from './cache/r2Cache'
 import { requireAdmin } from './security/auth'
 import {
   packumentCacheControl,
@@ -90,6 +95,34 @@ async function serveTarball(
       'content-type': 'application/gzip',
       'cache-control': tarballCacheControl(),
       'content-length': String(result.contentLength),
+    },
+  })
+}
+
+/**
+ * Resolve a pkg.pr.new-style download (a PR number -> its latest commit
+ * version, or a commit sha -> its synthetic version) and 302 to the canonical
+ * tarball. A PR number's mapping is mutable (it moves with the PR), so this
+ * redirect is not cached; the immutable tarball it points at is.
+ */
+async function serveDownloadRedirect(
+  env: Env,
+  download: { pkg: string; ref: string },
+): Promise<Response> {
+  if (!isWorkspacePackage(download.pkg, env)) {
+    throw new HttpError(404, `Unknown package: ${download.pkg}`)
+  }
+  const version = /^\d+$/.test(download.ref)
+    ? (latestVersionByPr(await getConfiguredRefs(env)).get(download.ref) ?? null)
+    : shaToVersion(download.ref)
+  if (!version) {
+    throw new HttpError(404, `No preview build for ref ${download.ref}`)
+  }
+  return new Response(null, {
+    status: 302,
+    headers: {
+      location: tarballUrl(env, download.pkg, version),
+      'cache-control': 'no-store',
     },
   })
 }
@@ -269,9 +302,7 @@ app.post('/-/purge', async (c) => {
   await Promise.all([
     c.env.STORAGE.delete(tarballKey(name, version)),
     c.env.STORAGE.delete(metaKey(name, version)),
-    caches.default.delete(
-      new Request(`${c.env.PUBLIC_BASE_URL}/tarballs/${name}/${version}.tgz`),
-    ),
+    caches.default.delete(new Request(tarballUrl(c.env, name, version))),
   ])
   return c.json({ purged: { package: name, version } })
 })
@@ -300,6 +331,16 @@ app.get('*', async (c) => {
   ) {
     return await serveTarball(c.env, npmTarball.name, npmTarball.version)
   }
+
+  // pkg.pr.new-style direct download: /<owner>/<repo>[/<pkg>]@<ref> -> 302 to
+  // the canonical tarball. Discriminated here (ahead of the packument parse)
+  // because the URL shape overlaps the scoped-packument namespace.
+  const download = parsePkgPrNewDownload(
+    pathname,
+    c.env.PREVIEW_OWNER,
+    c.env.PREVIEW_REPO,
+  )
+  if (download) return await serveDownloadRedirect(c.env, download)
 
   const pkgReq = parsePackagePath(pathname)
   if (!pkgReq) return redirectToNpm(c.env, c.req.raw)
@@ -353,17 +394,13 @@ app.get('*', async (c) => {
   )
 
   // Mutable `pr-<n>` dist-tags: point each PR at its latest-published commit
-  // version, so `vite-plus@pr-<n>` installs the PR's head build. The per-commit
-  // versions stay immutable; only the tag moves as the PR advances.
-  const latestPrTime = new Map<string, number>()
-  for (const ref of refs) {
-    if (!ref.prNumber || !packument.versions[ref.version]) continue
-    const t = ref.publishedAt ? Date.parse(ref.publishedAt) : 0
-    const prev = latestPrTime.get(ref.prNumber)
-    if (prev === undefined || t >= prev) {
-      latestPrTime.set(ref.prNumber, t)
-      packument['dist-tags'][`pr-${ref.prNumber}`] = ref.version
-    }
+  // version present in this packument, so `<pkg>@pr-<n>` installs the PR's head
+  // build. The per-commit versions stay immutable; only the tag moves.
+  for (const [prNum, version] of latestVersionByPr(
+    refs,
+    (v) => v in packument.versions,
+  )) {
+    packument['dist-tags'][`pr-${prNum}`] = version
   }
 
   return new Response(JSON.stringify(packument), {

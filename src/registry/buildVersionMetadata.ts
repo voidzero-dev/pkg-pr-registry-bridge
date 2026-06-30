@@ -1,5 +1,6 @@
 import type { Env } from '../config'
 import type { PreviewMeta } from '../tarball/buildPreviewTarball'
+import { tarballUrl } from '../cache/r2Cache'
 
 /**
  * Fields from a package.json that should not appear in a registry version
@@ -48,7 +49,7 @@ export function buildVersionMetadata(
   meta._id = `${packageName}@${version}`
 
   const dist: Record<string, any> = {
-    tarball: `${env.PUBLIC_BASE_URL}/tarballs/${packageName}/${version}.tgz`,
+    tarball: tarballUrl(env, packageName, version),
   }
   if (preview.shasum) dist.shasum = preview.shasum
   if (preview.integrity) dist.integrity = preview.integrity

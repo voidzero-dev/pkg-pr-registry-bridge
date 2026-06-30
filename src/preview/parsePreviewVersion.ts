@@ -18,6 +18,14 @@ export function commitVersion(sha: string): string {
   return `0.0.0-commit.${sha}`
 }
 
+/**
+ * A commit-sha ref (7-40 hex) -> its synthetic version, else null. Non-sha refs
+ * (e.g. a PR number) are mutable and intentionally not routed here.
+ */
+export function shaToVersion(ref: string): string | null {
+  return /^[0-9a-f]{7,40}$/i.test(ref) ? commitVersion(ref) : null
+}
+
 export function parsePreviewVersion(version: string): PreviewRef | null {
   const commit = version.match(/^0\.0\.0-commit\.([0-9a-f]{7,40})$/i)
   if (commit) return { type: 'commit', ref: commit[1] }

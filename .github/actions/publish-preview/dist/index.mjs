@@ -353,6 +353,9 @@ function isWorkspacePackage(name, env) {
 function commitVersion(sha) {
   return `0.0.0-commit.${sha}`;
 }
+function shaToVersion(ref) {
+  return /^[0-9a-f]{7,40}$/i.test(ref) ? commitVersion(ref) : null;
+}
 function parsePreviewVersion(version) {
   const commit = version.match(/^0\.0\.0-commit\.([0-9a-f]{7,40})$/i);
   if (commit) return { type: "commit", ref: commit[1] };
@@ -360,10 +363,6 @@ function parsePreviewVersion(version) {
 }
 
 // src/tarball/rewritePackageJson.ts
-function refToVersion(ref) {
-  if (/^[0-9a-f]{7,40}$/i.test(ref)) return commitVersion(ref);
-  return null;
-}
 function pkgPrNewUrlToVersion(spec, env) {
   const prefix = `${env.PKG_PR_NEW_BASE}/${env.PREVIEW_OWNER}/${env.PREVIEW_REPO}/`;
   if (!spec.startsWith(prefix)) return null;
@@ -372,7 +371,7 @@ function pkgPrNewUrlToVersion(spec, env) {
   if (at <= 0) return null;
   const name = rest.slice(0, at);
   if (!isWorkspacePackage(name, env)) return null;
-  return refToVersion(rest.slice(at + 1));
+  return shaToVersion(rest.slice(at + 1));
 }
 function rewriteDependencies(deps, version, env) {
   if (!deps) return deps;
