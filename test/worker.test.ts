@@ -498,6 +498,9 @@ describe('pkg.pr.new-style download', () => {
     )
     // The PR->version mapping is mutable, so the redirect is not cached.
     expect(res.headers.get('cache-control')).toBe('no-store')
+    // pkg.pr.new-style commit key is on the redirect too.
+    expect(res.headers.get('x-commit-key')).toBe(`voidzero-dev:vite-plus:${sha}`)
+    expect(res.headers.get('x-pkg-name-key')).toBe('vite-plus')
   })
 
   it('redirects /<owner>/<repo>/<scoped-pkg>@<sha> to that package', async () => {
@@ -551,6 +554,48 @@ describe('pkg.pr.new-style download', () => {
       redirect: 'manual',
     })
     expect(res.status).toBe(404)
+  })
+
+  it('HEAD <owner>/<repo>@<sha> -> 200 with the commit key, no redirect', async () => {
+    const sha = 'f0f0f0f'
+    const res = await SELF.fetch(`${BASE}/voidzero-dev/vite-plus@${sha}`, {
+      method: 'HEAD',
+    })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('x-commit-key')).toBe(`voidzero-dev:vite-plus:${sha}`)
+    expect(res.headers.get('x-pkg-name-key')).toBe('vite-plus')
+    // HEAD resolves the commit; it does not redirect to the tarball.
+    expect(res.headers.get('location')).toBeNull()
+  })
+
+  it('HEAD <owner>/<repo>@<pr> -> 200 with the PR latest commit key', async () => {
+    const prUrl = 'https://github.com/voidzero-dev/vite-plus/pull/808'
+    const sha = 'e1e1e10'
+    const version = `0.0.0-commit.${sha}`
+    const pub = await SELF.fetch(`${BASE}/-/publish`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ref: `commit.${sha}`,
+        prUrl,
+        packages: [
+          {
+            name: 'vite-plus',
+            version,
+            packageJson: { name: 'vite-plus', version },
+            integrity: 'sha512-test',
+            shasum: '',
+          },
+        ],
+      }),
+    })
+    expect(pub.status).toBe(201)
+    const res = await SELF.fetch(`${BASE}/voidzero-dev/vite-plus@808`, {
+      method: 'HEAD',
+    })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('x-commit-key')).toBe(`voidzero-dev:vite-plus:${sha}`)
+    expect(res.headers.get('x-pkg-name-key')).toBe('vite-plus')
   })
 })
 
