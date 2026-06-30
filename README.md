@@ -264,18 +264,22 @@ The public origin (`PUBLIC_BASE_URL` in `.env.production`) is the custom domain
 underlying Void platform URL `pkg-pr-registry-bridge.void.app` keeps working
 too).
 
-CI deploys in two stages:
+CI deploys in two stages, both smoke-testing the REAL Void runtime, which the
+`pool-workers` unit tests can't emulate (e.g. the platform forbidding
+`caches.default`, which 500'd every packument while all unit tests passed):
 
-- **Every PR** (`.github/workflows/staging.yml`) deploys the change to a
-  **staging** project (`pkg-pr-registry-bridge-staging.void.app`) and runs
-  `scripts/smoke-test.mjs` against that live URL. The smoke test exercises the
-  real Void runtime (`/_health`, the `/vite-plus` packument, `/-/refs`, a
-  download redirect), catching platform-only failures the `pool-workers` unit
-  tests cannot, e.g. the Void platform forbidding `caches.default`, which 500'd
-  every packument while all unit tests passed. Make `Staging` a required status
-  check (branch protection) so a failing smoke test blocks the merge.
-- **Push to `main`** (`.github/workflows/deploy.yml`) deploys to production and
-  smoke-tests the live prod runtime.
+- **Every PR** (`.github/workflows/staging.yml`) deploys the change to the
+  shared **staging** project (`pkg-pr-registry-bridge-staging.void.app`) and
+  runs `scripts/smoke-test.mjs` against it. Make `Staging` a required status
+  check (branch protection) so a failing smoke test blocks the merge. (Skipped
+  for fork PRs, which can't read `VOID_TOKEN`.)
+- **Push to `main`** (`.github/workflows/deploy.yml`) re-runs the staging deploy
+  + smoke as a gate, then deploys to production and smoke-tests it. The gate is
+  necessary because a change can reach `main` without the PR check, a fork PR or
+  a direct push, so production never ships unless staging passes first.
+
+The smoke test hits `/_health`, the `/vite-plus` packument (200 with `time`),
+`/-/refs`, and a download redirect.
 
 Add a `VOID_TOKEN` repository secret (`void auth token` copies one to your
 clipboard); the same token deploys both projects. Run the smoke test locally
