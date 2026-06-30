@@ -357,7 +357,7 @@ app.get('*', async (c) => {
   // response keeps the compact abbreviated version docs.
   const [base, npmTime, refs] = await Promise.all([
     fetchNpmPackument(c.env, name),
-    getNpmTimeCached(c.env, name, c.executionCtx),
+    getNpmTimeCached(c.env, name),
     getConfiguredRefs(c.env),
   ])
 

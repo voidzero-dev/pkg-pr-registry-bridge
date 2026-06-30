@@ -94,21 +94,27 @@ async function fetchNpmTime(
 export async function getNpmTimeCached(
   env: Env,
   name: string,
-  // Structural so this stays decoupled from Hono's vs Cloudflare's
-  // `ExecutionContext` types (which differ); both have `waitUntil`.
-  ctx: { waitUntil(promise: Promise<unknown>): void },
 ): Promise<Record<string, string>> {
   const key = new Request(
     `${env.PUBLIC_BASE_URL}/-/npm-time/${encodeNpmPackageName(name)}`,
   )
-  const hit = await caches.default.match(key)
-  if (hit) return (await hit.json()) as Record<string, string>
+  // The Cache API isn't guaranteed on every runtime this deploys to; degrade to
+  // a direct fetch on any cache error rather than failing the request.
+  try {
+    const hit = await caches.default.match(key)
+    if (hit) return (await hit.json()) as Record<string, string>
+  } catch (err) {
+    console.warn(`npm-time cache read failed for ${name}:`, err)
+    return (await fetchNpmTime(env, name)) ?? {}
+  }
 
   // Store the small EXTRACTED map (not the multi-MB body); `{}` for a 404 so a
   // not-on-npm package isn't re-fetched in full every request.
   const time = (await fetchNpmTime(env, name)) ?? {}
-  ctx.waitUntil(
-    caches.default.put(
+  try {
+    // Awaited (not waitUntil) so it works without an ExecutionContext, which the
+    // managed runtime does not always provide; the write is fast and miss-only.
+    await caches.default.put(
       key,
       new Response(JSON.stringify(time), {
         headers: {
@@ -116,7 +122,10 @@ export async function getNpmTimeCached(
           'cache-control': npmTimeCacheControl(),
         },
       }),
-    ),
-  )
+    )
+  } catch (err) {
+    // Best-effort cache population; log so a failing runtime is visible.
+    console.warn(`npm-time cache write failed for ${name}:`, err)
+  }
   return time
 }
