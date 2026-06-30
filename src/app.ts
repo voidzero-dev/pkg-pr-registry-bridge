@@ -438,8 +438,6 @@ app.get('*', async (c) => {
 app.all('*', (c) => redirectToNpm(c.env, c.req.raw))
 
 app.onError((err, c) => {
-  // Keep the CORS header on errors too, so a browser can read the error body.
-  c.header('access-control-allow-origin', '*')
   if (err instanceof HttpError) {
     return c.json({ error: err.message }, err.status as ContentfulStatusCode)
   }
