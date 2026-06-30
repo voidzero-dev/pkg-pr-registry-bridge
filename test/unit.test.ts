@@ -6,6 +6,7 @@ import {
 import {
   parseConfiguredPreviewRefs,
   parseConfiguredPreviewRefsSafe,
+  prNumberFromUrl,
 } from '../src/preview/parseConfiguredPreviewRefs'
 import { toPkgPrNewUrl } from '../src/preview/toPkgPrNewUrl'
 import {
@@ -97,6 +98,22 @@ describe('parseConfiguredPreviewRefs', () => {
         version: '0.0.0-commit.abcdef0',
       },
     ])
+  })
+})
+
+describe('prNumberFromUrl', () => {
+  it('extracts the PR number from a GitHub PR url', () => {
+    expect(
+      prNumberFromUrl('https://github.com/voidzero-dev/vite-plus/pull/1569'),
+    ).toBe('1569')
+    // trailing path segments (e.g. /files) are tolerated.
+    expect(prNumberFromUrl('https://github.com/o/r/pull/42/files')).toBe('42')
+  })
+
+  it('returns undefined for non-PR or missing urls', () => {
+    expect(prNumberFromUrl(undefined)).toBeUndefined()
+    expect(prNumberFromUrl('')).toBeUndefined()
+    expect(prNumberFromUrl('https://github.com/o/r/commit/abc123')).toBeUndefined()
   })
 })
 

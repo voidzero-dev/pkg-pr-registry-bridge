@@ -21,7 +21,15 @@ export type ParsedPreviewRef = {
 export type ConfiguredPreviewRef = ParsedPreviewRef & {
   publishedAt?: string
   prUrl?: string
+  /** PR number projected from prUrl, when published from a PR. */
+  prNumber?: string
   expiresAt?: number
+}
+
+/** Extract the PR number from a GitHub pull-request url, or undefined. */
+export function prNumberFromUrl(url: string | undefined): string | undefined {
+  const m = url?.match(/\/pull\/(\d+)/)
+  return m ? m[1] : undefined
 }
 
 /** Parse one trimmed ref token, or return null if it is not a commit ref. */

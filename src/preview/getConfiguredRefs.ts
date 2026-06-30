@@ -3,6 +3,7 @@ import {
   parseConfiguredPreviewRefs,
   parseConfiguredPreviewRefsSafe,
   parseSingleRef,
+  prNumberFromUrl,
   type ConfiguredPreviewRef,
   type ParsedPreviewRef,
 } from './parseConfiguredPreviewRefs'
@@ -90,6 +91,7 @@ export async function getConfiguredRefs(
         ...parsed,
         publishedAt: entry.publishedAt,
         prUrl: entry.prUrl,
+        prNumber: prNumberFromUrl(entry.prUrl),
         expiresAt: entry.expiresAt,
       })
     }
