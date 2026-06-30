@@ -4,8 +4,8 @@ import type { Env } from './config'
 import { HttpError } from './httpError'
 import { isWorkspacePackage } from './preview/packages'
 import {
-  commitVersion,
   parsePreviewVersion,
+  shaToVersion,
 } from './preview/parsePreviewVersion'
 import { parseConfiguredPreviewRefs } from './preview/parseConfiguredPreviewRefs'
 import {
@@ -17,6 +17,7 @@ import {
 import {
   parseNpmTarballPath,
   parsePackagePath,
+  parsePkgPrNewDownload,
   parseTarballPath,
   parseUploadPath,
 } from './registry/parsePackageName'
@@ -28,7 +29,7 @@ import {
   getPreviewTarballBody,
 } from './tarball/getPreviewBuild'
 import type { PreviewMeta } from './tarball/buildPreviewTarball'
-import { metaKey, tarballKey } from './cache/r2Cache'
+import { metaKey, tarballKey, tarballUrl } from './cache/r2Cache'
 import { requireAdmin } from './security/auth'
 import {
   packumentCacheControl,
@@ -42,35 +43,6 @@ import {
  * pinned preview during that gap.
  */
 const UNPUBLISHED_PREVIEW_TIME = '2020-01-01T00:00:00.000Z'
-
-/**
- * Parse a pkg.pr.new-style direct-download path for the configured repo:
- *   /<owner>/<repo>@<ref>        -> { pkg: <repo>, ref }
- *   /<owner>/<repo>/<pkg>@<ref>  -> { pkg, ref }   (<pkg> may be scoped)
- * Returns null when the path is not this form.
- */
-function parsePkgPrNewDownload(
-  pathname: string,
-  env: Env,
-): { pkg: string; ref: string } | null {
-  const base = `/${env.PREVIEW_OWNER}/${env.PREVIEW_REPO}`
-  if (!pathname.startsWith(base)) return null
-  const rest = pathname.slice(base.length)
-  // Bare form: the repo's main package (named after the repo).
-  if (rest.startsWith('@')) {
-    const ref = rest.slice(1)
-    return ref && !ref.includes('/') ? { pkg: env.PREVIEW_REPO, ref } : null
-  }
-  // Package form: `<pkg>@<ref>`; lastIndexOf('@') keeps a scoped pkg intact.
-  if (rest.startsWith('/')) {
-    const seg = rest.slice(1)
-    const at = seg.lastIndexOf('@')
-    if (at <= 0) return null
-    const ref = seg.slice(at + 1)
-    return ref && !ref.includes('/') ? { pkg: seg.slice(0, at), ref } : null
-  }
-  return null
-}
 
 type HonoEnv = { Bindings: Env }
 
@@ -123,6 +95,34 @@ async function serveTarball(
       'content-type': 'application/gzip',
       'cache-control': tarballCacheControl(),
       'content-length': String(result.contentLength),
+    },
+  })
+}
+
+/**
+ * Resolve a pkg.pr.new-style download (a PR number -> its latest commit
+ * version, or a commit sha -> its synthetic version) and 302 to the canonical
+ * tarball. A PR number's mapping is mutable (it moves with the PR), so this
+ * redirect is not cached; the immutable tarball it points at is.
+ */
+async function serveDownloadRedirect(
+  env: Env,
+  download: { pkg: string; ref: string },
+): Promise<Response> {
+  if (!isWorkspacePackage(download.pkg, env)) {
+    throw new HttpError(404, `Unknown package: ${download.pkg}`)
+  }
+  const version = /^\d+$/.test(download.ref)
+    ? (latestVersionByPr(await getConfiguredRefs(env)).get(download.ref) ?? null)
+    : shaToVersion(download.ref)
+  if (!version) {
+    throw new HttpError(404, `No preview build for ref ${download.ref}`)
+  }
+  return new Response(null, {
+    status: 302,
+    headers: {
+      location: tarballUrl(env, download.pkg, version),
+      'cache-control': 'no-store',
     },
   })
 }
@@ -302,9 +302,7 @@ app.post('/-/purge', async (c) => {
   await Promise.all([
     c.env.STORAGE.delete(tarballKey(name, version)),
     c.env.STORAGE.delete(metaKey(name, version)),
-    caches.default.delete(
-      new Request(`${c.env.PUBLIC_BASE_URL}/tarballs/${name}/${version}.tgz`),
-    ),
+    caches.default.delete(new Request(tarballUrl(c.env, name, version))),
   ])
   return c.json({ purged: { package: name, version } })
 })
@@ -334,34 +332,15 @@ app.get('*', async (c) => {
     return await serveTarball(c.env, npmTarball.name, npmTarball.version)
   }
 
-  // pkg.pr.new-style direct download: /<owner>/<repo>[/<pkg>]@<ref>. Resolve a
-  // PR number to its latest commit version (or a commit sha to its synthetic
-  // version) and 302 to the canonical tarball. A PR number's mapping is mutable
-  // (it moves with the PR), so the redirect itself is not cached.
-  const download = parsePkgPrNewDownload(pathname, c.env)
-  if (download) {
-    if (!isWorkspacePackage(download.pkg, c.env)) {
-      throw new HttpError(404, `Unknown package: ${download.pkg}`)
-    }
-    let version: string | null = null
-    if (/^\d+$/.test(download.ref)) {
-      version =
-        latestVersionByPr(await getConfiguredRefs(c.env)).get(download.ref) ??
-        null
-    } else if (/^[0-9a-f]{7,40}$/i.test(download.ref)) {
-      version = commitVersion(download.ref)
-    }
-    if (!version) {
-      throw new HttpError(404, `No preview build for ref ${download.ref}`)
-    }
-    return new Response(null, {
-      status: 302,
-      headers: {
-        location: `${c.env.PUBLIC_BASE_URL}/tarballs/${download.pkg}/${version}.tgz`,
-        'cache-control': 'no-store',
-      },
-    })
-  }
+  // pkg.pr.new-style direct download: /<owner>/<repo>[/<pkg>]@<ref> -> 302 to
+  // the canonical tarball. Discriminated here (ahead of the packument parse)
+  // because the URL shape overlaps the scoped-packument namespace.
+  const download = parsePkgPrNewDownload(
+    pathname,
+    c.env.PREVIEW_OWNER,
+    c.env.PREVIEW_REPO,
+  )
+  if (download) return await serveDownloadRedirect(c.env, download)
 
   const pkgReq = parsePackagePath(pathname)
   if (!pkgReq) return redirectToNpm(c.env, c.req.raw)

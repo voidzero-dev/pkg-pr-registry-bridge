@@ -1,5 +1,5 @@
 import { isWorkspacePackage, PREVIEW_PACKAGES } from '../preview/packages'
-import { commitVersion } from '../preview/parsePreviewVersion'
+import { shaToVersion } from '../preview/parsePreviewVersion'
 
 /** Config needed to rebuild pkg.pr.new URLs as bridge URLs. */
 export interface RewriteEnv {
@@ -8,13 +8,6 @@ export interface RewriteEnv {
   PREVIEW_OWNER: string
   PREVIEW_REPO: string
   WORKSPACE_PACKAGES: string
-}
-
-function refToVersion(ref: string): string | null {
-  // Only immutable commit refs are routed through the bridge. A PR-number URL
-  // (a mutable ref) is left as the original direct pkg.pr.new URL.
-  if (/^[0-9a-f]{7,40}$/i.test(ref)) return commitVersion(ref)
-  return null
 }
 
 /**
@@ -37,9 +30,10 @@ export function pkgPrNewUrlToVersion(
   if (at <= 0) return null
   const name = rest.slice(0, at)
   // Only route packages the bridge will serve; otherwise leave the working
-  // direct pkg.pr.new URL in place.
+  // direct pkg.pr.new URL in place. A non-commit (e.g. PR-number) ref is mutable
+  // and likewise left as the original direct URL (shaToVersion returns null).
   if (!isWorkspacePackage(name, env)) return null
-  return refToVersion(rest.slice(at + 1))
+  return shaToVersion(rest.slice(at + 1))
 }
 
 /**
