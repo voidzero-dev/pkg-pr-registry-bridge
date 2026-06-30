@@ -162,6 +162,26 @@ describe('packument endpoint', () => {
     expect(body.time['0.0.0-commit.a832a55']).toBeTruthy()
   })
 
+  it('serves npm time consistently across repeated requests (time-map cache)', async () => {
+    // npm's `time` map is cached per-colo so the full packument isn't reparsed
+    // every request; repeated requests must still serve the correct npm times,
+    // and the per-request preview-time injection must not corrupt the cached map.
+    const timeOf = async () =>
+      (
+        (await (
+          await SELF.fetch(`${BASE}/vite-plus`, {
+            headers: { accept: 'application/json' },
+          })
+        ).json()) as Record<string, any>
+      ).time as Record<string, string>
+    const a = await timeOf()
+    const b = await timeOf()
+    expect(a['0.2.1']).toBe('2026-06-18T05:33:32.399Z')
+    expect(b['0.2.1']).toBe('2026-06-18T05:33:32.399Z')
+    // the preview time is still injected on every request (not lost to caching).
+    expect(b['0.0.0-commit.a832a55']).toBeTruthy()
+  })
+
   it('stamps the preview release date server-side at publish, stable across requests', async () => {
     // The release date is stamped server-side once at publish, not npm's
     // package-modified time, not a per-request clock, and not a client value.

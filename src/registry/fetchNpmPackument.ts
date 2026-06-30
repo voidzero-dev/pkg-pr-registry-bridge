@@ -1,6 +1,7 @@
 import type { Env } from '../config'
 import { encodeNpmPackageName } from './parsePackageName'
 import { HttpError } from '../httpError'
+import { npmTimeCacheControl } from '../cache/headers'
 
 // Abbreviated packument format. Always request this from npm: it is an order
 // of magnitude smaller than the full packument (which some clients' Accept
@@ -64,7 +65,7 @@ export async function fetchNpmPackument(
  * null. Kept separate from fetchNpmPackument so the served response carries the
  * compact abbreviated version docs while still preserving npm's real times.
  */
-export async function fetchNpmTime(
+async function fetchNpmTime(
   env: Env,
   name: string,
 ): Promise<Record<string, string> | null> {
@@ -78,4 +79,44 @@ export async function fetchNpmTime(
   return time && typeof time === 'object'
     ? (time as Record<string, string>)
     : null
+}
+
+/**
+ * npm's per-version `time` map, cached per-colo so the FULL packument (an order
+ * of magnitude larger than the abbreviated one, e.g. ~1.4 MB for vite-plus) is
+ * fetched and parsed rarely instead of on every request, the dominant hot-path
+ * allocation. Past versions' times are immutable; the short TTL only bounds how
+ * long a brand-new npm version's time lags, and such a version is younger than
+ * any minimum-release-age threshold (so a momentarily-absent entry is filtered
+ * out, not an ERR_PNPM_MISSING_TIME). Refs/versions stay fresh (read live), so
+ * this adds no publish-visibility lag.
+ */
+export async function getNpmTimeCached(
+  env: Env,
+  name: string,
+  // Structural so this stays decoupled from Hono's vs Cloudflare's
+  // `ExecutionContext` types (which differ); both have `waitUntil`.
+  ctx: { waitUntil(promise: Promise<unknown>): void },
+): Promise<Record<string, string>> {
+  const key = new Request(
+    `${env.PUBLIC_BASE_URL}/-/npm-time/${encodeNpmPackageName(name)}`,
+  )
+  const hit = await caches.default.match(key)
+  if (hit) return (await hit.json()) as Record<string, string>
+
+  // Store the small EXTRACTED map (not the multi-MB body); `{}` for a 404 so a
+  // not-on-npm package isn't re-fetched in full every request.
+  const time = (await fetchNpmTime(env, name)) ?? {}
+  ctx.waitUntil(
+    caches.default.put(
+      key,
+      new Response(JSON.stringify(time), {
+        headers: {
+          'content-type': 'application/json',
+          'cache-control': npmTimeCacheControl(),
+        },
+      }),
+    ),
+  )
+  return time
 }

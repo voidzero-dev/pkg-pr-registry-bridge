@@ -21,7 +21,10 @@ import {
   parseTarballPath,
   parseUploadPath,
 } from './registry/parsePackageName'
-import { fetchNpmPackument, fetchNpmTime } from './registry/fetchNpmPackument'
+import {
+  fetchNpmPackument,
+  getNpmTimeCached,
+} from './registry/fetchNpmPackument'
 import { buildVersionMetadata } from './registry/buildVersionMetadata'
 import { redirectToNpm } from './registry/redirectToNpm'
 import {
@@ -354,7 +357,7 @@ app.get('*', async (c) => {
   // response keeps the compact abbreviated version docs.
   const [base, npmTime, refs] = await Promise.all([
     fetchNpmPackument(c.env, name),
-    fetchNpmTime(c.env, name),
+    getNpmTimeCached(c.env, name, c.executionCtx),
     getConfiguredRefs(c.env),
   ])
 
@@ -368,8 +371,9 @@ app.get('*', async (c) => {
   // pnpm's time-based resolution (`minimum-release-age`) hard-errors without a
   // `time` map (ERR_PNPM_MISSING_TIME). Seed it from npm's real publish times;
   // each injected preview version's entry is its server-stamped publish time
-  // (UNPUBLISHED_PREVIEW_TIME until published), added in the loop below.
-  const time: Record<string, string> = { ...(npmTime ?? {}) }
+  // (UNPUBLISHED_PREVIEW_TIME until published), added in the loop below. `npmTime`
+  // is a fresh per-request object (cache parse or fetch), so mutate it in place.
+  const time: Record<string, string> = npmTime
   packument.time = time
 
   // Inject each configured ref. The R2 meta reads are independent, so run them
