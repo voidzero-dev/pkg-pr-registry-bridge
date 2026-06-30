@@ -15,14 +15,16 @@ import {
   unregisterRef,
 } from './preview/getConfiguredRefs'
 import {
-  encodeNpmPackageName,
   parseNpmTarballPath,
   parsePackagePath,
   parsePkgPrNewDownload,
   parseTarballPath,
   parseUploadPath,
 } from './registry/parsePackageName'
-import { fetchNpmPackument, fetchNpmTime } from './registry/fetchNpmPackument'
+import {
+  fetchNpmPackument,
+  getNpmTimeCached,
+} from './registry/fetchNpmPackument'
 import { buildVersionMetadata } from './registry/buildVersionMetadata'
 import { redirectToNpm } from './registry/redirectToNpm'
 import {
@@ -44,44 +46,6 @@ import {
  * pinned preview during that gap.
  */
 const UNPUBLISHED_PREVIEW_TIME = '2020-01-01T00:00:00.000Z'
-
-/**
- * npm's per-version `time` map, cached per-colo so the FULL packument (an order
- * of magnitude larger than the abbreviated one, e.g. ~1.4 MB for vite-plus) is
- * fetched and parsed rarely instead of on every request, the dominant hot-path
- * allocation. Past versions' times are immutable; the short TTL only bounds how
- * long a brand-new npm version's time lags, and such a version is younger than
- * any minimum-release-age threshold (so a momentarily-absent entry is filtered
- * out, not an ERR_PNPM_MISSING_TIME). Refs/versions stay fresh (read live), so
- * this adds no publish-visibility lag.
- */
-async function getNpmTimeCached(
-  env: Env,
-  name: string,
-  ctx: { waitUntil(promise: Promise<unknown>): void },
-): Promise<Record<string, string> | null> {
-  const key = new Request(
-    `${env.PUBLIC_BASE_URL}/-/npm-time/${encodeNpmPackageName(name)}`,
-  )
-  const hit = await caches.default.match(key)
-  if (hit) return (await hit.json()) as Record<string, string>
-
-  // Cache the small EXTRACTED map (not the multi-MB body); `{}` for a 404 so a
-  // not-on-npm package isn't re-fetched in full every request.
-  const time = await fetchNpmTime(env, name)
-  ctx.waitUntil(
-    caches.default.put(
-      key,
-      new Response(JSON.stringify(time ?? {}), {
-        headers: {
-          'content-type': 'application/json',
-          'cache-control': packumentCacheControl(),
-        },
-      }),
-    ),
-  )
-  return time
-}
 
 type HonoEnv = { Bindings: Env }
 
@@ -409,7 +373,7 @@ app.get('*', async (c) => {
   // each injected preview version's entry is its server-stamped publish time
   // (UNPUBLISHED_PREVIEW_TIME until published), added in the loop below. `npmTime`
   // is a fresh per-request object (cache parse or fetch), so mutate it in place.
-  const time: Record<string, string> = npmTime ?? {}
+  const time: Record<string, string> = npmTime
   packument.time = time
 
   // Inject each configured ref. The R2 meta reads are independent, so run them
