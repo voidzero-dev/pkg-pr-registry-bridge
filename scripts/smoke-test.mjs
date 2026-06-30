@@ -108,25 +108,28 @@ console.log(`smoke-testing ${base}`)
 // failure where HEAD briefly hit an old node, x-commit-key=null). A genuinely
 // failing check exhausts the deadline; later checks then fail fast.
 const deadline = Date.now() + 60_000
-let failed = 0
-for (const check of checks) {
-  let err
+
+// Run a check (it logs its response each attempt); throw the last error once the
+// deadline passes.
+async function runWithRetry(check) {
   for (;;) {
-    err = undefined
     try {
-      await check.run() // logs the response on every attempt
-      break
-    } catch (e) {
-      err = e
-      if (Date.now() >= deadline) break
+      return await check.run()
+    } catch (err) {
+      if (Date.now() >= deadline) throw err
       await sleep(4000)
     }
   }
-  if (err) {
+}
+
+let failed = 0
+for (const check of checks) {
+  try {
+    await runWithRetry(check)
+    console.log(`  ✓ ${check.name}`)
+  } catch (err) {
     console.error(`  ✗ ${check.name}: ${err.message}`)
     failed++
-  } else {
-    console.log(`  ✓ ${check.name}`)
   }
 }
 
