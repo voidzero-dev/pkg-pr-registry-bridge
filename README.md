@@ -173,32 +173,23 @@ with `void secret put ADMIN_TOKEN`); without it configured the write endpoints
 return 503. `GET /-/refs` is a public read.
 
 ```bash
-# List configured refs (static env + runtime R2 index) - no auth required.
-# Each entry: { ref, version, publishedAt, prUrl, expiresAt }. publishedAt/prUrl
-# are null until the ref is published (prUrl only when published from a PR);
-# expiresAt is the index TTL (null for static env refs, which never expire).
+# List registered refs - no auth required.
+# Each entry: { ref, version, publishedAt, prUrl, expiresAt }. publishedAt is the
+# server-stamped release date; prUrl is null unless published from a PR; expiresAt
+# is the index TTL (90 days out).
 curl https://.../-/refs
-
-# Register a ref at runtime (no redeploy).
-curl -X POST -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \
-  -d '{"ref":"commit.a832a55"}' https://.../-/refs
-
-# Unregister a ref
-curl -X DELETE -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \
-  -d '{"ref":"commit.a832a55"}' https://.../-/refs
 
 # Purge a generated build (its tarball + meta) from R2
 curl -X POST -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \
   -d '{"package":"vite-plus","version":"0.0.0-commit.a832a55"}' https://.../-/purge
 ```
 
-Tarball upload (`PUT /-/tarball/<pkg>/<version>.tgz`) and publish
-(`POST /-/publish`, stores metadata + registers the ref) are also admin-guarded;
-they are driven by the [publish action](#publishing-from-ci), not by hand.
+Refs are created by publishing: tarball upload (`PUT /-/tarball/<pkg>/<version>.tgz`)
+then `POST /-/publish` (stores metadata + registers the ref), both admin-guarded
+and driven by the [publish action](#publishing-from-ci), not by hand.
 
-A registered ref is reflected immediately and built into the packument on the
-next request (and into R2 on first fetch). This is the no-redeploy path for
-exposing new pkg.pr.new builds.
+A published ref is reflected immediately and built into the packument on the next
+request. This is the no-redeploy path for exposing new pkg.pr.new builds.
 
 ### Publishing from CI
 

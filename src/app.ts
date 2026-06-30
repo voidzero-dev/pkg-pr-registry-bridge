@@ -8,13 +8,11 @@ import {
   parsePreviewVersion,
   shaToVersion,
 } from './preview/parsePreviewVersion'
-import { parseConfiguredPreviewRefs } from './preview/parseConfiguredPreviewRefs'
 import {
   getConfiguredRefs,
   getConfiguredRefsWithEtag,
   latestVersionByPr,
   registerRef,
-  unregisterRef,
 } from './preview/getConfiguredRefs'
 import {
   parseNpmTarballPath,
@@ -265,7 +263,7 @@ app.post('/-/publish', async (c) => {
   return c.json({ ref, version: parsed.version, published }, 201)
 })
 
-/** List the configured preview refs (static env + runtime R2 index). Public read. */
+/** List the registered preview refs (the runtime R2 index). Public read. */
 app.get('/-/refs', async (c) => {
   const refs = await getConfiguredRefs(c.env)
   return c.json({
@@ -274,50 +272,10 @@ app.get('/-/refs', async (c) => {
       version: r.version,
       publishedAt: r.publishedAt ?? null,
       prUrl: r.prUrl ?? null,
-      // ISO TTL; null for static env refs, which never expire.
+      // ISO TTL (90 days out), refreshed on each (re)publish.
       expiresAt: r.expiresAt ? new Date(r.expiresAt).toISOString() : null,
     })),
   })
-})
-
-/**
- * Register a preview ref at runtime (no redeploy). Body:
- * `{ "ref": "commit.<sha>" }`.
- */
-app.post('/-/refs', async (c) => {
-  admin(c)
-  const body = (await c.req.json().catch(() => ({}))) as { ref?: string }
-  const ref = (body.ref ?? '').trim()
-
-  let parsed
-  try {
-    ;[parsed] = parseConfiguredPreviewRefs(ref)
-  } catch {
-    throw new HttpError(400, `Invalid ref: ${ref || '(empty)'}`)
-  }
-
-  try {
-    await registerRef(c.env, ref)
-  } catch (err) {
-    throw new HttpError(503, String(err))
-  }
-  // The tarballs/integrity are built and uploaded by the publish action (CI);
-  // until then this ref's packument uses name-derived platform metas and the
-  // tarball endpoint redirects platform binaries to pkg.pr.new.
-  return c.json({ added: ref, version: parsed.version }, 201)
-})
-
-/** Unregister a runtime preview ref. Body: `{ "ref": "commit.<sha>" }`. */
-app.delete('/-/refs', async (c) => {
-  admin(c)
-  const body = (await c.req.json().catch(() => ({}))) as { ref?: string }
-  const ref = (body.ref ?? '').trim()
-  try {
-    await unregisterRef(c.env, ref)
-  } catch (err) {
-    throw new HttpError(400, String(err))
-  }
-  return c.json({ removed: ref })
 })
 
 /**
