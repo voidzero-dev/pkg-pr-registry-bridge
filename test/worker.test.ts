@@ -517,6 +517,7 @@ describe('admin: refs', () => {
         version: string
         publishedAt: string | null
         prUrl: string | null
+        expiresAt: string | null
       }>
     }
     const entry = body.refs.find((r) => r.ref === `commit.${sha}`)
@@ -526,6 +527,11 @@ describe('admin: refs', () => {
     expect(typeof entry!.publishedAt).toBe('string')
     expect(Number.isNaN(Date.parse(entry!.publishedAt!))).toBe(false)
     expect(entry!.prUrl).toBe(prUrl)
+    // expiresAt is an ISO TTL in the future (90 days out).
+    expect(typeof entry!.expiresAt).toBe('string')
+    expect(Date.parse(entry!.expiresAt!)).toBeGreaterThan(
+      Date.parse(entry!.publishedAt!),
+    )
     // the old dist-tag field is gone.
     expect(entry).not.toHaveProperty('tag')
   })
@@ -553,12 +559,18 @@ describe('admin: refs', () => {
 
     const res = await SELF.fetch(`${BASE}/-/refs`)
     const body = (await res.json()) as {
-      refs: Array<{ ref: string; publishedAt: string | null; prUrl: string | null }>
+      refs: Array<{
+        ref: string
+        publishedAt: string | null
+        prUrl: string | null
+        expiresAt: string | null
+      }>
     }
     const entry = body.refs.find((r) => r.ref === `commit.${sha}`)
     expect(entry).toBeTruthy()
     expect(typeof entry!.publishedAt).toBe('string')
     expect(entry!.prUrl).toBeNull()
+    expect(typeof entry!.expiresAt).toBe('string')
   })
 
   it('registers a ref and injects it into the packument', async () => {

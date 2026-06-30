@@ -2,7 +2,9 @@ import type { Env } from '../config'
 import {
   parseConfiguredPreviewRefs,
   parseConfiguredPreviewRefsSafe,
+  parseSingleRef,
   type ConfiguredPreviewRef,
+  type ParsedPreviewRef,
 } from './parseConfiguredPreviewRefs'
 import { REFS_INDEX_KEY } from '../cache/r2Cache'
 
@@ -21,7 +23,7 @@ type RefEntry = { expiresAt: number; publishedAt?: string; prUrl?: string }
 /** canonical `commit.<sha>` -> RefEntry. */
 type RefIndex = Record<string, RefEntry>
 
-function canonical(ref: ConfiguredPreviewRef): string {
+function canonical(ref: ParsedPreviewRef): string {
   return `${ref.type}.${ref.ref}`
 }
 
@@ -74,15 +76,23 @@ export async function getConfiguredRefs(
 ): Promise<ConfiguredPreviewRef[]> {
   const fromEnv = parseConfiguredPreviewRefsSafe(env.VITE_PLUS_PREVIEW_REFS)
 
-  let fromR2: ConfiguredPreviewRef[] = []
+  const fromR2: ConfiguredPreviewRef[] = []
   try {
     const { index } = await readRefIndex(env)
     const now = Date.now()
-    const live = Object.keys(index).filter((c) => index[c].expiresAt > now)
-    fromR2 = parseConfiguredPreviewRefsSafe(live.join(',')).map((r) => {
-      const entry = index[`${r.type}.${r.ref}`]
-      return { ...r, publishedAt: entry?.publishedAt, prUrl: entry?.prUrl }
-    })
+    // Each index entry is already in hand here, so attach its runtime state
+    // directly instead of re-deriving the key and looking it back up.
+    for (const [key, entry] of Object.entries(index)) {
+      if (entry.expiresAt <= now) continue
+      const parsed = parseSingleRef(key)
+      if (!parsed) continue
+      fromR2.push({
+        ...parsed,
+        publishedAt: entry.publishedAt,
+        prUrl: entry.prUrl,
+        expiresAt: entry.expiresAt,
+      })
+    }
   } catch (err) {
     console.warn('Failed to read preview refs from R2:', err)
   }
@@ -97,7 +107,7 @@ export async function registerRef(
   env: Env,
   ref: string,
   extra?: { publishedAt?: string; prUrl?: string },
-): Promise<ConfiguredPreviewRef> {
+): Promise<ParsedPreviewRef> {
   const [parsed] = parseConfiguredPreviewRefs(ref)
   await mutateRefIndex(env, (index) => {
     const existing = index[canonical(parsed)]

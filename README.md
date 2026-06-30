@@ -138,8 +138,9 @@ return 503. `GET /-/refs` is a public read.
 
 ```bash
 # List configured refs (static env + runtime R2 index) - no auth required.
-# Each entry: { ref, version, publishedAt, prUrl }; publishedAt/prUrl are null
-# until the ref is published (and prUrl only when published from a PR).
+# Each entry: { ref, version, publishedAt, prUrl, expiresAt }. publishedAt/prUrl
+# are null until the ref is published (prUrl only when published from a PR);
+# expiresAt is the index TTL (null for static env refs, which never expire).
 curl https://.../-/refs
 
 # Register a ref at runtime (no redeploy).

@@ -10,17 +10,22 @@
  */
 import { commitVersion } from './parsePreviewVersion'
 
-export type ConfiguredPreviewRef = {
+/** A ref as produced by parsing alone, with no runtime state. */
+export type ParsedPreviewRef = {
   type: 'commit'
   ref: string
   version: string
-  /** Populated by getConfiguredRefs from the runtime refs index, when known. */
+}
+
+/** A parsed ref enriched by getConfiguredRefs with runtime refs-index state. */
+export type ConfiguredPreviewRef = ParsedPreviewRef & {
   publishedAt?: string
   prUrl?: string
+  expiresAt?: number
 }
 
 /** Parse one trimmed ref token, or return null if it is not a commit ref. */
-function parseSingleRef(value: string): ConfiguredPreviewRef | null {
+export function parseSingleRef(value: string): ParsedPreviewRef | null {
   const commit = value.match(/^commit\.([0-9a-f]{7,40})$/i)
   if (!commit) return null
   return {
@@ -41,7 +46,7 @@ function splitRefs(input: string | undefined): string[] {
 /** Strict parser: throws on an invalid or non-commit ref. */
 export function parseConfiguredPreviewRefs(
   input: string | undefined,
-): ConfiguredPreviewRef[] {
+): ParsedPreviewRef[] {
   return splitRefs(input).map((value) => {
     const ref = parseSingleRef(value)
     if (!ref) {
@@ -56,9 +61,9 @@ export function parseConfiguredPreviewRefs(
 /** Lenient variant: drops invalid refs instead of throwing. */
 export function parseConfiguredPreviewRefsSafe(
   input: string | undefined,
-): ConfiguredPreviewRef[] {
+): ParsedPreviewRef[] {
   // Skip invalid config entries rather than failing the whole packument.
   return splitRefs(input)
     .map(parseSingleRef)
-    .filter((r): r is ConfiguredPreviewRef => r !== null)
+    .filter((r): r is ParsedPreviewRef => r !== null)
 }
