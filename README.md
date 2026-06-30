@@ -264,6 +264,15 @@ The public origin (`PUBLIC_BASE_URL` in `.env.production`) is the custom domain
 underlying Void platform URL `pkg-pr-registry-bridge.void.app` keeps working
 too).
 
-Pushes to `main` auto-deploy via `.github/workflows/deploy.yml` (`pnpm exec void
-deploy`). Add a `VOID_TOKEN` repository secret (`void auth token` copies one to
-your clipboard); `VOID_PROJECT` is pinned in the workflow.
+Pushes to `main` auto-deploy via `.github/workflows/deploy.yml`. It deploys to a
+**staging** project first (`pkg-pr-registry-bridge-staging.void.app`), runs
+`scripts/smoke-test.mjs` against that live URL, and only then deploys to
+production (and smoke-tests it). The smoke test exercises the real Void runtime
+(`/_health`, the `/vite-plus` packument, `/-/refs`, a download redirect), which
+catches platform-only failures the `pool-workers` unit tests cannot, e.g. the
+Void platform forbidding `caches.default`, which 500'd every packument while all
+unit tests passed. A failed staging smoke test stops the job before production.
+
+Add a `VOID_TOKEN` repository secret (`void auth token` copies one to your
+clipboard); the same token deploys both projects. Run the smoke test locally
+with `pnpm smoke <url>`, and deploy staging by hand with `pnpm deploy:staging`.
