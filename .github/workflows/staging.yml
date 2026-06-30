@@ -1,0 +1,43 @@
+name: Staging
+on:
+  pull_request:
+    branches: [main]
+
+# One shared staging environment, so serialize across PRs: queue rather than
+# clobber another PR's deploy+smoke, and never cancel a run mid-flight.
+concurrency:
+  group: void-staging
+  cancel-in-progress: false
+
+jobs:
+  staging:
+    runs-on: ubuntu-latest
+    # Fork PRs can't read VOID_TOKEN; they still get ci.yml (typecheck + test).
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      # Actions are pinned to a full commit SHA (org policy); kept in sync with ci.yml.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Deploy this PR's code to the shared staging project, then smoke-test the
+      # REAL Void runtime. This catches platform-only failures the pool-workers
+      # unit tests can't (e.g. the Void Cache API ban that 500'd every packument)
+      # BEFORE the change reaches main. Make this a required status check so a
+      # failing smoke test blocks the merge.
+      - name: Deploy to staging
+        run: pnpm exec void deploy --project pkg-pr-registry-bridge-staging
+        env:
+          VOID_TOKEN: ${{ secrets.VOID_TOKEN }}
+
+      - name: Smoke-test staging
+        run: node scripts/smoke-test.mjs https://pkg-pr-registry-bridge-staging.void.app

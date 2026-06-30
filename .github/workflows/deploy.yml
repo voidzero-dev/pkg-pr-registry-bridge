@@ -27,19 +27,8 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Staging first, then smoke-test the REAL runtime. This catches
-      # platform-only failures the pool-workers tests can't (e.g. the void
-      # Cache API ban that 500'd every packument). If the smoke step fails, the
-      # job stops here and production is never deployed.
-      - name: Deploy to staging
-        run: pnpm exec void deploy --project pkg-pr-registry-bridge-staging
-        env:
-          VOID_TOKEN: ${{ secrets.VOID_TOKEN }}
-
-      - name: Smoke-test staging
-        run: node scripts/smoke-test.mjs https://pkg-pr-registry-bridge-staging.void.app
-
-      # Only reached when the staging smoke test passed.
+      # Staging is validated on the PR (see staging.yml), so main just ships to
+      # production and re-runs the smoke test against the live prod runtime.
       - name: Deploy to production
         run: pnpm exec void deploy
         env:
