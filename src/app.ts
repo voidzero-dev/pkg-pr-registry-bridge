@@ -200,6 +200,8 @@ app.get('/-/refs', async (c) => {
       version: r.version,
       publishedAt: r.publishedAt ?? null,
       prUrl: r.prUrl ?? null,
+      // ISO TTL; null for static env refs, which never expire.
+      expiresAt: r.expiresAt ? new Date(r.expiresAt).toISOString() : null,
     })),
   })
 })
