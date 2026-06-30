@@ -130,6 +130,12 @@ runtime via the admin endpoint below (stored in a single R2 index object read
 with a cheap `get`, not a rate-limited KV `list`), with no redeploy. Both
 sources are merged.
 
+For refs published from a PR (the action forwards the PR url), the served
+packument also exposes a `pr-<n>` dist-tag pointing at that PR's
+latest-published commit version. The per-commit versions stay immutable; the tag
+moves as the PR advances, so `npm/pnpm install <pkg>@pr-<n>` against this
+registry installs the PR's head build.
+
 ## Admin endpoints
 
 Writes are guarded by `Authorization: Bearer <ADMIN_TOKEN>` (set `ADMIN_TOKEN`

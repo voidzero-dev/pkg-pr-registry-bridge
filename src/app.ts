@@ -352,6 +352,20 @@ app.get('*', async (c) => {
     }),
   )
 
+  // Mutable `pr-<n>` dist-tags: point each PR at its latest-published commit
+  // version, so `vite-plus@pr-<n>` installs the PR's head build. The per-commit
+  // versions stay immutable; only the tag moves as the PR advances.
+  const latestPrTime = new Map<string, number>()
+  for (const ref of refs) {
+    if (!ref.prNumber || !packument.versions[ref.version]) continue
+    const t = ref.publishedAt ? Date.parse(ref.publishedAt) : 0
+    const prev = latestPrTime.get(ref.prNumber)
+    if (prev === undefined || t >= prev) {
+      latestPrTime.set(ref.prNumber, t)
+      packument['dist-tags'][`pr-${ref.prNumber}`] = ref.version
+    }
+  }
+
   return new Response(JSON.stringify(packument), {
     headers: {
       'content-type': 'application/json; charset=utf-8',
