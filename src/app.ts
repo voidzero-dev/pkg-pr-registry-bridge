@@ -35,6 +35,7 @@ import {
 } from './tarball/getPreviewBuild'
 import type { PreviewMeta } from './tarball/buildPreviewTarball'
 import { metaKey, tarballKey, tarballUrl } from './cache/r2Cache'
+import { kvCachedText } from './cache/kvCache'
 import { requireAdmin } from './security/auth'
 import {
   packumentCacheControl,
@@ -408,75 +409,66 @@ app.get('*', async (c) => {
   // next request.
   const { refs, etag } = await getConfiguredRefsWithEtag(c.env)
   const cacheKey = `${PACKUMENT_OUT_PREFIX}${name}/${etag ?? 'none'}.${hashRefsEnv(c.env.VITE_PLUS_PREVIEW_REFS)}`
-  try {
-    const cached = await c.env.KV.get(cacheKey, 'text')
-    if (cached !== null) return packumentResponse(cached)
-  } catch (err) {
-    console.warn(`packument cache read failed for ${name}:`, err)
-  }
 
-  // Miss: the npm packument fetch and the npm `time` fetch are independent, so
-  // overlap them. `time` comes from npm's FULL packument (the abbreviated form we
-  // serve omits it) but is sourced separately so the served response keeps the
-  // compact abbreviated version docs.
-  const [base, npmTime] = await Promise.all([
-    getNpmPackumentCached(c.env, name),
-    getNpmTimeCached(c.env, name),
-  ])
+  const body = await kvCachedText(c.env, cacheKey, PACKUMENT_OUT_TTL_S, async () => {
+    // Miss: the npm packument fetch and the npm `time` fetch are independent, so
+    // overlap them. `time` comes from npm's FULL packument (the abbreviated form
+    // we serve omits it) but is sourced separately so the served response keeps
+    // the compact abbreviated version docs.
+    const [base, npmTime] = await Promise.all([
+      getNpmPackumentCached(c.env, name),
+      getNpmTimeCached(c.env, name),
+    ])
 
-  const packument: Record<string, any> =
-    base ?? { name, 'dist-tags': {}, versions: {} }
+    const packument: Record<string, any> =
+      base ?? { name, 'dist-tags': {}, versions: {} }
 
-  packument.name = name
-  packument['dist-tags'] ??= {}
-  packument.versions ??= {}
+    packument.name = name
+    packument['dist-tags'] ??= {}
+    packument.versions ??= {}
 
-  // pnpm's time-based resolution (`minimum-release-age`) hard-errors without a
-  // `time` map (ERR_PNPM_MISSING_TIME). Seed it from npm's real publish times;
-  // each injected preview version's entry is its server-stamped publish time
-  // (UNPUBLISHED_PREVIEW_TIME until published), added in the loop below. `npmTime`
-  // is a fresh per-request object (cache parse or fetch), so mutate it in place.
-  const time: Record<string, string> = npmTime
-  packument.time = time
+    // pnpm's time-based resolution (`minimum-release-age`) hard-errors without a
+    // `time` map (ERR_PNPM_MISSING_TIME). Seed it from npm's real publish times;
+    // each injected preview version's entry is its server-stamped publish time
+    // (UNPUBLISHED_PREVIEW_TIME until published), added in the loop below. `npmTime`
+    // is a fresh per-request object (cache parse or fetch), so mutate it in place.
+    const time: Record<string, string> = npmTime
+    packument.time = time
 
-  // Inject each configured ref. The R2 meta reads are independent, so run them
-  // concurrently; each writes a distinct version/time key, and a failing ref is
-  // isolated so it can't break installs of the package's other versions. After
-  // the deploy-time warm step these are R2 hits and don't touch upstream.
-  await Promise.all(
-    refs.map(async (ref) => {
-      try {
-        const preview = await getPreviewMeta(c.env, name, ref.version)
-        packument.versions[ref.version] = buildVersionMetadata(
-          c.env,
-          name,
-          ref.version,
-          preview,
-        )
-        time[ref.version] = preview.publishedAt ?? UNPUBLISHED_PREVIEW_TIME
-      } catch (err) {
-        console.warn(`Failed to inject preview ref ${ref.version}:`, err)
-      }
-    }),
-  )
+    // Inject each configured ref. The R2 meta reads are independent, so run them
+    // concurrently; each writes a distinct version/time key, and a failing ref is
+    // isolated so it can't break installs of the package's other versions. After
+    // the deploy-time warm step these are R2 hits and don't touch upstream.
+    await Promise.all(
+      refs.map(async (ref) => {
+        try {
+          const preview = await getPreviewMeta(c.env, name, ref.version)
+          packument.versions[ref.version] = buildVersionMetadata(
+            c.env,
+            name,
+            ref.version,
+            preview,
+          )
+          time[ref.version] = preview.publishedAt ?? UNPUBLISHED_PREVIEW_TIME
+        } catch (err) {
+          console.warn(`Failed to inject preview ref ${ref.version}:`, err)
+        }
+      }),
+    )
 
-  // Mutable `pr-<n>` dist-tags: point each PR at its latest-published commit
-  // version present in this packument, so `<pkg>@pr-<n>` installs the PR's head
-  // build. The per-commit versions stay immutable; only the tag moves.
-  for (const [prNum, version] of latestVersionByPr(
-    refs,
-    (v) => v in packument.versions,
-  )) {
-    packument['dist-tags'][`pr-${prNum}`] = version
-  }
+    // Mutable `pr-<n>` dist-tags: point each PR at its latest-published commit
+    // version present in this packument, so `<pkg>@pr-<n>` installs the PR's head
+    // build. The per-commit versions stay immutable; only the tag moves.
+    for (const [prNum, version] of latestVersionByPr(
+      refs,
+      (v) => v in packument.versions,
+    )) {
+      packument['dist-tags'][`pr-${prNum}`] = version
+    }
 
-  const body = JSON.stringify(packument)
-  // Best-effort: a failed write just means the next request rebuilds.
-  try {
-    await c.env.KV.put(cacheKey, body, { expirationTtl: PACKUMENT_OUT_TTL_S })
-  } catch (err) {
-    console.warn(`packument cache write failed for ${name}:`, err)
-  }
+    return JSON.stringify(packument)
+  })
+
   return packumentResponse(body)
 })
 
