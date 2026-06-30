@@ -33,6 +33,10 @@ const NPM_VITE_PLUS_TIME = {
   '0.2.1': '2026-06-18T05:33:32.399Z',
 }
 
+// Counts fetches of the FULL (time-bearing) vite-plus packument, to verify the
+// KV time-map cache prevents a per-request refetch.
+let fullTimeFetches = 0
+
 function json(obj: unknown, status = 200): Response {
   return new Response(JSON.stringify(obj), {
     status,
@@ -90,6 +94,7 @@ beforeAll(async () => {
         h instanceof Headers ? h.get('accept') : (h as Record<string, string>)?.accept
       ) ?? ''
       const abbreviated = accept.includes('install-v1')
+      if (!abbreviated) fullTimeFetches++
       const body = abbreviated
         ? { ...NPM_VITE_PLUS, modified: NPM_VITE_PLUS_TIME.modified }
         : { ...NPM_VITE_PLUS, time: NPM_VITE_PLUS_TIME }
@@ -180,6 +185,17 @@ describe('packument endpoint', () => {
     expect(b['0.2.1']).toBe('2026-06-18T05:33:32.399Z')
     // the preview time is still injected on every request (not lost to caching).
     expect(b['0.0.0-commit.a832a55']).toBeTruthy()
+  })
+
+  it('caches the npm time map in KV (full packument fetched at most once)', async () => {
+    const before = fullTimeFetches
+    const get = () =>
+      SELF.fetch(`${BASE}/vite-plus`, { headers: { accept: 'application/json' } })
+    await get()
+    await get()
+    // With the KV cache the full (time-bearing) packument is fetched at most
+    // once across the two requests; without it each request would refetch it.
+    expect(fullTimeFetches - before).toBeLessThanOrEqual(1)
   })
 
   it('stamps the preview release date server-side at publish, stable across requests', async () => {

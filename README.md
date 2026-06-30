@@ -187,7 +187,7 @@ curl -X POST -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: applicati
 curl -X DELETE -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \
   -d '{"ref":"commit.a832a55"}' https://.../-/refs
 
-# Purge a generated build from the caches (R2 + edge)
+# Purge a generated build (its tarball + meta) from R2
 curl -X POST -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \
   -d '{"package":"vite-plus","version":"0.0.0-commit.a832a55"}' https://.../-/purge
 ```

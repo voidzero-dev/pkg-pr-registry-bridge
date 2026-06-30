@@ -12,6 +12,7 @@
   "r2_buckets": [
     { "binding": "STORAGE", "bucket_name": "pkg-pr-registry-bridge-tarballs" }
   ],
+  "kv_namespaces": [{ "binding": "KV", "id": "test-npm-time-cache" }],
   "vars": {
     "NPM_REGISTRY": "https://registry.npmjs.org",
     "PKG_PR_NEW_BASE": "https://pkg.pr.new",
