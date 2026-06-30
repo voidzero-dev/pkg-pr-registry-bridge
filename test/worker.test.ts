@@ -573,6 +573,44 @@ describe('admin: refs', () => {
     expect(typeof entry!.expiresAt).toBe('string')
   })
 
+  it('injects a mutable pr-<n> dist-tag pointing at the PR latest commit', async () => {
+    const prUrl = 'https://github.com/voidzero-dev/vite-plus/pull/777'
+    const publish = (sha: string, version: string) =>
+      SELF.fetch(`${BASE}/-/publish`, {
+        method: 'POST',
+        headers: { ...AUTH, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ref: `commit.${sha}`,
+          prUrl,
+          packages: [
+            {
+              name: 'vite-plus',
+              version,
+              packageJson: { name: 'vite-plus', version },
+              integrity: 'sha512-test',
+              shasum: '',
+            },
+          ],
+        }),
+      })
+    const verA = '0.0.0-commit.aaa7770'
+    const verB = '0.0.0-commit.bbb7770'
+    expect((await publish('aaa7770', verA)).status).toBe(201)
+    // A read between publishes keeps B's server-stamp strictly later than A's.
+    await SELF.fetch(`${BASE}/-/refs`)
+    expect((await publish('bbb7770', verB)).status).toBe(201)
+
+    const pack = await SELF.fetch(`${BASE}/vite-plus`, {
+      headers: { accept: 'application/json' },
+    })
+    const body = (await pack.json()) as Record<string, any>
+    // both immutable commit versions are present...
+    expect(body.versions[verA]).toBeTruthy()
+    expect(body.versions[verB]).toBeTruthy()
+    // ...and the PR tag points at the latest-published one (B).
+    expect(body['dist-tags']['pr-777']).toBe(verB)
+  })
+
   it('registers a ref and injects it into the packument', async () => {
     const add = await SELF.fetch(`${BASE}/-/refs`, {
       method: 'POST',
