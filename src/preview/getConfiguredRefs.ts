@@ -152,11 +152,3 @@ export async function registerRef(
   })
   return parsed
 }
-
-/** Remove a runtime-registered ref. */
-export async function unregisterRef(env: Env, ref: string): Promise<void> {
-  const [parsed] = parseConfiguredPreviewRefs(ref)
-  await mutateRefIndex(env, (index) => {
-    delete index[canonical(parsed)]
-  })
-}

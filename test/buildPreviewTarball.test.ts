@@ -27,10 +27,14 @@ async function makeUpstream(pkg: Record<string, any>) {
 
 describe('buildPreviewTarball', () => {
   it('rewrites package.json name/version/deps and preserves other files', async () => {
+    const binSha = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef'
     const upstream = await makeUpstream({
       name: '@voidzero-dev/vite-plus-core',
       version: '1891',
       dependencies: { 'vite-plus': '1891', picomatch: '^2.3.1' },
+      optionalDependencies: {
+        '@voidzero-dev/vite-plus-darwin-arm64': `https://pkg.pr.new/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-darwin-arm64@${binSha}`,
+      },
       bin: { vp: './bin/vp' },
     })
 
@@ -45,6 +49,10 @@ describe('buildPreviewTarball', () => {
     expect(build.packageJson.version).toBe('0.0.0-commit.a832a55')
     expect(build.packageJson.dependencies['vite-plus']).toBe('0.0.0-commit.a832a55')
     expect(build.packageJson.dependencies.picomatch).toBe('^2.3.1')
+    // pkg.pr.new optionalDependency URLs are rewritten to version strings.
+    expect(
+      build.packageJson.optionalDependencies['@voidzero-dev/vite-plus-darwin-arm64'],
+    ).toBe(`0.0.0-commit.${binSha}`)
 
     const files = await parseTarGzip(build.tarball)
 
