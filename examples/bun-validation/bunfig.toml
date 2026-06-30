@@ -1,5 +1,5 @@
 [install]
-registry = "https://pkg-pr-registry-bridge.void.app/"
+registry = "https://registry-bridge.viteplus.dev/"
 
 # Bun's default network concurrency (48) triggers an HTTP/2 client bug against
 # Cloudflare on large dependency graphs (vite-plus pulls 400+ packages): streams

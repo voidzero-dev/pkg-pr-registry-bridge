@@ -4,7 +4,7 @@ A version-gated npm registry bridge that lets package managers install
 [pkg.pr.new](https://pkg.pr.new) Vite+ preview builds using normal npm registry
 semantics. Runs as a single Cloudflare Worker.
 
-Live: `https://pkg-pr-registry-bridge.void.app`
+Live: `https://registry-bridge.viteplus.dev`
 
 The package name selects the upstream package; the version pattern selects the
 source:
@@ -83,7 +83,7 @@ versions (strict allowlist). Owner/repo are fixed to `voidzero-dev/vite-plus`.
 
 ```toml
 [install]
-registry = "https://pkg-pr-registry-bridge.void.app/"
+registry = "https://registry-bridge.viteplus.dev/"
 
 # REQUIRED for large installs. Bun's default network concurrency (48) triggers
 # an HTTP/2 client bug against Cloudflare on big dependency graphs (vite-plus
@@ -232,10 +232,10 @@ preview refs into R2 via the action so installs are served from cache), then
 alias/override resolves to the synthetic version). Use `pnpm run deploy:only`
 for `void deploy` alone.
 
-The public origin (`PUBLIC_BASE_URL` in `.env.production`) is the Void platform
-URL `https://pkg-pr-registry-bridge.void.app`. To serve from a custom domain
-instead, run `void domain add <hostname>` (it prints the CNAME + ownership TXT to
-add at your DNS provider) and set `PUBLIC_BASE_URL` to that host.
+The public origin (`PUBLIC_BASE_URL` in `.env.production`) is the custom domain
+`https://registry-bridge.viteplus.dev`, attached with `void domain add` (the
+underlying Void platform URL `pkg-pr-registry-bridge.void.app` keeps working
+too).
 
 Pushes to `main` auto-deploy via `.github/workflows/deploy.yml` (`pnpm exec void
 deploy`). Add a `VOID_TOKEN` repository secret (`void auth token` copies one to
