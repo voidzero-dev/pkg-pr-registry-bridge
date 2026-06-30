@@ -103,7 +103,8 @@ export async function getNpmTimeCached(
   try {
     const hit = await caches.default.match(key)
     if (hit) return (await hit.json()) as Record<string, string>
-  } catch {
+  } catch (err) {
+    console.warn(`npm-time cache read failed for ${name}:`, err)
     return (await fetchNpmTime(env, name)) ?? {}
   }
 
@@ -122,8 +123,9 @@ export async function getNpmTimeCached(
         },
       }),
     )
-  } catch {
-    // best-effort cache population
+  } catch (err) {
+    // Best-effort cache population; log so a failing runtime is visible.
+    console.warn(`npm-time cache write failed for ${name}:`, err)
   }
   return time
 }
