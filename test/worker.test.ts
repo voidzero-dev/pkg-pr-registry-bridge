@@ -615,6 +615,42 @@ describe('pkg.pr.new-style download', () => {
   })
 })
 
+describe('CORS', () => {
+  it('sets access-control-allow-origin: * on the packument', async () => {
+    const res = await SELF.fetch(`${BASE}/vite-plus`, {
+      headers: { accept: 'application/json' },
+    })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('access-control-allow-origin')).toBe('*')
+  })
+
+  it('sets the CORS header on /-/refs and the download redirect', async () => {
+    const refs = await SELF.fetch(`${BASE}/-/refs`)
+    expect(refs.headers.get('access-control-allow-origin')).toBe('*')
+    const dl = await SELF.fetch(`${BASE}/voidzero-dev/vite-plus@abc1234`, {
+      redirect: 'manual',
+    })
+    expect(dl.status).toBe(302)
+    expect(dl.headers.get('access-control-allow-origin')).toBe('*')
+  })
+
+  it('sets the CORS header on error responses', async () => {
+    // Unknown package in the download path -> 404 via onError.
+    const res = await SELF.fetch(
+      `${BASE}/voidzero-dev/vite-plus/not-a-pkg@abc1234`,
+      { redirect: 'manual' },
+    )
+    expect(res.status).toBe(404)
+    expect(res.headers.get('access-control-allow-origin')).toBe('*')
+  })
+
+  it('answers an OPTIONS preflight with the CORS header', async () => {
+    const res = await SELF.fetch(`${BASE}/vite-plus`, { method: 'OPTIONS' })
+    expect(res.status).toBeLessThan(300)
+    expect(res.headers.get('access-control-allow-origin')).toBe('*')
+  })
+})
+
 describe('admin: refs', () => {
   it('writes require auth (reads do not)', async () => {
     // POST/DELETE require the bearer token.
