@@ -11,6 +11,7 @@ import {
 import { parseConfiguredPreviewRefs } from './preview/parseConfiguredPreviewRefs'
 import {
   getConfiguredRefs,
+  getConfiguredRefsWithEtag,
   latestVersionByPr,
   registerRef,
   unregisterRef,
@@ -34,6 +35,7 @@ import {
 } from './tarball/getPreviewBuild'
 import type { PreviewMeta } from './tarball/buildPreviewTarball'
 import { metaKey, tarballKey, tarballUrl } from './cache/r2Cache'
+import { kvCachedText } from './cache/kvCache'
 import { requireAdmin } from './security/auth'
 import {
   packumentCacheControl,
@@ -47,6 +49,36 @@ import {
  * pinned preview during that gap.
  */
 const UNPUBLISHED_PREVIEW_TIME = '2020-01-01T00:00:00.000Z'
+
+// Output cache for the assembled packument. Void does not edge-cache the Worker
+// response, so without this the ~440KB packument is re-assembled and re-stringified
+// on every request. Keyed by the refs-index etag + a hash of the static env refs;
+// a short TTL bounds npm stable-version drift (preview freshness comes from the
+// etag, not the TTL).
+const PACKUMENT_OUT_PREFIX = 'pkgt/'
+const PACKUMENT_OUT_TTL_S = 60
+
+/**
+ * Stable short hash of the static env-configured refs (VITE_PLUS_PREVIEW_REFS),
+ * folded into the output-cache key. KV persists across deploys, so the key must
+ * change when these change; the R2 etag only covers runtime ref changes.
+ */
+function hashRefsEnv(refs: string | undefined): string {
+  let h = 5381
+  const s = refs ?? ''
+  for (let i = 0; i < s.length; i++) h = (Math.imul(h, 33) + s.charCodeAt(i)) | 0
+  return (h >>> 0).toString(36)
+}
+
+/** Build the packument HTTP response from an already-serialized body. */
+function packumentResponse(body: string): Response {
+  return new Response(body, {
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': packumentCacheControl(),
+    },
+  })
+}
 
 type HonoEnv = { Bindings: Env }
 
@@ -370,68 +402,74 @@ app.get('*', async (c) => {
   const { name } = pkgReq
   if (!isWorkspacePackage(name, c.env)) return redirectToNpm(c.env, c.req.raw)
 
-  // The npm packument fetch, the npm `time` fetch, and the refs read are all
-  // independent; overlap them. `time` comes from npm's FULL packument (the
-  // abbreviated form we serve omits it) but is sourced separately so the served
-  // response keeps the compact abbreviated version docs.
-  const [base, npmTime, refs] = await Promise.all([
-    getNpmPackumentCached(c.env, name),
-    getNpmTimeCached(c.env, name),
-    getConfiguredRefs(c.env),
-  ])
+  // Read the refs first: its etag keys the output cache below, and the refs feed
+  // the assembly on a miss. Any ref change rewrites the index → new etag → the
+  // key changes → automatic invalidation (no explicit purge), and R2 is strongly
+  // consistent read-after-write, so a just-published preview shows up on the very
+  // next request.
+  const { refs, etag } = await getConfiguredRefsWithEtag(c.env)
+  const cacheKey = `${PACKUMENT_OUT_PREFIX}${name}/${etag ?? 'none'}.${hashRefsEnv(c.env.VITE_PLUS_PREVIEW_REFS)}`
 
-  const packument: Record<string, any> =
-    base ?? { name, 'dist-tags': {}, versions: {} }
+  const body = await kvCachedText(c.env, cacheKey, PACKUMENT_OUT_TTL_S, async () => {
+    // Miss: the npm packument fetch and the npm `time` fetch are independent, so
+    // overlap them. `time` comes from npm's FULL packument (the abbreviated form
+    // we serve omits it) but is sourced separately so the served response keeps
+    // the compact abbreviated version docs.
+    const [base, npmTime] = await Promise.all([
+      getNpmPackumentCached(c.env, name),
+      getNpmTimeCached(c.env, name),
+    ])
 
-  packument.name = name
-  packument['dist-tags'] ??= {}
-  packument.versions ??= {}
+    const packument: Record<string, any> =
+      base ?? { name, 'dist-tags': {}, versions: {} }
 
-  // pnpm's time-based resolution (`minimum-release-age`) hard-errors without a
-  // `time` map (ERR_PNPM_MISSING_TIME). Seed it from npm's real publish times;
-  // each injected preview version's entry is its server-stamped publish time
-  // (UNPUBLISHED_PREVIEW_TIME until published), added in the loop below. `npmTime`
-  // is a fresh per-request object (cache parse or fetch), so mutate it in place.
-  const time: Record<string, string> = npmTime
-  packument.time = time
+    packument.name = name
+    packument['dist-tags'] ??= {}
+    packument.versions ??= {}
 
-  // Inject each configured ref. The R2 meta reads are independent, so run them
-  // concurrently; each writes a distinct version/time key, and a failing ref is
-  // isolated so it can't break installs of the package's other versions. After
-  // the deploy-time warm step these are R2 hits and don't touch upstream.
-  await Promise.all(
-    refs.map(async (ref) => {
-      try {
-        const preview = await getPreviewMeta(c.env, name, ref.version)
-        packument.versions[ref.version] = buildVersionMetadata(
-          c.env,
-          name,
-          ref.version,
-          preview,
-        )
-        time[ref.version] = preview.publishedAt ?? UNPUBLISHED_PREVIEW_TIME
-      } catch (err) {
-        console.warn(`Failed to inject preview ref ${ref.version}:`, err)
-      }
-    }),
-  )
+    // pnpm's time-based resolution (`minimum-release-age`) hard-errors without a
+    // `time` map (ERR_PNPM_MISSING_TIME). Seed it from npm's real publish times;
+    // each injected preview version's entry is its server-stamped publish time
+    // (UNPUBLISHED_PREVIEW_TIME until published), added in the loop below. `npmTime`
+    // is a fresh per-request object (cache parse or fetch), so mutate it in place.
+    const time: Record<string, string> = npmTime
+    packument.time = time
 
-  // Mutable `pr-<n>` dist-tags: point each PR at its latest-published commit
-  // version present in this packument, so `<pkg>@pr-<n>` installs the PR's head
-  // build. The per-commit versions stay immutable; only the tag moves.
-  for (const [prNum, version] of latestVersionByPr(
-    refs,
-    (v) => v in packument.versions,
-  )) {
-    packument['dist-tags'][`pr-${prNum}`] = version
-  }
+    // Inject each configured ref. The R2 meta reads are independent, so run them
+    // concurrently; each writes a distinct version/time key, and a failing ref is
+    // isolated so it can't break installs of the package's other versions. After
+    // the deploy-time warm step these are R2 hits and don't touch upstream.
+    await Promise.all(
+      refs.map(async (ref) => {
+        try {
+          const preview = await getPreviewMeta(c.env, name, ref.version)
+          packument.versions[ref.version] = buildVersionMetadata(
+            c.env,
+            name,
+            ref.version,
+            preview,
+          )
+          time[ref.version] = preview.publishedAt ?? UNPUBLISHED_PREVIEW_TIME
+        } catch (err) {
+          console.warn(`Failed to inject preview ref ${ref.version}:`, err)
+        }
+      }),
+    )
 
-  return new Response(JSON.stringify(packument), {
-    headers: {
-      'content-type': 'application/json; charset=utf-8',
-      'cache-control': packumentCacheControl(),
-    },
+    // Mutable `pr-<n>` dist-tags: point each PR at its latest-published commit
+    // version present in this packument, so `<pkg>@pr-<n>` installs the PR's head
+    // build. The per-commit versions stay immutable; only the tag moves.
+    for (const [prNum, version] of latestVersionByPr(
+      refs,
+      (v) => v in packument.versions,
+    )) {
+      packument['dist-tags'][`pr-${prNum}`] = version
+    }
+
+    return JSON.stringify(packument)
   })
+
+  return packumentResponse(body)
 })
 
 /** Non-GET methods fall through to npm. */

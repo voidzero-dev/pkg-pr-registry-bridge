@@ -36,3 +36,33 @@ export async function kvCached<T>(
   }
   return value
 }
+
+/**
+ * Like {@link kvCached}, but for an already-serialized string body: stores and
+ * serves it verbatim (`get(..., 'text')` / `put(value)`), with no JSON parse or
+ * re-stringify round-trip. Use when the cached value is the exact bytes to serve
+ * (e.g. a large assembled response) and re-encoding it would be wasted work. The
+ * fetcher always produces a body, so the result is always cached.
+ */
+export async function kvCachedText(
+  env: Env,
+  key: string,
+  ttlSeconds: number,
+  fetcher: () => Promise<string>,
+): Promise<string> {
+  try {
+    const cached = await env.KV.get(key, 'text')
+    if (cached !== null) return cached
+  } catch (err) {
+    console.warn(`KV cache read failed for ${key}:`, err)
+  }
+
+  const value = await fetcher()
+  try {
+    await env.KV.put(key, value, { expirationTtl: ttlSeconds })
+  } catch (err) {
+    // Best-effort population; log so a failing runtime stays visible.
+    console.warn(`KV cache write failed for ${key}:`, err)
+  }
+  return value
+}

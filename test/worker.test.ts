@@ -214,6 +214,38 @@ describe('packument endpoint', () => {
     expect(abbreviatedFetches - before).toBeLessThanOrEqual(1)
   })
 
+  it('rebuilds a cached packument when a ref is published (output cache invalidates on etag)', async () => {
+    // The assembled packument is cached keyed by the refs-index etag. Publishing
+    // rewrites the index (new etag), so even a warm cache must rebuild on the next
+    // request and surface the new version, never serve the stale body.
+    const sha = 'f5f5f5f'
+    const ver = `0.0.0-commit.${sha}`
+    // Warm the output cache for vite-plus under the current etag.
+    await SELF.fetch(`${BASE}/vite-plus`, { headers: { accept: 'application/json' } })
+    const pub = await SELF.fetch(`${BASE}/-/publish`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ref: `commit.${sha}`,
+        packages: [
+          {
+            name: 'vite-plus',
+            version: ver,
+            packageJson: { name: 'vite-plus', version: ver },
+            integrity: 'sha512-f5',
+            shasum: 'f5',
+          },
+        ],
+      }),
+    })
+    expect(pub.status).toBe(201)
+    const res = await SELF.fetch(`${BASE}/vite-plus`, {
+      headers: { accept: 'application/json' },
+    })
+    const body = (await res.json()) as Record<string, any>
+    expect(body.versions[ver]?.dist?.integrity).toBe('sha512-f5')
+  })
+
   it('stamps the preview release date server-side at publish, stable across requests', async () => {
     // The release date is stamped server-side once at publish, not npm's
     // package-modified time, not a per-request clock, and not a client value.
