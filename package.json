@@ -8,7 +8,7 @@
     "dev": "vite dev",
     "build": "vite build",
     "prepare": "void prepare",
-    "deploy": "void deploy && node scripts/warm.mjs && node scripts/e2e-bun.mjs",
+    "deploy": "void deploy && node scripts/e2e-bun.mjs",
     "deploy:only": "void deploy",
     "warm": "node scripts/warm.mjs",
     "smoke": "node scripts/smoke-test.mjs",

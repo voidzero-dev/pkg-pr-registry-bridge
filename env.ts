@@ -14,8 +14,6 @@ export default defineEnv({
   // Fixed upstream owner/repo; never selected by request input.
   PREVIEW_OWNER: string(),
   PREVIEW_REPO: string(),
-  // Comma-separated commit refs to inject into packuments: `commit.<sha>`.
-  VITE_PLUS_PREVIEW_REFS: string(),
   // Allowlist of packages the bridge serves/routes (exact names or `prefix*`).
   WORKSPACE_PACKAGES: string(),
   // Max upstream tarball size in bytes.

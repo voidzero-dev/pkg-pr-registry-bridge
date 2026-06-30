@@ -9,7 +9,6 @@ export default defineConfig({
         // Test overrides for the bindings declared in wrangler.test.jsonc.
         bindings: {
           PUBLIC_BASE_URL: 'https://bridge.example.com',
-          VITE_PLUS_PREVIEW_REFS: 'commit.a832a55',
           ADMIN_TOKEN: 'test-admin-token',
         },
       },

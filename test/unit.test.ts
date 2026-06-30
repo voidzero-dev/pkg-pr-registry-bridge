@@ -5,7 +5,6 @@ import {
 } from '../src/preview/parsePreviewVersion'
 import {
   parseConfiguredPreviewRefs,
-  parseConfiguredPreviewRefsSafe,
   prNumberFromUrl,
 } from '../src/preview/parseConfiguredPreviewRefs'
 import { toPkgPrNewUrl } from '../src/preview/toPkgPrNewUrl'
@@ -88,16 +87,9 @@ describe('parseConfiguredPreviewRefs', () => {
     expect(parseConfiguredPreviewRefs(undefined)).toEqual([])
   })
 
-  it('rejects pr/invalid refs (strict throws, safe skips)', () => {
+  it('rejects pr/invalid refs (strict throws)', () => {
     expect(() => parseConfiguredPreviewRefs('bogus')).toThrow()
     expect(() => parseConfiguredPreviewRefs('pr.1891')).toThrow()
-    expect(parseConfiguredPreviewRefsSafe('pr.1,bogus,commit.abcdef0')).toEqual([
-      {
-        type: 'commit',
-        ref: 'abcdef0',
-        version: '0.0.0-commit.abcdef0',
-      },
-    ])
   })
 })
 

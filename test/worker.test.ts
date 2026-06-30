@@ -1,5 +1,13 @@
 import { SELF } from 'cloudflare:test'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest'
 import { createTarGzip, parseTarGzip } from 'nanotar'
 
 const BASE = 'https://bridge.example.com'
@@ -67,7 +75,7 @@ beforeAll(async () => {
     os: ['darwin'],
     cpu: ['arm64'],
   })
-  // The configured ref is `commit.a832a55` (see vitest.config.ts).
+  // The suite's fixture ref `commit.a832a55` (registered in beforeEach).
   const vitePlusCommit = await makeTarball({
     name: 'vite-plus',
     version: 'a832a55',
@@ -127,6 +135,20 @@ beforeAll(async () => {
 
 afterAll(() => {
   vi.unstubAllGlobals()
+})
+
+// The suite's fixture preview ref (`commit.a832a55`). It used to be injected via
+// the VITE_PLUS_PREVIEW_REFS env var; refs are now runtime-only, so register it
+// dynamically before each test (idempotent, so it survives storage isolation).
+beforeEach(async () => {
+  await SELF.fetch(`${BASE}/-/refs`, {
+    method: 'POST',
+    headers: {
+      authorization: 'Bearer test-admin-token',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ ref: 'commit.a832a55' }),
+  })
 })
 
 describe('packument endpoint', () => {
@@ -715,7 +737,7 @@ describe('admin: refs', () => {
     ).toBe(401)
   })
 
-  it('lists the env-configured refs without auth (public read)', async () => {
+  it('lists the registered refs without auth (public read)', async () => {
     const res = await SELF.fetch(`${BASE}/-/refs`)
     expect(res.status).toBe(200)
     const body = (await res.json()) as { refs: Array<{ ref: string }> }
@@ -894,7 +916,7 @@ describe('admin: refs', () => {
   })
 
   it('unregisters a ref', async () => {
-    // Use a sha that is not the env-configured ref, so removal is observable.
+    // Use a sha that is not the fixture ref, so removal is observable.
     const ref = 'commit.beefcafe'
     await SELF.fetch(`${BASE}/-/refs`, {
       method: 'POST',

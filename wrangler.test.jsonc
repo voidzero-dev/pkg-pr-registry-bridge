@@ -3,8 +3,7 @@
 // not auto-discover it; Void manages real bindings via `void.json` + inference.
 // `main` points at the assembled Hono app so the integration tests exercise the
 // same code the Void route layer forwards to. Host-specific vars
-// (PUBLIC_BASE_URL, VITE_PLUS_PREVIEW_REFS, ADMIN_TOKEN) are injected in
-// vitest.config.ts.
+// (PUBLIC_BASE_URL, ADMIN_TOKEN) are injected in vitest.config.ts.
 {
   "name": "pkg-pr-registry-bridge",
   "main": "src/app.ts",

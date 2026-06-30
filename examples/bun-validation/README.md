@@ -33,5 +33,5 @@ bunx vp --version
 ```
 
 To target a different preview build, change the `0.0.0-commit.<sha>` version in
-`package.json`, and make sure that ref is exposed by the bridge via
-`VITE_PLUS_PREVIEW_REFS`.
+`package.json`, and make sure that ref has been published to the bridge (CI's
+publish action does this).

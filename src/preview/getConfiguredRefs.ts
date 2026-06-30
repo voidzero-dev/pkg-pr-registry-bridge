@@ -1,7 +1,6 @@
 import type { Env } from '../config'
 import {
   parseConfiguredPreviewRefs,
-  parseConfiguredPreviewRefsSafe,
   parseSingleRef,
   prNumberFromUrl,
   type ConfiguredPreviewRef,
@@ -69,20 +68,17 @@ async function mutateRefIndex(
 }
 
 /**
- * Resolve the preview refs to inject into packuments: the static
- * `VITE_PLUS_PREVIEW_REFS` var merged with refs registered at runtime in R2.
+ * Resolve the preview refs to inject into packuments, from the runtime refs
+ * index in R2 (registered via the admin endpoints / the publish action). Also
+ * returns the index etag, which changes on every ref mutation, so callers that
+ * cache derived output can invalidate on any ref change. Null etag when the
+ * index is absent or unreadable.
  */
 export async function getConfiguredRefsWithEtag(
   env: Env,
 ): Promise<{ refs: ConfiguredPreviewRef[]; etag: string | null }> {
-  const fromEnv = parseConfiguredPreviewRefsSafe(env.VITE_PLUS_PREVIEW_REFS)
-
-  // The R2 index etag changes on every ref mutation (register/publish/unregister
-  // all rewrite the object), so it doubles as a cheap version stamp for callers
-  // that cache derived output and want to invalidate on any ref change. Null when
-  // the index is absent or unreadable.
   let etag: string | null = null
-  const fromR2: ConfiguredPreviewRef[] = []
+  const refs: ConfiguredPreviewRef[] = []
   try {
     const { index, etag: indexEtag } = await readRefIndex(env)
     etag = indexEtag
@@ -93,7 +89,7 @@ export async function getConfiguredRefsWithEtag(
       if (entry.expiresAt <= now) continue
       const parsed = parseSingleRef(key)
       if (!parsed) continue
-      fromR2.push({
+      refs.push({
         ...parsed,
         publishedAt: entry.publishedAt,
         prUrl: entry.prUrl,
@@ -105,9 +101,7 @@ export async function getConfiguredRefsWithEtag(
     console.warn('Failed to read preview refs from R2:', err)
   }
 
-  const byVersion = new Map<string, ConfiguredPreviewRef>()
-  for (const ref of [...fromEnv, ...fromR2]) byVersion.set(ref.version, ref)
-  return { refs: [...byVersion.values()], etag }
+  return { refs, etag }
 }
 
 export async function getConfiguredRefs(

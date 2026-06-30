@@ -114,21 +114,21 @@ networkConcurrency = 8
 > mirror configured, unset that override or run bun directly so the bridge
 > registry is used.
 
-## Why preview refs are configured (`VITE_PLUS_PREVIEW_REFS`)
+## Why the bridge needs a list of preview refs
 
 A package manager fetches the **packument** (`GET /vite-plus`) to discover which
 versions exist *before* it resolves a version, and the request carries no
 desired-version hint. So the bridge has to know which synthetic preview versions
 to list in that packument. pkg.pr.new has no API to enumerate its builds as
-semver versions, so the set is configured explicitly.
+semver versions, so the set is maintained explicitly.
 
 The tarball endpoint, by contrast, accepts any valid preview version without
 configuration; only packument-based discovery needs the list.
 
-The static `VITE_PLUS_PREVIEW_REFS` var is one source; refs can also be added at
-runtime via the admin endpoint below (stored in a single R2 index object read
-with a cheap `get`, not a rate-limited KV `list`), with no redeploy. Both
-sources are merged.
+Refs are registered at runtime via the admin endpoints below (the publish action
+calls them from CI), stored in a single R2 index object read with a cheap `get`
+(not a rate-limited KV `list`) and pruned by a TTL. No redeploy and no static
+configuration: a published preview appears as soon as the action registers it.
 
 For refs published from a PR (the action forwards the PR url), the served
 packument also exposes a `pr-<n>` dist-tag pointing at that PR's
@@ -224,7 +224,6 @@ are uploaded with `void secret put`:
 | `NPM_REGISTRY` | npm fallback registry (`https://registry.npmjs.org`). |
 | `PKG_PR_NEW_BASE` | pkg.pr.new base (`https://pkg.pr.new`). |
 | `PREVIEW_OWNER` / `PREVIEW_REPO` | Fixed upstream repo (`voidzero-dev` / `vite-plus`). |
-| `VITE_PLUS_PREVIEW_REFS` | Comma-separated commit refs to inject: `commit.<sha>` (PR refs rejected). |
 | `WORKSPACE_PACKAGES` | Allowlist for the tarball endpoint and pkg.pr.new-URL dep routing. Exact names or `prefix*`, e.g. `vite-plus,@voidzero-dev/vite-plus-*`. |
 | `MAX_TARBALL_BYTES` | Max upstream tarball size (default 64 MiB). |
 

@@ -1,7 +1,9 @@
 // Shared helpers for the deploy-time scripts (warm.mjs, e2e-bun.mjs).
-// Reads the bridge origin and preview refs from the committed `.env` files
-// (Void's source of truth for worker vars), with `.env.production` overriding
-// `.env`. Override at runtime with BRIDGE_URL / BRIDGE_E2E_REF.
+// Reads the bridge origin from the committed `.env` files (Void's source of
+// truth for worker vars), with `.env.production` overriding `.env`. Override at
+// runtime with BRIDGE_URL. Preview refs are no longer static config; they are
+// registered at runtime (CI / admin endpoints), so the scripts discover them
+// from the live bridge instead.
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -34,7 +36,7 @@ function parseEnvFile(file) {
   return out
 }
 
-/** Read PUBLIC_BASE_URL and VITE_PLUS_PREVIEW_REFS from `.env` + `.env.production`. */
+/** Read PUBLIC_BASE_URL from `.env` + `.env.production`. */
 export function readConfig() {
   const merged = {
     ...parseEnvFile(path.join(root, '.env')),
@@ -42,7 +44,6 @@ export function readConfig() {
   }
   return {
     baseUrl: merged.PUBLIC_BASE_URL || '',
-    refs: merged.VITE_PLUS_PREVIEW_REFS || '',
   }
 }
 

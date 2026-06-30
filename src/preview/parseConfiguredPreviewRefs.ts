@@ -1,6 +1,6 @@
 /**
- * Parses the configured preview refs (from `VITE_PLUS_PREVIEW_REFS` or the
- * runtime R2 refs index) that should be injected into packuments.
+ * Parses preview refs (registered at runtime in the R2 refs index) that should
+ * be injected into packuments.
  *
  * Only immutable commit refs are supported:
  *   commit.<sha>
@@ -64,14 +64,4 @@ export function parseConfiguredPreviewRefs(
     }
     return ref
   })
-}
-
-/** Lenient variant: drops invalid refs instead of throwing. */
-export function parseConfiguredPreviewRefsSafe(
-  input: string | undefined,
-): ParsedPreviewRef[] {
-  // Skip invalid config entries rather than failing the whole packument.
-  return splitRefs(input)
-    .map(parseSingleRef)
-    .filter((r): r is ParsedPreviewRef => r !== null)
 }
