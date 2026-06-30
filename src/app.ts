@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { cors } from 'hono/cors'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { Env } from './config'
 import { HttpError } from './httpError'
@@ -50,6 +51,10 @@ const UNPUBLISHED_PREVIEW_TIME = '2020-01-01T00:00:00.000Z'
 type HonoEnv = { Bindings: Env }
 
 export const app = new Hono<HonoEnv>()
+
+// Allow browser clients to read every response (this is a public, read-mostly
+// registry API). Mirrors pkg.pr.new's `access-control-allow-origin: *`.
+app.use('*', cors())
 
 app.get('/_health', (c) => c.json({ status: 'ok' }))
 
@@ -433,6 +438,8 @@ app.get('*', async (c) => {
 app.all('*', (c) => redirectToNpm(c.env, c.req.raw))
 
 app.onError((err, c) => {
+  // Keep the CORS header on errors too, so a browser can read the error body.
+  c.header('access-control-allow-origin', '*')
   if (err instanceof HttpError) {
     return c.json({ error: err.message }, err.status as ContentfulStatusCode)
   }
