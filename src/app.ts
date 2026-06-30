@@ -3,10 +3,14 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { Env } from './config'
 import { HttpError } from './httpError'
 import { isWorkspacePackage } from './preview/packages'
-import { parsePreviewVersion } from './preview/parsePreviewVersion'
+import {
+  commitVersion,
+  parsePreviewVersion,
+} from './preview/parsePreviewVersion'
 import { parseConfiguredPreviewRefs } from './preview/parseConfiguredPreviewRefs'
 import {
   getConfiguredRefs,
+  latestVersionByPr,
   registerRef,
   unregisterRef,
 } from './preview/getConfiguredRefs'
@@ -38,6 +42,35 @@ import {
  * pinned preview during that gap.
  */
 const UNPUBLISHED_PREVIEW_TIME = '2020-01-01T00:00:00.000Z'
+
+/**
+ * Parse a pkg.pr.new-style direct-download path for the configured repo:
+ *   /<owner>/<repo>@<ref>        -> { pkg: <repo>, ref }
+ *   /<owner>/<repo>/<pkg>@<ref>  -> { pkg, ref }   (<pkg> may be scoped)
+ * Returns null when the path is not this form.
+ */
+function parsePkgPrNewDownload(
+  pathname: string,
+  env: Env,
+): { pkg: string; ref: string } | null {
+  const base = `/${env.PREVIEW_OWNER}/${env.PREVIEW_REPO}`
+  if (!pathname.startsWith(base)) return null
+  const rest = pathname.slice(base.length)
+  // Bare form: the repo's main package (named after the repo).
+  if (rest.startsWith('@')) {
+    const ref = rest.slice(1)
+    return ref && !ref.includes('/') ? { pkg: env.PREVIEW_REPO, ref } : null
+  }
+  // Package form: `<pkg>@<ref>`; lastIndexOf('@') keeps a scoped pkg intact.
+  if (rest.startsWith('/')) {
+    const seg = rest.slice(1)
+    const at = seg.lastIndexOf('@')
+    if (at <= 0) return null
+    const ref = seg.slice(at + 1)
+    return ref && !ref.includes('/') ? { pkg: seg.slice(0, at), ref } : null
+  }
+  return null
+}
 
 type HonoEnv = { Bindings: Env }
 
@@ -301,6 +334,35 @@ app.get('*', async (c) => {
     return await serveTarball(c.env, npmTarball.name, npmTarball.version)
   }
 
+  // pkg.pr.new-style direct download: /<owner>/<repo>[/<pkg>]@<ref>. Resolve a
+  // PR number to its latest commit version (or a commit sha to its synthetic
+  // version) and 302 to the canonical tarball. A PR number's mapping is mutable
+  // (it moves with the PR), so the redirect itself is not cached.
+  const download = parsePkgPrNewDownload(pathname, c.env)
+  if (download) {
+    if (!isWorkspacePackage(download.pkg, c.env)) {
+      throw new HttpError(404, `Unknown package: ${download.pkg}`)
+    }
+    let version: string | null = null
+    if (/^\d+$/.test(download.ref)) {
+      version =
+        latestVersionByPr(await getConfiguredRefs(c.env)).get(download.ref) ??
+        null
+    } else if (/^[0-9a-f]{7,40}$/i.test(download.ref)) {
+      version = commitVersion(download.ref)
+    }
+    if (!version) {
+      throw new HttpError(404, `No preview build for ref ${download.ref}`)
+    }
+    return new Response(null, {
+      status: 302,
+      headers: {
+        location: `${c.env.PUBLIC_BASE_URL}/tarballs/${download.pkg}/${version}.tgz`,
+        'cache-control': 'no-store',
+      },
+    })
+  }
+
   const pkgReq = parsePackagePath(pathname)
   if (!pkgReq) return redirectToNpm(c.env, c.req.raw)
 
@@ -353,17 +415,13 @@ app.get('*', async (c) => {
   )
 
   // Mutable `pr-<n>` dist-tags: point each PR at its latest-published commit
-  // version, so `vite-plus@pr-<n>` installs the PR's head build. The per-commit
-  // versions stay immutable; only the tag moves as the PR advances.
-  const latestPrTime = new Map<string, number>()
-  for (const ref of refs) {
-    if (!ref.prNumber || !packument.versions[ref.version]) continue
-    const t = ref.publishedAt ? Date.parse(ref.publishedAt) : 0
-    const prev = latestPrTime.get(ref.prNumber)
-    if (prev === undefined || t >= prev) {
-      latestPrTime.set(ref.prNumber, t)
-      packument['dist-tags'][`pr-${ref.prNumber}`] = ref.version
-    }
+  // version present in this packument, so `<pkg>@pr-<n>` installs the PR's head
+  // build. The per-commit versions stay immutable; only the tag moves.
+  for (const [prNum, version] of latestVersionByPr(
+    refs,
+    (v) => v in packument.versions,
+  )) {
+    packument['dist-tags'][`pr-${prNum}`] = version
   }
 
   return new Response(JSON.stringify(packument), {

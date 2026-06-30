@@ -104,6 +104,30 @@ export async function getConfiguredRefs(
   return [...byVersion.values()]
 }
 
+/**
+ * Map each PR number to its latest-published commit version among `refs`
+ * (max publishedAt wins). Used for the `pr-<n>` dist-tag and the pkg.pr.new
+ * style download URL. `accept` optionally restricts eligible versions (e.g.
+ * only versions present in a built packument).
+ */
+export function latestVersionByPr(
+  refs: ConfiguredPreviewRef[],
+  accept: (version: string) => boolean = () => true,
+): Map<string, string> {
+  const out = new Map<string, string>()
+  const latestT = new Map<string, number>()
+  for (const ref of refs) {
+    if (!ref.prNumber || !accept(ref.version)) continue
+    const t = ref.publishedAt ? Date.parse(ref.publishedAt) : 0
+    const prev = latestT.get(ref.prNumber)
+    if (prev === undefined || t >= prev) {
+      latestT.set(ref.prNumber, t)
+      out.set(ref.prNumber, ref.version)
+    }
+  }
+  return out
+}
+
 /** Validate and register a ref. Concurrency-safe via the conditional put. */
 export async function registerRef(
   env: Env,

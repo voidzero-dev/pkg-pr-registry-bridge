@@ -136,6 +136,24 @@ latest-published commit version. The per-commit versions stay immutable; the tag
 moves as the PR advances, so `npm/pnpm install <pkg>@pr-<n>` against this
 registry installs the PR's head build.
 
+## Direct tarball download (pkg.pr.new-style)
+
+A pkg.pr.new-style URL resolves a ref to a tarball, handy for a `curl` download
+or a single self-contained package. Swap the hostname on any pkg.pr.new URL:
+
+```bash
+# The repo's main package (vite-plus) at a PR's latest commit, or a commit sha:
+curl -L https://registry-bridge.viteplus.dev/voidzero-dev/vite-plus@1891
+curl -L https://registry-bridge.viteplus.dev/voidzero-dev/vite-plus@<sha>
+# A specific (here scoped) package:
+curl -L https://registry-bridge.viteplus.dev/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-core@1891
+```
+
+It 302-redirects to the canonical `/tarballs/<pkg>/<version>.tgz`. Note the
+bridge rewrites a preview tarball's transitive deps to versions (not pkg.pr.new
+URLs), so for a full install of the meta-package with its platform binaries, use
+the registry + `pr-<n>` tag above rather than this URL as a bare dependency.
+
 ## Admin endpoints
 
 Writes are guarded by `Authorization: Bearer <ADMIN_TOKEN>` (set `ADMIN_TOKEN`

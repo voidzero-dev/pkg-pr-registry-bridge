@@ -466,6 +466,74 @@ describe('integrity', () => {
 
 const AUTH = { authorization: 'Bearer test-admin-token' }
 
+describe('pkg.pr.new-style download', () => {
+  it('redirects /<owner>/<repo>@<sha> to the version tarball', async () => {
+    const sha = 'abc1234'
+    const res = await SELF.fetch(`${BASE}/voidzero-dev/vite-plus@${sha}`, {
+      redirect: 'manual',
+    })
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe(
+      `${BASE}/tarballs/vite-plus/0.0.0-commit.${sha}.tgz`,
+    )
+    // The PR->version mapping is mutable, so the redirect is not cached.
+    expect(res.headers.get('cache-control')).toBe('no-store')
+  })
+
+  it('redirects /<owner>/<repo>/<scoped-pkg>@<sha> to that package', async () => {
+    const sha = 'def5678'
+    const res = await SELF.fetch(
+      `${BASE}/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-core@${sha}`,
+      { redirect: 'manual' },
+    )
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe(
+      `${BASE}/tarballs/@voidzero-dev/vite-plus-core/0.0.0-commit.${sha}.tgz`,
+    )
+  })
+
+  it('redirects /<owner>/<repo>@<pr> to the PR latest commit tarball', async () => {
+    const prUrl = 'https://github.com/voidzero-dev/vite-plus/pull/909'
+    const publish = (sha: string, version: string) =>
+      SELF.fetch(`${BASE}/-/publish`, {
+        method: 'POST',
+        headers: { ...AUTH, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ref: `commit.${sha}`,
+          prUrl,
+          packages: [
+            {
+              name: 'vite-plus',
+              version,
+              packageJson: { name: 'vite-plus', version },
+              integrity: 'sha512-test',
+              shasum: '',
+            },
+          ],
+        }),
+      })
+    const verB = '0.0.0-commit.ddd9090'
+    expect((await publish('ccc9090', '0.0.0-commit.ccc9090')).status).toBe(201)
+    await SELF.fetch(`${BASE}/-/refs`) // keep B's server-stamp strictly later
+    expect((await publish('ddd9090', verB)).status).toBe(201)
+
+    const res = await SELF.fetch(`${BASE}/voidzero-dev/vite-plus@909`, {
+      redirect: 'manual',
+    })
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe(
+      `${BASE}/tarballs/vite-plus/${verB}.tgz`,
+    )
+  })
+
+  it('404s for a PR with no published build', async () => {
+    const res = await SELF.fetch(`${BASE}/voidzero-dev/vite-plus@999999`, {
+      redirect: 'manual',
+    })
+    expect(res.status).toBe(404)
+  })
+})
+
 describe('admin: refs', () => {
   it('writes require auth (reads do not)', async () => {
     // POST/DELETE require the bearer token.
