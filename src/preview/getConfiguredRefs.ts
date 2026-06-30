@@ -16,8 +16,10 @@ import { REFS_INDEX_KEY } from '../cache/r2Cache'
 const REF_TTL_MS = 90 * 24 * 60 * 60 * 1000
 const MAX_CAS_ATTEMPTS = 6
 
-/** canonical `commit.<sha>` -> expiry (epoch ms). */
-type RefIndex = Record<string, { expiresAt: number }>
+/** Per-ref runtime state: expiry plus optional publish time and PR url. */
+type RefEntry = { expiresAt: number; publishedAt?: string; prUrl?: string }
+/** canonical `commit.<sha>` -> RefEntry. */
+type RefIndex = Record<string, RefEntry>
 
 function canonical(ref: ConfiguredPreviewRef): string {
   return `${ref.type}.${ref.ref}`
@@ -77,7 +79,10 @@ export async function getConfiguredRefs(
     const { index } = await readRefIndex(env)
     const now = Date.now()
     const live = Object.keys(index).filter((c) => index[c].expiresAt > now)
-    fromR2 = parseConfiguredPreviewRefsSafe(live.join(','))
+    fromR2 = parseConfiguredPreviewRefsSafe(live.join(',')).map((r) => {
+      const entry = index[`${r.type}.${r.ref}`]
+      return { ...r, publishedAt: entry?.publishedAt, prUrl: entry?.prUrl }
+    })
   } catch (err) {
     console.warn('Failed to read preview refs from R2:', err)
   }
@@ -91,10 +96,17 @@ export async function getConfiguredRefs(
 export async function registerRef(
   env: Env,
   ref: string,
+  extra?: { publishedAt?: string; prUrl?: string },
 ): Promise<ConfiguredPreviewRef> {
   const [parsed] = parseConfiguredPreviewRefs(ref)
   await mutateRefIndex(env, (index) => {
-    index[canonical(parsed)] = { expiresAt: Date.now() + REF_TTL_MS }
+    const existing = index[canonical(parsed)]
+    // Preserve a prior publish time / PR url when re-registering without them.
+    index[canonical(parsed)] = {
+      expiresAt: Date.now() + REF_TTL_MS,
+      publishedAt: extra?.publishedAt ?? existing?.publishedAt,
+      prUrl: extra?.prUrl ?? existing?.prUrl,
+    }
   })
   return parsed
 }

@@ -137,7 +137,9 @@ with `void secret put ADMIN_TOKEN`); without it configured the write endpoints
 return 503. `GET /-/refs` is a public read.
 
 ```bash
-# List configured refs (static env + runtime R2 index) - no auth required
+# List configured refs (static env + runtime R2 index) - no auth required.
+# Each entry: { ref, version, publishedAt, prUrl }; publishedAt/prUrl are null
+# until the ref is published (and prUrl only when published from a PR).
 curl https://.../-/refs
 
 # Register a ref at runtime (no redeploy).

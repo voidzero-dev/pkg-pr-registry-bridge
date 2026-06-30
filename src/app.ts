@@ -136,6 +136,7 @@ app.post('/-/publish', async (c) => {
   admin(c)
   const body = (await c.req.json().catch(() => ({}))) as {
     ref?: string
+    prUrl?: string
     packages?: Array<{
       name?: string
       version?: string
@@ -145,6 +146,8 @@ app.post('/-/publish', async (c) => {
     }>
   }
   const ref = (body.ref ?? '').trim()
+  // Optional: the action runs on push commits too, where there is no PR.
+  const prUrl = (body.prUrl ?? '').trim() || undefined
   const packages = Array.isArray(body.packages) ? body.packages : []
   if (!ref) throw new HttpError(400, 'Missing ref')
   if (packages.length === 0) throw new HttpError(400, 'Missing packages')
@@ -179,8 +182,9 @@ app.post('/-/publish', async (c) => {
 
   let parsed
   try {
-    // registerRef parses + validates the ref and returns it.
-    parsed = await registerRef(c.env, ref)
+    // registerRef parses + validates the ref and returns it. Record this run's
+    // server-stamped publish time and (when present) the source PR url.
+    parsed = await registerRef(c.env, ref, { publishedAt, prUrl })
   } catch (err) {
     throw new HttpError(400, `Invalid or unregisterable ref: ${ref} (${err})`)
   }
@@ -194,7 +198,8 @@ app.get('/-/refs', async (c) => {
     refs: refs.map((r) => ({
       ref: `${r.type}.${r.ref}`,
       version: r.version,
-      tag: r.tag,
+      publishedAt: r.publishedAt ?? null,
+      prUrl: r.prUrl ?? null,
     })),
   })
 })
@@ -223,7 +228,7 @@ app.post('/-/refs', async (c) => {
   // The tarballs/integrity are built and uploaded by the publish action (CI);
   // until then this ref's packument uses name-derived platform metas and the
   // tarball endpoint redirects platform binaries to pkg.pr.new.
-  return c.json({ added: ref, version: parsed.version, tag: parsed.tag }, 201)
+  return c.json({ added: ref, version: parsed.version }, 201)
 })
 
 /** Unregister a runtime preview ref. Body: `{ "ref": "commit.<sha>" }`. */
@@ -325,9 +330,9 @@ app.get('*', async (c) => {
   packument.time = time
 
   // Inject each configured ref. The R2 meta reads are independent, so run them
-  // concurrently; each writes a distinct version/tag/time key, and a failing
-  // ref is isolated so it can't break installs of the package's other versions.
-  // After the deploy-time warm step these are R2 hits and don't touch upstream.
+  // concurrently; each writes a distinct version/time key, and a failing ref is
+  // isolated so it can't break installs of the package's other versions. After
+  // the deploy-time warm step these are R2 hits and don't touch upstream.
   await Promise.all(
     refs.map(async (ref) => {
       try {
@@ -338,7 +343,6 @@ app.get('*', async (c) => {
           ref.version,
           preview,
         )
-        packument['dist-tags'][ref.tag] = ref.version
         time[ref.version] = preview.publishedAt ?? UNPUBLISHED_PREVIEW_TIME
       } catch (err) {
         console.warn(`Failed to inject preview ref ${ref.version}:`, err)

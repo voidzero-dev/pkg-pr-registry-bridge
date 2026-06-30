@@ -15,6 +15,12 @@ inputs:
   admin-token:
     description: 'Bridge ADMIN_TOKEN (store as a secret).'
     required: true
+  pr-url:
+    description: >-
+      URL of the source pull request, surfaced by /-/refs. Optional: pass
+      github.event.pull_request.html_url on pull_request runs; leave empty on
+      push/commit runs.
+    required: false
   pkg-pr-new-base:
     description: 'pkg.pr.new base URL.'
     required: false

@@ -92,6 +92,8 @@ async function main(): Promise<void> {
   const version = parsed.version
   const bridge = (input('bridge-url') || 'https://registry-bridge.viteplus.dev').replace(/\/+$/, '')
   const token = input('admin-token', true)
+  // Optional: present on pull_request runs, empty on push/commit runs.
+  const prUrl = input('pr-url') || undefined
   const env: RewriteEnv = {
     PUBLIC_BASE_URL: bridge,
     PKG_PR_NEW_BASE: (input('pkg-pr-new-base') || 'https://pkg.pr.new').replace(/\/+$/, ''),
@@ -143,7 +145,7 @@ async function main(): Promise<void> {
     const res = await fetch(`${bridge}/-/publish`, {
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ ref, packages }),
+      body: JSON.stringify({ ref, prUrl, packages }),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => '')}`)
   })
