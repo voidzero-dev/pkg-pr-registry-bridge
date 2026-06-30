@@ -1,6 +1,7 @@
 import type { Env } from '../config'
 import { encodeNpmPackageName } from './parsePackageName'
 import { HttpError } from '../httpError'
+import { kvCached } from '../cache/kvCache'
 
 // Abbreviated packument format. Always request this from npm: it is an order
 // of magnitude smaller than the full packument (which some clients' Accept
@@ -97,23 +98,35 @@ export async function getNpmTimeCached(
   env: Env,
   name: string,
 ): Promise<Record<string, string>> {
-  const key = `npm-time/${name}`
-  // Degrade to a direct fetch on any cache error rather than failing the request.
-  try {
-    const cached = await env.KV.get<Record<string, string>>(key, 'json')
-    if (cached) return cached
-  } catch (err) {
-    console.warn(`npm-time cache read failed for ${name}:`, err)
-  }
+  // The fetcher returns the small EXTRACTED map (not the multi-MB body), and `{}`
+  // for a 404 so a not-on-npm package is cached and not re-fetched in full every
+  // request.
+  return (
+    (await kvCached(env, `npm-time/${name}`, NPM_TIME_TTL_S, async () =>
+      (await fetchNpmTime(env, name)) ?? {},
+    )) ?? {}
+  )
+}
 
-  // Store the small EXTRACTED map (not the multi-MB body); `{}` for a 404 so a
-  // not-on-npm package isn't re-fetched in full every request.
-  const time = (await fetchNpmTime(env, name)) ?? {}
-  try {
-    await env.KV.put(key, JSON.stringify(time), { expirationTtl: NPM_TIME_TTL_S })
-  } catch (err) {
-    // Best-effort cache population; log so a failing runtime is visible.
-    console.warn(`npm-time cache write failed for ${name}:`, err)
-  }
-  return time
+/** Cached abbreviated packument TTL: matches the served `cache-control` window. */
+const NPM_PACKUMENT_TTL_S = 5 * 60
+
+/**
+ * The abbreviated npm packument, cached in KV. The Void runtime does NOT
+ * edge-cache the assembled packument response (it forbids the Cache API), so
+ * without this every fresh client, e.g. each CI install, re-fetched the full
+ * abbreviated packument from npm cross-network, the dominant hot-path latency.
+ * Only npm-published versions are cached; preview versions are injected live
+ * from the refs index, so a newly published preview still appears immediately
+ * (the cache adds no publish-visibility lag, only an npm stable release lags up
+ * to the TTL, which the served `max-age=300` already allows). A 404 (not on npm)
+ * returns null and is left uncached so it stays cheap to re-probe.
+ */
+export function getNpmPackumentCached(
+  env: Env,
+  name: string,
+): Promise<Record<string, any> | null> {
+  return kvCached(env, `npm-packument/${name}`, NPM_PACKUMENT_TTL_S, () =>
+    fetchNpmPackument(env, name),
+  )
 }

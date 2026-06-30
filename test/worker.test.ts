@@ -36,6 +36,9 @@ const NPM_VITE_PLUS_TIME = {
 // Counts fetches of the FULL (time-bearing) vite-plus packument, to verify the
 // KV time-map cache prevents a per-request refetch.
 let fullTimeFetches = 0
+// Counts fetches of the ABBREVIATED vite-plus packument, to verify the KV
+// packument cache prevents a per-request refetch.
+let abbreviatedFetches = 0
 
 function json(obj: unknown, status = 200): Response {
   return new Response(JSON.stringify(obj), {
@@ -94,7 +97,8 @@ beforeAll(async () => {
         h instanceof Headers ? h.get('accept') : (h as Record<string, string>)?.accept
       ) ?? ''
       const abbreviated = accept.includes('install-v1')
-      if (!abbreviated) fullTimeFetches++
+      if (abbreviated) abbreviatedFetches++
+      else fullTimeFetches++
       const body = abbreviated
         ? { ...NPM_VITE_PLUS, modified: NPM_VITE_PLUS_TIME.modified }
         : { ...NPM_VITE_PLUS, time: NPM_VITE_PLUS_TIME }
@@ -198,6 +202,18 @@ describe('packument endpoint', () => {
     expect(fullTimeFetches - before).toBeLessThanOrEqual(1)
   })
 
+  it('caches the abbreviated packument in KV (fetched at most once)', async () => {
+    // The Void runtime does not edge-cache the assembled response, so without
+    // this KV cache every fresh client would re-fetch the abbreviated packument
+    // from npm. Two requests must hit npm for it at most once.
+    const before = abbreviatedFetches
+    const get = () =>
+      SELF.fetch(`${BASE}/vite-plus`, { headers: { accept: 'application/json' } })
+    await get()
+    await get()
+    expect(abbreviatedFetches - before).toBeLessThanOrEqual(1)
+  })
+
   it('stamps the preview release date server-side at publish, stable across requests', async () => {
     // The release date is stamped server-side once at publish, not npm's
     // package-modified time, not a per-request clock, and not a client value.
@@ -265,13 +281,15 @@ describe('packument endpoint', () => {
   it('surfaces an npm registry error (non-200, non-404) instead of synthesizing', async () => {
     // 404 means "not on npm" and is synthesized (above). Any other upstream
     // error must propagate npm's status, not hide behind a 200 packument that
-    // silently drops the package's real versions.
+    // silently drops the package's real versions. Use a workspace package the
+    // suite never fetches, so the npm packument is a cold KV miss (a warm cache
+    // would, by design, ride out the blip and serve the cached packument).
     const saved = globalThis.fetch
     vi.stubGlobal('fetch', () =>
       Promise.resolve(json({ error: 'upstream boom' }, 503)),
     )
     try {
-      const res = await SELF.fetch(`${BASE}/vite-plus`, {
+      const res = await SELF.fetch(`${BASE}/@voidzero-dev%2Fvite-plus-uncached`, {
         headers: { accept: 'application/json' },
       })
       expect(res.status).toBe(503)
