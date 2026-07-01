@@ -406,6 +406,13 @@ describe('fetchUpstreamTarball', () => {
     expect(Array.from(out)).toEqual([9, 8, 7, 6])
   })
 
+  it('assembles a larger multi-chunk body with no Content-Length', async () => {
+    const big = new Uint8Array(100_000).map((_, i) => i % 256)
+    mockUpstream([big.slice(0, 60_000), big.slice(60_000)])
+    const out = await fetchUpstreamTarball('https://example.com/t.tgz', 200_000)
+    expect(out).toEqual(big)
+  })
+
   it('rejects a declared Content-Length over the max', async () => {
     mockUpstream([new Uint8Array([1])], { 'content-length': '2000' })
     await expectTooLarge(fetchUpstreamTarball('https://example.com/t.tgz', 1024))
