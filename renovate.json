@@ -2,5 +2,10 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:recommended"
-  ]
+  ],
+  "description": [
+    "minimumReleaseAge keeps Renovate from proposing a version newer than pnpm's minimum-release-age cooldown. pnpm 11 enforces a 1-day supply-chain policy on `pnpm install --frozen-lockfile`, so a same-day bump writes a too-new lockfile entry and CI fails with ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION. 3 days clears the 1-day floor with margin. internalChecksFilter=strict holds such an update until it ages in, instead of opening a red PR."
+  ],
+  "minimumReleaseAge": "3 days",
+  "internalChecksFilter": "strict"
 }
