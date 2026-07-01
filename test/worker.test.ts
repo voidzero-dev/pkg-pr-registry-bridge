@@ -137,17 +137,50 @@ afterAll(() => {
   vi.unstubAllGlobals()
 })
 
-// The suite's fixture preview ref (`commit.a832a55`). It used to be injected via
-// the VITE_PLUS_PREVIEW_REFS env var; refs are now runtime-only, so register it
-// dynamically before each test (idempotent, so it survives storage isolation).
+// The suite's fixture preview ref (`commit.a832a55`), published before each test
+// (idempotent, so it survives storage isolation). Publishing vite-plus + core
+// with their rewritten package.json is exactly what a CI publish stores, so
+// packuments inject the ref the way they do in production. (`POST /-/refs`
+// register-only was removed; a ref exists only once it has been published.)
+const FIXTURE_VERSION = '0.0.0-commit.a832a55'
 beforeEach(async () => {
-  await SELF.fetch(`${BASE}/-/refs`, {
+  await SELF.fetch(`${BASE}/-/publish`, {
     method: 'POST',
     headers: {
       authorization: 'Bearer test-admin-token',
       'content-type': 'application/json',
     },
-    body: JSON.stringify({ ref: 'commit.a832a55' }),
+    body: JSON.stringify({
+      ref: 'commit.a832a55',
+      packages: [
+        {
+          name: 'vite-plus',
+          version: FIXTURE_VERSION,
+          packageJson: {
+            name: 'vite-plus',
+            version: FIXTURE_VERSION,
+            dependencies: { '@voidzero-dev/vite-plus-core': FIXTURE_VERSION },
+            optionalDependencies: {
+              '@voidzero-dev/vite-plus-darwin-arm64': `0.0.0-commit.${PLATFORM_SHA}`,
+            },
+            bin: { vp: './bin/vp' },
+          },
+          integrity: 'sha512-Zm9vYmFy',
+          shasum: 'a'.repeat(40),
+        },
+        {
+          name: '@voidzero-dev/vite-plus-core',
+          version: FIXTURE_VERSION,
+          packageJson: {
+            name: '@voidzero-dev/vite-plus-core',
+            version: FIXTURE_VERSION,
+            dependencies: { 'vite-plus': FIXTURE_VERSION },
+          },
+          integrity: 'sha512-Y29yZQ',
+          shasum: 'b'.repeat(40),
+        },
+      ],
+    }),
   })
 })
 
@@ -364,26 +397,19 @@ describe('packument endpoint', () => {
   })
 
   it('injects the version into a platform package packument with os/cpu', async () => {
-    // Register the platform commit ref so the platform packument exposes it.
-    await SELF.fetch(`${BASE}/-/refs`, {
-      method: 'POST',
-      headers: {
-        authorization: 'Bearer test-admin-token',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({ ref: `commit.${PLATFORM_SHA}` }),
-    })
+    // The fixture ref has no darwin meta published, so the platform packument
+    // derives os/cpu from the package name (platformMetaFromName).
     const res = await SELF.fetch(
       `${BASE}/@voidzero-dev%2Fvite-plus-darwin-arm64`,
       { headers: { accept: 'application/json' } },
     )
     const body = (await res.json()) as Record<string, any>
-    const v = body.versions[`0.0.0-commit.${PLATFORM_SHA}`]
+    const v = body.versions[FIXTURE_VERSION]
     expect(v).toBeTruthy()
     expect(v.os).toEqual(['darwin'])
     expect(v.cpu).toEqual(['arm64'])
     expect(v.dist.tarball).toBe(
-      `${BASE}/tarballs/@voidzero-dev/vite-plus-darwin-arm64/0.0.0-commit.${PLATFORM_SHA}.tgz`,
+      `${BASE}/tarballs/@voidzero-dev/vite-plus-darwin-arm64/${FIXTURE_VERSION}.tgz`,
     )
   })
 
@@ -724,19 +750,6 @@ describe('CORS', () => {
 })
 
 describe('admin: refs', () => {
-  it('writes require auth (reads do not)', async () => {
-    // POST/DELETE require the bearer token.
-    expect(
-      (await SELF.fetch(`${BASE}/-/refs`, { method: 'POST' })).status,
-    ).toBe(401)
-    expect(
-      (await SELF.fetch(`${BASE}/-/refs`, {
-        method: 'POST',
-        headers: { authorization: 'Bearer wrong' },
-      })).status,
-    ).toBe(401)
-  })
-
   it('lists the registered refs without auth (public read)', async () => {
     const res = await SELF.fetch(`${BASE}/-/refs`)
     expect(res.status).toBe(200)
@@ -868,71 +881,52 @@ describe('admin: refs', () => {
     expect(body['dist-tags']['pr-777']).toBe(verB)
   })
 
-  it('registers a ref and injects it into the packument', async () => {
-    const add = await SELF.fetch(`${BASE}/-/refs`, {
+  it('rejects an invalid ref (publish)', async () => {
+    const res = await SELF.fetch(`${BASE}/-/publish`, {
       method: 'POST',
       headers: { ...AUTH, 'content-type': 'application/json' },
-      body: JSON.stringify({ ref: 'commit.a832a55' }),
-    })
-    expect(add.status).toBe(201)
-    expect((await add.json()) as any).toMatchObject({
-      version: '0.0.0-commit.a832a55',
-    })
-
-    // The dynamically registered ref now appears in the packument.
-    const pack = await SELF.fetch(`${BASE}/vite-plus`, {
-      headers: { accept: 'application/json' },
-    })
-    const body = (await pack.json()) as Record<string, any>
-    expect(body.versions['0.0.0-commit.a832a55']).toBeTruthy()
-  })
-
-  it('rejects an invalid ref', async () => {
-    const res = await SELF.fetch(`${BASE}/-/refs`, {
-      method: 'POST',
-      headers: { ...AUTH, 'content-type': 'application/json' },
-      body: JSON.stringify({ ref: 'nonsense' }),
+      body: JSON.stringify({
+        ref: 'nonsense',
+        packages: [
+          {
+            name: 'vite-plus',
+            version: '0.0.0-commit.abc1234',
+            packageJson: { name: 'vite-plus', version: '0.0.0-commit.abc1234' },
+            integrity: 'sha512-x',
+            shasum: 'x',
+          },
+        ],
+      }),
     })
     expect(res.status).toBe(400)
   })
 
-  it('registers concurrently without overwriting (incremental)', async () => {
-    const a = 'commit.aaaaaaa'
-    const b = 'commit.bbbbbbb'
-    const post = (ref: string) =>
-      SELF.fetch(`${BASE}/-/refs`, {
+  it('publishes concurrently without overwriting (incremental)', async () => {
+    const publish = (sha: string) =>
+      SELF.fetch(`${BASE}/-/publish`, {
         method: 'POST',
         headers: { ...AUTH, 'content-type': 'application/json' },
-        body: JSON.stringify({ ref }),
+        body: JSON.stringify({
+          ref: `commit.${sha}`,
+          packages: [
+            {
+              name: 'vite-plus',
+              version: `0.0.0-commit.${sha}`,
+              packageJson: { name: 'vite-plus', version: `0.0.0-commit.${sha}` },
+              integrity: 'sha512-x',
+              shasum: 'x',
+            },
+          ],
+        }),
       })
-    // Two PRs registering at the same time: both must survive.
-    await Promise.all([post(a), post(b)])
+    // Two PRs publishing at the same time: both refs must survive the CAS.
+    await Promise.all([publish('aaaaaaa'), publish('bbbbbbb')])
     const list = (await (
-      await SELF.fetch(`${BASE}/-/refs`, { headers: AUTH })
+      await SELF.fetch(`${BASE}/-/refs`)
     ).json()) as { refs: Array<{ ref: string }> }
     const refs = list.refs.map((r) => r.ref)
-    expect(refs).toContain(a)
-    expect(refs).toContain(b)
-  })
-
-  it('unregisters a ref', async () => {
-    // Use a sha that is not the fixture ref, so removal is observable.
-    const ref = 'commit.beefcafe'
-    await SELF.fetch(`${BASE}/-/refs`, {
-      method: 'POST',
-      headers: { ...AUTH, 'content-type': 'application/json' },
-      body: JSON.stringify({ ref }),
-    })
-    const del = await SELF.fetch(`${BASE}/-/refs`, {
-      method: 'DELETE',
-      headers: { ...AUTH, 'content-type': 'application/json' },
-      body: JSON.stringify({ ref }),
-    })
-    expect(del.status).toBe(200)
-    const list = (await (
-      await SELF.fetch(`${BASE}/-/refs`, { headers: AUTH })
-    ).json()) as { refs: Array<{ ref: string }> }
-    expect(list.refs.some((r) => r.ref === ref)).toBe(false)
+    expect(refs).toContain('commit.aaaaaaa')
+    expect(refs).toContain('commit.bbbbbbb')
   })
 })
 
