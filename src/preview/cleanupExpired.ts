@@ -1,10 +1,11 @@
 import type { Env } from '../config'
+import { META_PREFIX, TARBALL_PREFIX } from '../cache/r2Cache'
 import { REF_TTL_MS } from './getConfiguredRefs'
 
-// R2 key prefixes for the per-version preview artifacts. Must match `metaKey` /
-// `tarballKey` in ../cache/r2Cache. NOT `meta-index/` or `refs/`: those are the
-// live indexes (self-pruned on write), not per-version orphans.
-const ARTIFACT_PREFIXES = ['meta/', 'tarball/']
+// The per-version artifact prefixes (shared with the key builders). NOT
+// `meta-index/` or `refs/`: those are the live indexes (self-pruned on write),
+// not per-version orphans, and their prefixes are disjoint from these.
+const ARTIFACT_PREFIXES = [META_PREFIX, TARBALL_PREFIX]
 
 /**
  * Delete per-version preview artifacts (meta + tarball) whose ref TTL has lapsed,

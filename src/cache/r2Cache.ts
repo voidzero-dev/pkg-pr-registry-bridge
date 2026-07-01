@@ -1,8 +1,13 @@
 /** R2 object keys and the public URL for a generated preview build. */
 import type { Env } from '../config'
 
+// Per-version object key prefixes. Shared with the expiry sweep
+// (cleanupExpiredArtifacts), so a rename here can't silently desync it.
+export const TARBALL_PREFIX = 'tarball/'
+export const META_PREFIX = 'meta/'
+
 export function tarballKey(name: string, version: string): string {
-  return `tarball/${name}/${version}.tgz`
+  return `${TARBALL_PREFIX}${name}/${version}.tgz`
 }
 
 /** Public URL of a preview tarball (the inverse of parseTarballPath). */
@@ -15,7 +20,7 @@ export function tarballUrl(
 }
 
 export function metaKey(name: string, version: string): string {
-  return `meta/${name}/${version}.json`
+  return `${META_PREFIX}${name}/${version}.json`
 }
 
 /**
