@@ -9,6 +9,7 @@
  * would be overwritten as the PR advances.
  */
 import { commitVersion } from './parsePreviewVersion'
+import { splitCsv } from '../util/splitCsv'
 
 /** A ref as produced by parsing alone, with no runtime state. */
 export type ParsedPreviewRef = {
@@ -43,19 +44,11 @@ export function parseSingleRef(value: string): ParsedPreviewRef | null {
   }
 }
 
-function splitRefs(input: string | undefined): string[] {
-  if (!input) return []
-  return input
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-}
-
 /** Strict parser: throws on an invalid or non-commit ref. */
 export function parseConfiguredPreviewRefs(
   input: string | undefined,
 ): ParsedPreviewRef[] {
-  return splitRefs(input).map((value) => {
+  return splitCsv(input).map((value) => {
     const ref = parseSingleRef(value)
     if (!ref) {
       throw new Error(
