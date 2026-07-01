@@ -1,6 +1,9 @@
 import { HttpError } from '../httpError'
 
-async function fetchUpstream(url: string, maxBytes: number) {
+async function fetchUpstream(
+  url: string,
+  maxBytes: number,
+): Promise<{ body: ReadableStream<Uint8Array>; declaredLength: number | null }> {
   const res = await fetch(url, {
     headers: {
       accept: 'application/octet-stream',
@@ -16,11 +19,21 @@ async function fetchUpstream(url: string, maxBytes: number) {
     throw new HttpError(502, `Failed to fetch upstream tarball (${res.status})`)
   }
 
-  const declared = Number(res.headers.get('content-length') ?? '')
-  if (Number.isFinite(declared) && declared > maxBytes) {
+  const header = res.headers.get('content-length')
+  const declared = header !== null ? Number(header) : NaN
+  const valid = Number.isFinite(declared) && declared >= 0
+  if (valid && declared > maxBytes) {
     throw new HttpError(413, 'Upstream tarball exceeds the maximum size')
   }
-  return res.body
+  return { body: res.body, declaredLength: valid ? declared : null }
+}
+
+/** Cancel the reader and reject for exceeding `maxBytes`. Never returns. */
+async function rejectOversized(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): Promise<never> {
+  await reader.cancel()
+  throw new HttpError(413, 'Upstream tarball exceeds the maximum size')
 }
 
 /**
@@ -32,9 +45,32 @@ export async function fetchUpstreamTarball(
   url: string,
   maxBytes: number,
 ): Promise<Uint8Array> {
-  const body = await fetchUpstream(url, maxBytes)
-
+  const { body, declaredLength } = await fetchUpstream(url, maxBytes)
   const reader = body.getReader()
+
+  // `Content-Length` is already known (and within bounds) here, so stream
+  // straight into one pre-sized buffer instead of collecting per-chunk arrays
+  // and copying them all into a second, final buffer (halves peak memory for
+  // this, the common, case).
+  if (declaredLength !== null) {
+    const out = new Uint8Array(declaredLength)
+    let offset = 0
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (offset + value.byteLength > declaredLength) {
+        return rejectOversized(reader)
+      }
+      out.set(value, offset)
+      offset += value.byteLength
+    }
+    // A short read (fewer bytes than declared) copies down to the actual
+    // size, so the oversized backing buffer can be GC'd instead of kept alive
+    // by a `subarray` view over it; the common, fully-filled case above
+    // returns `out` itself with no extra copy.
+    return offset === declaredLength ? out : out.slice(0, offset)
+  }
+
   const chunks: Uint8Array[] = []
   let total = 0
   for (;;) {
@@ -42,8 +78,7 @@ export async function fetchUpstreamTarball(
     if (done) break
     total += value.byteLength
     if (total > maxBytes) {
-      await reader.cancel()
-      throw new HttpError(413, 'Upstream tarball exceeds the maximum size')
+      return rejectOversized(reader)
     }
     chunks.push(value)
   }

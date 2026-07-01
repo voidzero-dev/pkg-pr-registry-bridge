@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   isPreviewVersion,
   parsePreviewVersion,
@@ -25,6 +25,8 @@ import {
 } from '../src/security/validateTarballPath'
 import { buildVersionMetadata } from '../src/registry/buildVersionMetadata'
 import { computeDigests } from '../src/tarball/digests'
+import { fetchUpstreamTarball } from '../src/tarball/fetchUpstreamTarball'
+import { HttpError } from '../src/httpError'
 import type { Env } from '../src/config'
 
 const env = {
@@ -358,5 +360,64 @@ describe('computeDigests', () => {
     expect(d.integrity).toMatch(/^sha512-[A-Za-z0-9+/]+=*$/)
     const again = await computeDigests(data)
     expect(again.integrity).toBe(d.integrity)
+  })
+})
+
+describe('fetchUpstreamTarball', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  /**
+   * Stub global fetch to return a multi-chunk stream (so both the pre-sized
+   * and fallback paths do >1 read()), optionally with response headers.
+   */
+  function mockUpstream(chunks: Uint8Array[], headers?: HeadersInit): void {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(chunk)
+        controller.close()
+      },
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(stream, { headers })),
+    )
+  }
+
+  async function expectTooLarge(promise: Promise<unknown>): Promise<void> {
+    await expect(promise).rejects.toMatchObject({
+      status: 413,
+    } satisfies Partial<HttpError>)
+  }
+
+  it('streams into a pre-sized buffer when Content-Length is present', async () => {
+    mockUpstream(
+      [new Uint8Array([1, 2, 3]), new Uint8Array([4, 5])],
+      { 'content-length': '5' },
+    )
+    const out = await fetchUpstreamTarball('https://example.com/t.tgz', 1024)
+    expect(Array.from(out)).toEqual([1, 2, 3, 4, 5])
+  })
+
+  it('falls back to chunk collection when Content-Length is absent', async () => {
+    mockUpstream([new Uint8Array([9, 8, 7]), new Uint8Array([6])])
+    const out = await fetchUpstreamTarball('https://example.com/t.tgz', 1024)
+    expect(Array.from(out)).toEqual([9, 8, 7, 6])
+  })
+
+  it('rejects a declared Content-Length over the max', async () => {
+    mockUpstream([new Uint8Array([1])], { 'content-length': '2000' })
+    await expectTooLarge(fetchUpstreamTarball('https://example.com/t.tgz', 1024))
+  })
+
+  it('rejects when the body exceeds a Content-Length that understated it', async () => {
+    mockUpstream([new Uint8Array([1, 2, 3, 4])], { 'content-length': '2' })
+    await expectTooLarge(fetchUpstreamTarball('https://example.com/t.tgz', 1024))
+  })
+
+  it('rejects a body exceeding the max with no Content-Length', async () => {
+    mockUpstream([new Uint8Array(2000)])
+    await expectTooLarge(fetchUpstreamTarball('https://example.com/t.tgz', 1024))
   })
 })
