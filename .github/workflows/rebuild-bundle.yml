@@ -1,0 +1,63 @@
+name: Rebuild action bundle
+
+# The `needs-bundle-rebuild` label (Renovate adds it for bumps to deps compiled
+# into the publish-action bundle) triggers a rebuild of the bundle and a push of
+# the refreshed dist, so the "Verify action bundle" check passes without a manual
+# `pnpm build:action`.
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rebuild-bundle-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  rebuild:
+    name: rebuild bundle
+    # Only for our label, and only same-repo branches we can push back to
+    # (Renovate PRs are same-repo; fork PRs can't be pushed to).
+    if: >-
+      github.event.label.name == 'needs-bundle-rebuild' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      # Actions are pinned to a full commit SHA (org policy).
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          # Prefer a PAT/App token so the follow-up push re-triggers the PR's
+          # required checks (a push with the default GITHUB_TOKEN does not). Falls
+          # back to GITHUB_TOKEN, which still commits the fresh dist but won't
+          # re-run CI, so the check needs a manual nudge.
+          token: ${{ secrets.BUNDLE_REBUILD_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Rebuild the action bundle
+        run: pnpm build:action
+
+      - name: Commit and push the rebuilt bundle if it changed
+        run: |
+          if git diff --quiet -- .github/actions/publish-preview/dist; then
+            echo "Bundle already up to date; nothing to push."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/actions/publish-preview/dist
+          git commit -m "Rebuild publish-action bundle for dependency update"
+          git push
