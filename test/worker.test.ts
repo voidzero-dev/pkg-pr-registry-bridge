@@ -270,38 +270,54 @@ describe('packument endpoint', () => {
     expect(abbreviatedFetches - before).toBeLessThanOrEqual(1)
   })
 
-  it('injects a version from the meta aggregate, not the per-version key', async () => {
-    // Publish a ref (writes both the per-version metaKey and the meta-index
-    // aggregate), then delete the per-version key. The packument must still list
-    // the version, sourced from the aggregate it reads in one shot , if it were
-    // still reading per-version keys, the on-demand fallback would fail here (no
-    // mock tarball) and the version would drop.
-    const sha = 'ababab0'
-    const ver = `0.0.0-commit.${sha}`
-    const pub = await SELF.fetch(`${BASE}/-/publish`, {
-      method: 'POST',
-      headers: { ...AUTH, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        ref: `commit.${sha}`,
-        packages: [
-          {
-            name: 'vite-plus',
-            version: ver,
-            packageJson: { name: 'vite-plus', version: ver },
-            integrity: 'sha512-ab',
-            shasum: 'ab',
-          },
-        ],
-      }),
-    })
-    expect(pub.status).toBe(201)
-    await env.STORAGE.delete(metaKey('vite-plus', ver))
+  it('accumulates every published version, served from the aggregate (continuous releases)', async () => {
+    // Publish versions one after another, deleting each per-version key so the
+    // aggregate is the ONLY source. After each release the packument must list
+    // every preview version so far (the beforeEach fixture ref plus the ones
+    // published here) and the count must match, proving the aggregate accumulates
+    // unboundedly and is what the packument reads , if it fell back to per-version
+    // keys, the on-demand build would fail for these shas (no mock tarball) and
+    // versions would drop.
+    const previewCount = (body: Record<string, any>) =>
+      Object.keys(body.versions).filter((v) =>
+        v.startsWith('0.0.0-commit.'),
+      ).length
 
-    const res = await SELF.fetch(`${BASE}/vite-plus`, {
-      headers: { accept: 'application/json' },
-    })
-    const body = (await res.json()) as Record<string, any>
-    expect(body.versions[ver]?.dist?.integrity).toBe('sha512-ab')
+    const published: string[] = []
+    for (let i = 1; i <= 10; i++) {
+      const sha = `f1${String(i).padStart(5, '0')}`
+      const ver = `0.0.0-commit.${sha}`
+      const pub = await SELF.fetch(`${BASE}/-/publish`, {
+        method: 'POST',
+        headers: { ...AUTH, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ref: `commit.${sha}`,
+          packages: [
+            {
+              name: 'vite-plus',
+              version: ver,
+              packageJson: { name: 'vite-plus', version: ver },
+              integrity: `sha512-${sha}`,
+              shasum: sha,
+            },
+          ],
+        }),
+      })
+      expect(pub.status).toBe(201)
+      await env.STORAGE.delete(metaKey('vite-plus', ver))
+      published.push(ver)
+
+      const body = (await (
+        await SELF.fetch(`${BASE}/vite-plus`, {
+          headers: { accept: 'application/json' },
+        })
+      ).json()) as Record<string, any>
+      for (const v of published) {
+        expect(body.versions[v]?.dist?.integrity).toBeTruthy()
+      }
+      // The fixture ref (commit.a832a55) plus everything published so far.
+      expect(previewCount(body)).toBe(1 + published.length)
+    }
   })
 
   it('rebuilds a cached packument when a ref is published (output cache invalidates on etag)', async () => {
