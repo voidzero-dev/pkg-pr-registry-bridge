@@ -56,6 +56,14 @@ const UNPUBLISHED_PREVIEW_TIME = '2020-01-01T00:00:00.000Z'
 const PACKUMENT_OUT_PREFIX = 'pkgt/'
 const PACKUMENT_OUT_TTL_S = 60
 
+// Early-warning threshold for the packument rebuild's subrequest count. Each
+// rebuild issues ~3 + one-per-ref R2 reads; Cloudflare caps subrequests per
+// request (50 on most plans, 1000 on unbound). Log before that ceiling is close
+// so the fan-out can be addressed (e.g. a per-package meta aggregate) before a
+// cold packument request could ever hit the cap. Rebuilds are rare (F5 output
+// cache), so this stays quiet until the active-ref set is genuinely large.
+const MANY_REFS_WARN = 40
+
 /** Build the packument HTTP response from an already-serialized body. */
 function packumentResponse(body: string): Response {
   return new Response(body, {
@@ -385,6 +393,11 @@ app.get('*', async (c) => {
     // concurrently; each writes a distinct version/time key, and a failing ref is
     // isolated so it can't break installs of the package's other versions. After
     // the deploy-time warm step these are R2 hits and don't touch upstream.
+    if (refs.length > MANY_REFS_WARN) {
+      console.warn(
+        `packument ${name}: rebuilding with ${refs.length} refs (~${refs.length + 3} subrequests); nearing the CF subrequest cap`,
+      )
+    }
     await Promise.all(
       refs.map(async (ref) => {
         try {
