@@ -19,6 +19,15 @@ export function metaKey(name: string, version: string): string {
 }
 
 /**
+ * Per-package aggregate of every active version's meta (`version -> meta`), so
+ * the packument reads ONE object instead of one `metaKey` per configured ref.
+ * Keeps the packument rebuild's subrequest count flat as refs accumulate.
+ */
+export function metaIndexKey(name: string): string {
+  return `meta-index/${name}.json`
+}
+
+/**
  * The single object holding the runtime-registered preview refs. Read on every
  * packument request (a cheap R2 get, not a KV list, which is rate-limited).
  */

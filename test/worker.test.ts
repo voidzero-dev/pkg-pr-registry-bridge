@@ -1,4 +1,5 @@
-import { SELF } from 'cloudflare:test'
+import { SELF, env } from 'cloudflare:test'
+import { metaIndexKey, metaKey } from '../src/cache/r2Cache'
 import {
   afterAll,
   beforeAll,
@@ -267,6 +268,40 @@ describe('packument endpoint', () => {
     await get()
     await get()
     expect(abbreviatedFetches - before).toBeLessThanOrEqual(1)
+  })
+
+  it('injects a version from the meta aggregate, not the per-version key', async () => {
+    // Publish a ref (writes both the per-version metaKey and the meta-index
+    // aggregate), then delete the per-version key. The packument must still list
+    // the version, sourced from the aggregate it reads in one shot , if it were
+    // still reading per-version keys, the on-demand fallback would fail here (no
+    // mock tarball) and the version would drop.
+    const sha = 'ababab0'
+    const ver = `0.0.0-commit.${sha}`
+    const pub = await SELF.fetch(`${BASE}/-/publish`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ref: `commit.${sha}`,
+        packages: [
+          {
+            name: 'vite-plus',
+            version: ver,
+            packageJson: { name: 'vite-plus', version: ver },
+            integrity: 'sha512-ab',
+            shasum: 'ab',
+          },
+        ],
+      }),
+    })
+    expect(pub.status).toBe(201)
+    await env.STORAGE.delete(metaKey('vite-plus', ver))
+
+    const res = await SELF.fetch(`${BASE}/vite-plus`, {
+      headers: { accept: 'application/json' },
+    })
+    const body = (await res.json()) as Record<string, any>
+    expect(body.versions[ver]?.dist?.integrity).toBe('sha512-ab')
   })
 
   it('rebuilds a cached packument when a ref is published (output cache invalidates on etag)', async () => {
@@ -955,6 +990,39 @@ describe('admin: purge', () => {
     expect((await res.json()) as any).toMatchObject({
       purged: { package: 'vite-plus', version: '0.0.0-commit.a832a55' },
     })
+  })
+
+  it('drops the purged version from the meta aggregate', async () => {
+    const sha = 'cdcdcd0'
+    const ver = `0.0.0-commit.${sha}`
+    await SELF.fetch(`${BASE}/-/publish`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ref: `commit.${sha}`,
+        packages: [
+          {
+            name: 'vite-plus',
+            version: ver,
+            packageJson: { name: 'vite-plus', version: ver },
+            integrity: 'sha512-cd',
+            shasum: 'cd',
+          },
+        ],
+      }),
+    })
+    const readIndex = async () =>
+      (await (await env.STORAGE.get(metaIndexKey('vite-plus')))?.json()) as
+        | Record<string, unknown>
+        | undefined
+    expect((await readIndex())?.[ver]).toBeTruthy()
+
+    await SELF.fetch(`${BASE}/-/purge`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({ package: 'vite-plus', version: ver }),
+    })
+    expect((await readIndex())?.[ver]).toBeUndefined()
   })
 })
 

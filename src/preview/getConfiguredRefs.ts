@@ -7,6 +7,7 @@ import {
   type ParsedPreviewRef,
 } from './parseConfiguredPreviewRefs'
 import { REFS_INDEX_KEY } from '../cache/r2Cache'
+import { casR2Json } from '../cache/r2Cas'
 
 // Runtime-registered refs live in ONE R2 object, read on every packument request
 // with a cheap `get`. The earlier design stored one KV key per ref and read them
@@ -15,8 +16,7 @@ import { REFS_INDEX_KEY } from '../cache/r2Cache'
 // blew through it. Updates use R2 conditional puts (etag compare-and-swap) so
 // concurrent registrations can't clobber each other, the concurrency safety the
 // per-key KV layout was providing, without any `list`.
-const REF_TTL_MS = 90 * 24 * 60 * 60 * 1000
-const MAX_CAS_ATTEMPTS = 6
+export const REF_TTL_MS = 90 * 24 * 60 * 60 * 1000
 
 /** Per-ref runtime state: expiry plus optional publish time and PR url. */
 type RefEntry = { expiresAt: number; publishedAt?: string; prUrl?: string }
@@ -46,25 +46,13 @@ async function mutateRefIndex(
   env: Env,
   mutate: (index: RefIndex) => void,
 ): Promise<void> {
-  for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
-    const { index, etag } = await readRefIndex(env)
+  await casR2Json<RefIndex>(env, REFS_INDEX_KEY, (index) => {
     const now = Date.now()
     for (const key of Object.keys(index)) {
       if (index[key].expiresAt <= now) delete index[key]
     }
     mutate(index)
-    const written = await env.STORAGE.put(
-      REFS_INDEX_KEY,
-      JSON.stringify(index),
-      {
-        onlyIf: etag ? { etagMatches: etag } : { etagDoesNotMatch: '*' },
-        httpMetadata: { contentType: 'application/json' },
-      },
-    )
-    if (written !== null) return
-    // A concurrent writer won the race; re-read the new state and retry.
-  }
-  throw new Error('Could not update the refs index (R2 write contention)')
+  })
 }
 
 /**
