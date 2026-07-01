@@ -1,5 +1,7 @@
 import { SELF, env } from 'cloudflare:test'
 import { metaIndexKey, metaKey } from '../src/cache/r2Cache'
+import { cleanupExpiredArtifacts } from '../src/preview/cleanupExpired'
+import { REF_TTL_MS } from '../src/preview/getConfiguredRefs'
 import {
   afterAll,
   beforeAll,
@@ -1092,5 +1094,37 @@ describe('health', () => {
     const res = await SELF.fetch(`${BASE}/_health`)
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ status: 'ok' })
+  })
+})
+
+describe('cleanup of expired artifacts (scheduled)', () => {
+  it('deletes per-version meta + tarball past the ref TTL', async () => {
+    await env.STORAGE.put('meta/vite-plus/0.0.0-commit.old00001.json', '{}')
+    await env.STORAGE.put('tarball/vite-plus/0.0.0-commit.old00001.tgz', 'x')
+    // A future "now" makes every object older than the TTL, so all are expired.
+    const { deleted } = await cleanupExpiredArtifacts(
+      env,
+      Date.now() + 2 * REF_TTL_MS,
+    )
+    expect(deleted).toBeGreaterThanOrEqual(2)
+    expect(
+      await env.STORAGE.get('meta/vite-plus/0.0.0-commit.old00001.json'),
+    ).toBeNull()
+    expect(
+      await env.STORAGE.get('tarball/vite-plus/0.0.0-commit.old00001.tgz'),
+    ).toBeNull()
+  })
+
+  it('keeps artifacts within the TTL and never touches the indexes', async () => {
+    await env.STORAGE.put('meta/vite-plus/0.0.0-commit.fresh001.json', '{}')
+    // beforeEach published commit.a832a55, so the refs + meta indexes exist.
+    const { deleted } = await cleanupExpiredArtifacts(env) // now = Date.now()
+    expect(deleted).toBe(0)
+    expect(
+      await env.STORAGE.get('meta/vite-plus/0.0.0-commit.fresh001.json'),
+    ).not.toBeNull()
+    // The live indexes live under different prefixes and must be untouched.
+    expect(await env.STORAGE.get('refs/index.json')).not.toBeNull()
+    expect(await env.STORAGE.get(metaIndexKey('vite-plus'))).not.toBeNull()
   })
 })
