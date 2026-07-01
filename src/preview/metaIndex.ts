@@ -1,30 +1,41 @@
 import type { Env } from '../config'
 import type { PreviewMeta } from '../tarball/buildPreviewTarball'
 import { metaIndexKey } from '../cache/r2Cache'
-import { casR2Json } from '../cache/r2Cas'
+import { casR2Json, readR2Json } from '../cache/r2Cas'
 import { REF_TTL_MS } from './getConfiguredRefs'
 
-/** A version's immutable meta plus the same TTL its ref carries (for pruning). */
-type MetaIndexEntry = { meta: PreviewMeta; expiresAt: number }
-/** `0.0.0-commit.<sha>` -> its meta. */
-export type MetaIndex = Record<string, MetaIndexEntry>
+/** `0.0.0-commit.<sha>` -> its immutable meta (the same value stored at `metaKey`). */
+export type MetaIndex = Record<string, PreviewMeta>
 
 /**
- * The package's meta aggregate (`version -> meta`), read once by the packument
- * instead of one `metaKey` per ref. Empty on absence or a parse error, so the
- * caller falls back to the per-version key.
+ * The package's meta aggregate, read once by the packument instead of one
+ * `metaKey` per ref. Empty on absence or a parse error, so the caller falls back
+ * to the per-version key.
  */
 export async function readMetaIndex(env: Env, name: string): Promise<MetaIndex> {
-  const obj = await env.STORAGE.get(metaIndexKey(name))
-  if (!obj) return {}
-  return obj.json<MetaIndex>().catch(() => ({}))
+  return (await readR2Json<MetaIndex>(env, metaIndexKey(name))).value
 }
 
 /**
- * Add (or refresh) a version's meta in the package aggregate, pruning entries
- * whose TTL has passed so the object stays bounded to the active ref window.
- * Concurrency-safe via the conditional put; publishes of different packages hit
- * different keys, so they never contend.
+ * Drop entries whose ref TTL has passed, so the object stays bounded to the
+ * active-ref window. The bound is derived from each meta's own `publishedAt`
+ * (which is `now` at publish, the same instant the ref's TTL starts), so the
+ * aggregate needs no separate expiry field; an unparseable/absent time prunes
+ * (the packument fallback still covers such a version via its per-version key).
+ */
+function pruneExpired(index: MetaIndex): void {
+  const cutoff = Date.now() - REF_TTL_MS
+  for (const version of Object.keys(index)) {
+    if (!(Date.parse(index[version].publishedAt ?? '') > cutoff)) {
+      delete index[version]
+    }
+  }
+}
+
+/**
+ * Add (or refresh) a version's meta in the package aggregate, pruning expired
+ * entries. Concurrency-safe via the conditional put; publishes of different
+ * packages hit different keys, so they never contend.
  */
 export async function upsertMetaIndex(
   env: Env,
@@ -33,11 +44,8 @@ export async function upsertMetaIndex(
   meta: PreviewMeta,
 ): Promise<void> {
   await casR2Json<MetaIndex>(env, metaIndexKey(name), (index) => {
-    const now = Date.now()
-    for (const v of Object.keys(index)) {
-      if (index[v].expiresAt <= now) delete index[v]
-    }
-    index[version] = { meta, expiresAt: now + REF_TTL_MS }
+    pruneExpired(index)
+    index[version] = meta
   })
 }
 

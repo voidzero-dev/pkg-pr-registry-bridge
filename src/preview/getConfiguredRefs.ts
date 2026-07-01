@@ -7,7 +7,7 @@ import {
   type ParsedPreviewRef,
 } from './parseConfiguredPreviewRefs'
 import { REFS_INDEX_KEY } from '../cache/r2Cache'
-import { casR2Json } from '../cache/r2Cas'
+import { casR2Json, readR2Json } from '../cache/r2Cas'
 
 // Runtime-registered refs live in ONE R2 object, read on every packument request
 // with a cheap `get`. The earlier design stored one KV key per ref and read them
@@ -25,15 +25,6 @@ type RefIndex = Record<string, RefEntry>
 
 function canonical(ref: ParsedPreviewRef): string {
   return `${ref.type}.${ref.ref}`
-}
-
-async function readRefIndex(
-  env: Env,
-): Promise<{ index: RefIndex; etag: string | null }> {
-  const obj = await env.STORAGE.get(REFS_INDEX_KEY)
-  if (!obj) return { index: {}, etag: null }
-  const index = await obj.json<RefIndex>().catch(() => ({}) as RefIndex)
-  return { index, etag: obj.etag }
 }
 
 /**
@@ -68,7 +59,10 @@ export async function getConfiguredRefsWithEtag(
   let etag: string | null = null
   const refs: ConfiguredPreviewRef[] = []
   try {
-    const { index, etag: indexEtag } = await readRefIndex(env)
+    const { value: index, etag: indexEtag } = await readR2Json<RefIndex>(
+      env,
+      REFS_INDEX_KEY,
+    )
     etag = indexEtag
     const now = Date.now()
     // Each index entry is already in hand here, so attach its runtime state

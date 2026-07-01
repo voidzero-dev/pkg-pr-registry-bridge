@@ -397,16 +397,18 @@ app.get('*', async (c) => {
     const time: Record<string, string> = npmTime
     packument.time = time
 
-    // Inject each configured ref from the meta aggregate read above. A ref not
-    // yet in the aggregate (published before it existed) falls back to its
-    // per-version key; that path fades as such refs republish or expire. A
-    // failing ref is isolated so it can't break installs of the package's other
-    // versions.
+    // Inject each configured ref from the meta aggregate read above. A ref
+    // missing from the aggregate falls back to its per-version key: this covers
+    // both refs published before the aggregate existed (fades as they republish
+    // or expire within REF_TTL_MS) and an absent/corrupt aggregate (readMetaIndex
+    // returns {}), so the fallback is a permanent degraded path, not just a
+    // migration artifact. A failing ref is isolated so it can't break installs of
+    // the package's other versions.
     await Promise.all(
       refs.map(async (ref) => {
         try {
           const preview =
-            metaIndex[ref.version]?.meta ??
+            metaIndex[ref.version] ??
             (await getPreviewMeta(c.env, name, ref.version))
           packument.versions[ref.version] = buildVersionMetadata(
             c.env,
