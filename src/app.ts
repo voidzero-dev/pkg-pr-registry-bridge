@@ -15,6 +15,11 @@ import {
   registerRef,
 } from './preview/getConfiguredRefs'
 import {
+  readMetaIndex,
+  removeFromMetaIndex,
+  upsertMetaIndex,
+} from './preview/metaIndex'
+import {
   parseNpmTarballPath,
   parsePackagePath,
   parsePkgPrNewDownload,
@@ -55,14 +60,6 @@ const UNPUBLISHED_PREVIEW_TIME = '2020-01-01T00:00:00.000Z'
 // from the etag, not the TTL).
 const PACKUMENT_OUT_PREFIX = 'pkgt/'
 const PACKUMENT_OUT_TTL_S = 60
-
-// Early-warning threshold for the packument rebuild's subrequest count. Each
-// rebuild issues ~3 + one-per-ref R2 reads; Cloudflare caps subrequests per
-// request (50 on most plans, 1000 on unbound). Log before that ceiling is close
-// so the fan-out can be addressed (e.g. a per-package meta aggregate) before a
-// cold packument request could ever hit the cap. Rebuilds are rare (F5 output
-// cache), so this stays quiet until the active-ref set is genuinely large.
-const MANY_REFS_WARN = 40
 
 /** Build the packument HTTP response from an already-serialized body. */
 function packumentResponse(body: string): Response {
@@ -242,7 +239,7 @@ app.post('/-/publish', async (c) => {
   // time is ignored.
   const publishedAt = new Date().toISOString()
   const published = await Promise.all(
-    packages.map((pkg) => {
+    packages.map(async (pkg) => {
       const name = pkg.name!
       const version = pkg.version!
       const meta: PreviewMeta = {
@@ -251,12 +248,19 @@ app.post('/-/publish', async (c) => {
         integrity: pkg.integrity ?? '',
         publishedAt,
       }
-      return c.env.STORAGE.put(metaKey(name, version), JSON.stringify(meta), {
-        httpMetadata: {
-          contentType: 'application/json',
-          cacheControl: tarballCacheControl(),
-        },
-      }).then(() => `${name}@${version}`)
+      // `metaKey` is the per-version source of truth (and the packument's
+      // migration fallback); the meta-index is the per-package aggregate the
+      // packument reads in one shot regardless of how many refs exist.
+      await Promise.all([
+        c.env.STORAGE.put(metaKey(name, version), JSON.stringify(meta), {
+          httpMetadata: {
+            contentType: 'application/json',
+            cacheControl: tarballCacheControl(),
+          },
+        }),
+        upsertMetaIndex(c.env, name, version, meta),
+      ])
+      return `${name}@${version}`
     }),
   )
 
@@ -309,6 +313,7 @@ app.post('/-/purge', async (c) => {
   await Promise.all([
     c.env.STORAGE.delete(tarballKey(name, version)),
     c.env.STORAGE.delete(metaKey(name, version)),
+    removeFromMetaIndex(c.env, name, version),
   ])
   return c.json({ purged: { package: name, version } })
 })
@@ -365,13 +370,16 @@ app.get('*', async (c) => {
   const cacheKey = `${PACKUMENT_OUT_PREFIX}${name}/${etag ?? 'none'}`
 
   const body = await kvCachedText(c.env, cacheKey, PACKUMENT_OUT_TTL_S, async () => {
-    // Miss: the npm packument fetch and the npm `time` fetch are independent, so
-    // overlap them. `time` comes from npm's FULL packument (the abbreviated form
-    // we serve omits it) but is sourced separately so the served response keeps
-    // the compact abbreviated version docs.
-    const [base, npmTime] = await Promise.all([
+    // Miss: the npm packument fetch, the npm `time` fetch, and the per-package
+    // meta aggregate are independent, so overlap them. `time` comes from npm's
+    // FULL packument (the abbreviated form we serve omits it) but is sourced
+    // separately so the served response keeps the compact abbreviated version
+    // docs. `metaIndex` is read ONCE here instead of one key per ref, so this
+    // rebuild's subrequest count stays flat no matter how many refs exist.
+    const [base, npmTime, metaIndex] = await Promise.all([
       getNpmPackumentCached(c.env, name),
       getNpmTimeCached(c.env, name),
+      readMetaIndex(c.env, name),
     ])
 
     const packument: Record<string, any> =
@@ -389,19 +397,19 @@ app.get('*', async (c) => {
     const time: Record<string, string> = npmTime
     packument.time = time
 
-    // Inject each configured ref. The R2 meta reads are independent, so run them
-    // concurrently; each writes a distinct version/time key, and a failing ref is
-    // isolated so it can't break installs of the package's other versions. After
-    // the deploy-time warm step these are R2 hits and don't touch upstream.
-    if (refs.length > MANY_REFS_WARN) {
-      console.warn(
-        `packument ${name}: rebuilding with ${refs.length} refs (~${refs.length + 3} subrequests); nearing the CF subrequest cap`,
-      )
-    }
+    // Inject each configured ref from the meta aggregate read above. A ref
+    // missing from the aggregate falls back to its per-version key: this covers
+    // both refs published before the aggregate existed (fades as they republish
+    // or expire within REF_TTL_MS) and an absent/corrupt aggregate (readMetaIndex
+    // returns {}), so the fallback is a permanent degraded path, not just a
+    // migration artifact. A failing ref is isolated so it can't break installs of
+    // the package's other versions.
     await Promise.all(
       refs.map(async (ref) => {
         try {
-          const preview = await getPreviewMeta(c.env, name, ref.version)
+          const preview =
+            metaIndex[ref.version] ??
+            (await getPreviewMeta(c.env, name, ref.version))
           packument.versions[ref.version] = buildVersionMetadata(
             c.env,
             name,

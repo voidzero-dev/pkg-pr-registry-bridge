@@ -1,4 +1,5 @@
-import { SELF } from 'cloudflare:test'
+import { SELF, env } from 'cloudflare:test'
+import { metaIndexKey, metaKey } from '../src/cache/r2Cache'
 import {
   afterAll,
   beforeAll,
@@ -267,6 +268,56 @@ describe('packument endpoint', () => {
     await get()
     await get()
     expect(abbreviatedFetches - before).toBeLessThanOrEqual(1)
+  })
+
+  it('accumulates every published version, served from the aggregate (continuous releases)', async () => {
+    // Publish versions one after another, deleting each per-version key so the
+    // aggregate is the ONLY source. After each release the packument must list
+    // every preview version so far (the beforeEach fixture ref plus the ones
+    // published here) and the count must match, proving the aggregate accumulates
+    // unboundedly and is what the packument reads , if it fell back to per-version
+    // keys, the on-demand build would fail for these shas (no mock tarball) and
+    // versions would drop.
+    const previewCount = (body: Record<string, any>) =>
+      Object.keys(body.versions).filter((v) =>
+        v.startsWith('0.0.0-commit.'),
+      ).length
+
+    const published: string[] = []
+    for (let i = 1; i <= 10; i++) {
+      const sha = `f1${String(i).padStart(5, '0')}`
+      const ver = `0.0.0-commit.${sha}`
+      const pub = await SELF.fetch(`${BASE}/-/publish`, {
+        method: 'POST',
+        headers: { ...AUTH, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ref: `commit.${sha}`,
+          packages: [
+            {
+              name: 'vite-plus',
+              version: ver,
+              packageJson: { name: 'vite-plus', version: ver },
+              integrity: `sha512-${sha}`,
+              shasum: sha,
+            },
+          ],
+        }),
+      })
+      expect(pub.status).toBe(201)
+      await env.STORAGE.delete(metaKey('vite-plus', ver))
+      published.push(ver)
+
+      const body = (await (
+        await SELF.fetch(`${BASE}/vite-plus`, {
+          headers: { accept: 'application/json' },
+        })
+      ).json()) as Record<string, any>
+      for (const v of published) {
+        expect(body.versions[v]?.dist?.integrity).toBeTruthy()
+      }
+      // The fixture ref (commit.a832a55) plus everything published so far.
+      expect(previewCount(body)).toBe(1 + published.length)
+    }
   })
 
   it('rebuilds a cached packument when a ref is published (output cache invalidates on etag)', async () => {
@@ -955,6 +1006,39 @@ describe('admin: purge', () => {
     expect((await res.json()) as any).toMatchObject({
       purged: { package: 'vite-plus', version: '0.0.0-commit.a832a55' },
     })
+  })
+
+  it('drops the purged version from the meta aggregate', async () => {
+    const sha = 'cdcdcd0'
+    const ver = `0.0.0-commit.${sha}`
+    await SELF.fetch(`${BASE}/-/publish`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ref: `commit.${sha}`,
+        packages: [
+          {
+            name: 'vite-plus',
+            version: ver,
+            packageJson: { name: 'vite-plus', version: ver },
+            integrity: 'sha512-cd',
+            shasum: 'cd',
+          },
+        ],
+      }),
+    })
+    const readIndex = async () =>
+      (await (await env.STORAGE.get(metaIndexKey('vite-plus')))?.json()) as
+        | Record<string, unknown>
+        | undefined
+    expect((await readIndex())?.[ver]).toBeTruthy()
+
+    await SELF.fetch(`${BASE}/-/purge`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({ package: 'vite-plus', version: ver }),
+    })
+    expect((await readIndex())?.[ver]).toBeUndefined()
   })
 })
 
