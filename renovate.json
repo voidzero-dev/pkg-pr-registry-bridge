@@ -7,5 +7,22 @@
     "minimumReleaseAge keeps Renovate from proposing a version newer than pnpm's minimum-release-age cooldown. pnpm 11 enforces a 1-day supply-chain policy on `pnpm install --frozen-lockfile`, so a same-day bump writes a too-new lockfile entry and CI fails with ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION. 3 days clears the 1-day floor with margin. internalChecksFilter=strict holds such an update until it ages in, instead of opening a red PR."
   ],
   "minimumReleaseAge": "3 days",
-  "internalChecksFilter": "strict"
+  "internalChecksFilter": "strict",
+  "packageRules": [
+    {
+      "description": [
+        "nanotar (bundled) and esbuild (the bundler) are compiled into the committed publish-action bundle (.github/actions/publish-preview/dist), which CI rebuilds and diff-checks. A bump to either needs `pnpm build:action` re-run and the dist re-committed, so flag those PRs; the 'Verify action bundle' CI check is the backstop for anything else."
+      ],
+      "matchPackageNames": [
+        "nanotar",
+        "esbuild"
+      ],
+      "addLabels": [
+        "needs-bundle-rebuild"
+      ],
+      "prBodyNotes": [
+        "⚠️ This dependency is compiled into the committed publish-action bundle. Run `pnpm build:action` and commit `.github/actions/publish-preview/dist` on this branch, or the \"Verify action bundle\" CI check will fail."
+      ]
+    }
+  ]
 }
