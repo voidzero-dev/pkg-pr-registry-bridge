@@ -15,7 +15,10 @@ if (!base) {
   process.exit(2)
 }
 
-// A configured commit ref (also a valid sha for the download endpoint).
+// Any valid commit sha: the download/HEAD checks resolve a sha to its synthetic
+// version without a registry lookup, so this need not be a registered ref. The
+// packument check relies on npm's stable versions, not a preview ref, so the
+// smoke test does not depend on any ref being registered.
 const SHA = '6acea1aa818e96365b5811d47360367ba18a3a05'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const truncate = (s, n = 300) => (s.length > n ? `${s.slice(0, n)}…` : s)

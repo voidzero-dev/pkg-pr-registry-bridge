@@ -52,23 +52,11 @@ const UNPUBLISHED_PREVIEW_TIME = '2020-01-01T00:00:00.000Z'
 
 // Output cache for the assembled packument. Void does not edge-cache the Worker
 // response, so without this the ~440KB packument is re-assembled and re-stringified
-// on every request. Keyed by the refs-index etag + a hash of the static env refs;
-// a short TTL bounds npm stable-version drift (preview freshness comes from the
-// etag, not the TTL).
+// on every request. Keyed by the refs-index etag, which changes on every ref
+// mutation; a short TTL bounds npm stable-version drift (preview freshness comes
+// from the etag, not the TTL).
 const PACKUMENT_OUT_PREFIX = 'pkgt/'
 const PACKUMENT_OUT_TTL_S = 60
-
-/**
- * Stable short hash of the static env-configured refs (VITE_PLUS_PREVIEW_REFS),
- * folded into the output-cache key. KV persists across deploys, so the key must
- * change when these change; the R2 etag only covers runtime ref changes.
- */
-function hashRefsEnv(refs: string | undefined): string {
-  let h = 5381
-  const s = refs ?? ''
-  for (let i = 0; i < s.length; i++) h = (Math.imul(h, 33) + s.charCodeAt(i)) | 0
-  return (h >>> 0).toString(36)
-}
 
 /** Build the packument HTTP response from an already-serialized body. */
 function packumentResponse(body: string): Response {
@@ -408,7 +396,7 @@ app.get('*', async (c) => {
   // consistent read-after-write, so a just-published preview shows up on the very
   // next request.
   const { refs, etag } = await getConfiguredRefsWithEtag(c.env)
-  const cacheKey = `${PACKUMENT_OUT_PREFIX}${name}/${etag ?? 'none'}.${hashRefsEnv(c.env.VITE_PLUS_PREVIEW_REFS)}`
+  const cacheKey = `${PACKUMENT_OUT_PREFIX}${name}/${etag ?? 'none'}`
 
   const body = await kvCachedText(c.env, cacheKey, PACKUMENT_OUT_TTL_S, async () => {
     // Miss: the npm packument fetch and the npm `time` fetch are independent, so

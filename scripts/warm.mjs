@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// Publish preview refs to the bridge by running the publish action for each one
-// (build + hash + upload the artifacts in Node, then register the ref). This is
-// the same code path vite-plus's CI uses; here it pre-populates the configured
-// static refs as part of `pnpm deploy`.
+// Publish one or more preview refs to the bridge by running the publish action
+// for each (build + hash + upload the artifacts in Node, then register the ref).
+// This is the same code path vite-plus's CI uses; here it's a manual helper to
+// seed or refresh a specific commit (refs are otherwise registered dynamically
+// by CI, so a normal deploy needs no warming).
 //
 // Usage:
-//   node scripts/warm.mjs                    # publish the refs in .env
 //   node scripts/warm.mjs <sha> [<sha>...]   # publish each commit
 //
 // Needs PKG_PR_BRIDGE_ADMIN_TOKEN (or ADMIN_TOKEN) in the environment.
@@ -36,7 +36,7 @@ function publish(sha, bridge) {
   })
 }
 
-const { baseUrl, refs } = readConfig()
+const { baseUrl } = readConfig()
 const bridge = (process.env.BRIDGE_URL || baseUrl || '').replace(/\/+$/, '')
 if (!bridge) {
   console.error('warm: could not determine bridge URL')
@@ -48,8 +48,7 @@ if (!ADMIN_TOKEN) {
 }
 
 const cliArgs = process.argv.slice(2).map((s) => s.trim()).filter(Boolean)
-const source = cliArgs.length > 0 ? cliArgs : refs.split(',')
-const shas = source.map((s) => s.trim()).filter(Boolean).map((raw) => {
+const shas = cliArgs.map((raw) => {
   const sha = normalizeSha(raw)
   if (!sha) {
     console.error(`warm: invalid commit "${raw}" (expected a sha or commit.<sha>)`)
@@ -59,7 +58,7 @@ const shas = source.map((s) => s.trim()).filter(Boolean).map((raw) => {
 })
 
 if (shas.length === 0) {
-  console.log('warm: no preview refs configured; nothing to publish.')
+  console.log('warm: no commit shas given; nothing to publish (refs register dynamically).')
   process.exit(0)
 }
 

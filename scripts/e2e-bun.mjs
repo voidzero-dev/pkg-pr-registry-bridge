@@ -6,10 +6,10 @@
 // installed packages resolved to the synthetic preview version (which only the
 // bridge can serve). Intended to run after every deploy (`pnpm deploy`).
 //
-// Config (all optional; sensible defaults read from .env / .env.production):
-//   BRIDGE_URL         override the bridge origin (default: PUBLIC_BASE_URL)
-//   BRIDGE_E2E_REF     preview ref to test, e.g. `commit.<sha>` (default: first
-//                      of VITE_PLUS_PREVIEW_REFS)
+// Config (all optional):
+//   BRIDGE_URL         override the bridge origin (default: PUBLIC_BASE_URL from .env)
+//   BRIDGE_E2E_REF     preview ref to test, e.g. `commit.<sha>` (default: the
+//                      first ref the bridge currently lists at /-/refs)
 //   BRIDGE_E2E_VERSION explicit synthetic version, e.g. `0.0.0-commit.<sha>`
 //                      (overrides BRIDGE_E2E_REF)
 import { execFileSync } from 'node:child_process'
@@ -31,29 +31,32 @@ async function waitForHealth(base) {
   throw new Error(`bridge health check never passed at ${base}/_health`)
 }
 
+// The synthetic version to validate: an explicit override, else the first ref
+// the live bridge currently lists. Preview refs are registered at runtime (CI /
+// admin), not static config, so the test discovers one from the deployment
+// rather than reading it from `.env`.
+async function resolveVersion(base) {
+  if (process.env.BRIDGE_E2E_VERSION) return process.env.BRIDGE_E2E_VERSION
+  if (process.env.BRIDGE_E2E_REF) return refToVersion(process.env.BRIDGE_E2E_REF)
+  try {
+    const res = await fetch(`${base}/-/refs`)
+    const { refs } = await res.json()
+    const first = Array.isArray(refs) ? refs[0] : null
+    return first?.version ?? (first?.ref ? refToVersion(first.ref) : null)
+  } catch {
+    return null
+  }
+}
+
 const config = readConfig()
 const bridgeUrl = (process.env.BRIDGE_URL || config.baseUrl || '').replace(
   /\/+$/,
   '',
 )
-const ref = (
-  process.env.BRIDGE_E2E_REF ||
-  config.refs.split(',')[0] ||
-  ''
-).trim()
-const version =
-  process.env.BRIDGE_E2E_VERSION || (ref ? refToVersion(ref) : null)
 
 if (!bridgeUrl) {
   console.error('e2e: could not determine bridge URL (set BRIDGE_URL)')
   process.exit(1)
-}
-if (!version) {
-  console.log(
-    'e2e: no preview ref configured (VITE_PLUS_PREVIEW_REFS empty); ' +
-      'nothing to validate, skipping.',
-  )
-  process.exit(0)
 }
 
 try {
@@ -63,8 +66,17 @@ try {
   process.exit(1)
 }
 
-console.log(`e2e: validating ${version} via ${bridgeUrl}`)
 await waitForHealth(bridgeUrl)
+
+const version = await resolveVersion(bridgeUrl)
+if (!version) {
+  console.log(
+    'e2e: no preview ref available on the bridge; nothing to validate, skipping.',
+  )
+  process.exit(0)
+}
+
+console.log(`e2e: validating ${version} via ${bridgeUrl}`)
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-e2e-'))
 let exitCode = 0
