@@ -220,7 +220,7 @@ are uploaded with `void secret put`:
 
 Bindings/secrets:
 
-- `STORAGE` (R2) - generated tarballs, rewritten metadata (incl. integrity), and the runtime-registered refs index. Auto-provisioned by Void on deploy (no manual bucket creation); the binding is declared in `void.json` (`inference.bindings.storage`). The runtime refs index self-expires after 90 days (in-code TTL).
+- `STORAGE` (R2) - generated tarballs, rewritten metadata (incl. integrity), and the runtime-registered refs index. Auto-provisioned by Void on deploy (no manual bucket creation); the binding is declared in `void.json` (`inference.bindings.storage`). The runtime refs index self-expires after 90 days (in-code TTL), and a daily Void cron (`crons/cleanup-expired.ts`) sweeps the per-version meta/tarball objects once their ref TTL lapses, so R2 storage stays bounded to the active-ref window.
 - `ADMIN_TOKEN` (secret) - guards the admin endpoints. Set with `void secret put ADMIN_TOKEN`.
 
 ## Develop

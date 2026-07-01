@@ -21,6 +21,7 @@
   "include": [
     "src",
     "routes",
+    "crons",
     "env.ts",
     "test",
     "vite.config.ts",
