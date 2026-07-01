@@ -328,12 +328,6 @@ var HttpError = class extends Error {
   }
 };
 
-// src/util/splitCsv.ts
-function splitCsv(input2) {
-  if (!input2) return [];
-  return input2.split(",").map((s) => s.trim()).filter(Boolean);
-}
-
 // src/preview/packages.ts
 var PREVIEW_PACKAGES = /* @__PURE__ */ new Set([
   "@voidzero-dev/vite-plus-core",
@@ -342,15 +336,8 @@ var PREVIEW_PACKAGES = /* @__PURE__ */ new Set([
 function isPreviewPackage(name) {
   return PREVIEW_PACKAGES.has(name);
 }
-var patternsMemo;
-function workspacePatterns(raw) {
-  if (patternsMemo?.raw !== raw) {
-    patternsMemo = { raw, patterns: splitCsv(raw) };
-  }
-  return patternsMemo.patterns;
-}
 function isWorkspacePackage(name, env) {
-  const patterns = workspacePatterns(env.WORKSPACE_PACKAGES ?? "");
+  const patterns = (env.WORKSPACE_PACKAGES ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   if (patterns.length === 0) return PREVIEW_PACKAGES.has(name);
   for (const pattern of patterns) {
     if (pattern.endsWith("*")) {
@@ -519,8 +506,12 @@ function parseSingleRef(value) {
     version: commitVersion(commit[1])
   };
 }
+function splitRefs(input2) {
+  if (!input2) return [];
+  return input2.split(",").map((s) => s.trim()).filter(Boolean);
+}
 function parseConfiguredPreviewRefs(input2) {
-  return splitCsv(input2).map((value) => {
+  return splitRefs(input2).map((value) => {
     const ref = parseSingleRef(value);
     if (!ref) {
       throw new Error(
