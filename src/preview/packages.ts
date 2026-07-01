@@ -1,5 +1,3 @@
-import { splitCsv } from '../util/splitCsv'
-
 /**
  * Strict allowlist of packages that may receive synthetic preview versions.
  * Everything else is proxied to npm unchanged. The bridge must never become a
@@ -12,20 +10,6 @@ export const PREVIEW_PACKAGES = new Set<string>([
 
 export function isPreviewPackage(name: string): boolean {
   return PREVIEW_PACKAGES.has(name)
-}
-
-// `WORKSPACE_PACKAGES` is a static Worker var: constant for the isolate's
-// lifetime, but `isWorkspacePackage` is called multiple times per request. A
-// single-entry memo (keyed by the raw string) skips the split/trim/filter
-// allocation on every call while still handling the differing configs each
-// test in this suite passes.
-let patternsMemo: { raw: string; patterns: string[] } | undefined
-
-function workspacePatterns(raw: string): string[] {
-  if (patternsMemo?.raw !== raw) {
-    patternsMemo = { raw, patterns: splitCsv(raw) }
-  }
-  return patternsMemo.patterns
 }
 
 /**
@@ -43,7 +27,10 @@ export function isWorkspacePackage(
   name: string,
   env: { WORKSPACE_PACKAGES?: string },
 ): boolean {
-  const patterns = workspacePatterns(env.WORKSPACE_PACKAGES ?? '')
+  const patterns = (env.WORKSPACE_PACKAGES ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
 
   // Safe fallback if unconfigured: only the synthetic-version packages.
   if (patterns.length === 0) return PREVIEW_PACKAGES.has(name)
