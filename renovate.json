@@ -11,7 +11,7 @@
   "packageRules": [
     {
       "description": [
-        "nanotar (bundled) and esbuild (the bundler) are compiled into the committed publish-action bundle (.github/actions/publish-preview/dist), which CI rebuilds and diff-checks. A bump to either needs `pnpm build:action` re-run and the dist re-committed, so flag those PRs; the 'Verify action bundle' CI check is the backstop for anything else."
+        "nanotar (bundled) and esbuild (the bundler) are compiled into the committed publish-action bundle (.github/actions/publish-preview/dist). A bump to either can change that bundle, so flag those PRs with `needs-bundle-rebuild`, which triggers the rebuild-bundle workflow to re-run `pnpm build:action` and push the refreshed dist; the 'Verify action bundle' CI check is the backstop for anything else."
       ],
       "matchPackageNames": [
         "nanotar",
@@ -21,7 +21,7 @@
         "needs-bundle-rebuild"
       ],
       "prBodyNotes": [
-        "⚠️ This dependency is compiled into the committed publish-action bundle. Run `pnpm build:action` and commit `.github/actions/publish-preview/dist` on this branch, or the \"Verify action bundle\" CI check will fail."
+        "ℹ️ This dependency is compiled into the committed publish-action bundle. The `needs-bundle-rebuild` label triggers a workflow that re-runs `pnpm build:action` and pushes the refreshed `.github/actions/publish-preview/dist` to this branch automatically, so the \"Verify action bundle\" check passes without a manual rebuild. If that push doesn't run (e.g. a fork PR the bot can't push to), rebuild and commit the dist yourself."
       ]
     }
   ]
