@@ -1,5 +1,5 @@
 import {
-  createTarGzip,
+  createTar,
   parseTarGzip,
   type ParsedTarFileItem,
   type TarFileInput,
@@ -11,6 +11,37 @@ import {
   assertSafeTarballPath,
   isUnderPackageRoot,
 } from '../security/validateTarballPath'
+
+/** Two 512-byte blocks: the size of a tar end-of-archive marker. */
+const TAR_MARKER_BYTES = 1024
+
+/**
+ * Guarantee the archive ends with the tar end-of-archive marker (two 512-byte
+ * all-zero blocks). nanotar pads the archive up to a full 10240-byte record and
+ * relies on that zero slack to form the marker, but emits NO slack when the
+ * packed size is already an exact multiple of 10240 (and only a single zero
+ * block when it is 512 short of one). Lenient readers (BSD/GNU tar) tolerate a
+ * missing/short marker, but pnpm's strict extractor then reads a header past
+ * EOF and fails with ERR_PNPM_TARBALL_EXTRACT. Append a clean marker whenever
+ * the last 1024 bytes are not already all zero; a no-op for normal archives.
+ */
+function withEndOfArchiveMarker(tar: Uint8Array): Uint8Array {
+  const hasMarker =
+    tar.length >= TAR_MARKER_BYTES &&
+    tar.subarray(tar.length - TAR_MARKER_BYTES).every((b) => b === 0)
+  if (hasMarker) return tar
+  const out = new Uint8Array(tar.length + TAR_MARKER_BYTES)
+  out.set(tar, 0)
+  return out
+}
+
+/** Gzip a byte buffer using the runtime's CompressionStream (deterministic). */
+async function gzip(data: Uint8Array): Promise<Uint8Array> {
+  const stream = new Response(data).body!.pipeThrough(
+    new CompressionStream('gzip'),
+  )
+  return new Uint8Array(await new Response(stream).arrayBuffer())
+}
 
 export const PACKAGE_JSON_NAMES = new Set([
   'package/package.json',
@@ -116,7 +147,10 @@ export async function buildPreviewTarball(
     })
   }
 
-  const tarball = await createTarGzip(out)
+  // Build the raw tar, ensure it carries the end-of-archive marker (nanotar
+  // can omit it, see withEndOfArchiveMarker), then gzip. Integrity/shasum are
+  // computed over these final bytes, so they always match what is served.
+  const tarball = await gzip(withEndOfArchiveMarker(createTar(out)))
   const { shasum, integrity } = await computeDigests(tarball)
   return { tarball, packageJson: rewritten, shasum, integrity }
 }

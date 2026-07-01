@@ -281,19 +281,6 @@ function createTar(files, opts = {}) {
   }
   return new Uint8Array(buffer);
 }
-function createTarGzipStream(files, opts = {}) {
-  const buffer = createTar(files, opts);
-  return new ReadableStream({
-    start(controller) {
-      controller.enqueue(buffer);
-      controller.close();
-    }
-  }).pipeThrough(new CompressionStream(opts.compression ?? "gzip"));
-}
-async function createTarGzip(files, opts = {}) {
-  const data = await new Response(createTarGzipStream(files, opts)).arrayBuffer().then((buffer) => new Uint8Array(buffer));
-  return data;
-}
 function _writeString(buffer, str, offset, size) {
   const strView = new Uint8Array(buffer, offset, size);
   const te = new TextEncoder();
@@ -449,6 +436,20 @@ function isUnderPackageRoot(name) {
 }
 
 // src/tarball/buildPreviewTarball.ts
+var TAR_MARKER_BYTES = 1024;
+function withEndOfArchiveMarker(tar) {
+  const hasMarker = tar.length >= TAR_MARKER_BYTES && tar.subarray(tar.length - TAR_MARKER_BYTES).every((b) => b === 0);
+  if (hasMarker) return tar;
+  const out = new Uint8Array(tar.length + TAR_MARKER_BYTES);
+  out.set(tar, 0);
+  return out;
+}
+async function gzip(data) {
+  const stream = new Response(data).body.pipeThrough(
+    new CompressionStream("gzip")
+  );
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
 var PACKAGE_JSON_NAMES = /* @__PURE__ */ new Set([
   "package/package.json",
   "./package/package.json"
@@ -484,7 +485,7 @@ async function buildPreviewTarball(gzippedTarball, packageName, version, env) {
       attrs: file.attrs
     });
   }
-  const tarball = await createTarGzip(out);
+  const tarball = await gzip(withEndOfArchiveMarker(createTar(out)));
   const { shasum, integrity } = await computeDigests(tarball);
   return { tarball, packageJson: rewritten, shasum, integrity };
 }
