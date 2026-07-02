@@ -576,24 +576,34 @@ async function main() {
     WORKSPACE_PACKAGES: input("workspace-packages") || "vite-plus,@voidzero-dev/vite-plus-*"
   };
   console.log(`publishing ${version} to ${bridge}`);
-  const packages = [];
-  const buildAndUpload = async (name, ver) => {
+  let published = 0;
+  const postPublish = (body, label) => withRetry(label, async () => {
+    const res = await fetch(`${bridge}/-/publish`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => "")}`);
+  });
+  const publishPackage = async (name, ver) => {
     const upstream = await fetchUpstream(env, name, ver);
     const build = await buildPreviewTarball(upstream, name, ver, env);
     await uploadTarball(bridge, token, name, ver, build.tarball);
-    console.log(`  \u2713 ${name}@${ver} (${build.tarball.byteLength} bytes)`);
-    return {
+    const pkg = {
       name,
       version: ver,
       packageJson: build.packageJson,
       integrity: build.integrity,
       shasum: build.shasum
     };
+    await postPublish({ ref, prUrl, register: false, packages: [pkg] }, `publish ${name}`);
+    published++;
+    console.log(`  \u2713 ${name}@${ver} (${build.tarball.byteLength} bytes)`);
+    return pkg;
   };
   let vitePlusPackageJson;
   for (const name of PREVIEW_PACKAGES) {
-    const pkg = await buildAndUpload(name, version);
-    packages.push(pkg);
+    const pkg = await publishPackage(name, version);
     if (name === "vite-plus") vitePlusPackageJson = pkg.packageJson;
   }
   const optionalDeps = vitePlusPackageJson?.optionalDependencies ?? {};
@@ -601,17 +611,10 @@ async function main() {
     ([name]) => isWorkspacePackage(name, env) && !isPreviewPackage(name)
   );
   for (const [name, depVersion] of binaries) {
-    packages.push(await buildAndUpload(name, depVersion));
+    await publishPackage(name, depVersion);
   }
-  await withRetry("publish", async () => {
-    const res = await fetch(`${bridge}/-/publish`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ ref, prUrl, packages })
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => "")}`);
-  });
-  console.log(`published ${packages.length} packages, registered ${ref}`);
+  await postPublish({ ref, prUrl, packages: [] }, "register ref");
+  console.log(`published ${published} packages, registered ${ref}`);
   const out = process.env.GITHUB_OUTPUT;
   if (out) {
     const { appendFileSync } = await import("node:fs");

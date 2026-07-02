@@ -5,6 +5,7 @@ import { isPreviewPackage } from '../preview/packages'
 import { platformInfoFromName } from '../preview/platformInfo'
 import { toPkgPrNewUrl } from '../preview/toPkgPrNewUrl'
 import { metaKey, tarballKey } from '../cache/r2Cache'
+import { upsertMetaIndex } from '../preview/metaIndex'
 import { tarballCacheControl } from '../cache/headers'
 import {
   buildPreviewTarball,
@@ -43,6 +44,11 @@ async function buildAndStore(
     integrity: build.integrity,
     publishedAt,
   }
+  // Write the tarball and BOTH meta sources together. The rebuild replaces any
+  // previously published bytes (a workerd gzip stream differs byte-for-byte
+  // from CI's Node gzip of the same tar), so a stale meta-index entry would
+  // otherwise advertise an integrity the served tarball can no longer match,
+  // and the packument would flap between the two sources.
   await Promise.all([
     env.STORAGE.put(tarballKey(name, version), build.tarball, {
       httpMetadata: { contentType: 'application/gzip', cacheControl },
@@ -50,6 +56,7 @@ async function buildAndStore(
     env.STORAGE.put(metaKey(name, version), JSON.stringify(meta), {
       httpMetadata: { contentType: 'application/json', cacheControl },
     }),
+    upsertMetaIndex(env, name, version, meta),
   ])
 
   return { ...build, publishedAt }

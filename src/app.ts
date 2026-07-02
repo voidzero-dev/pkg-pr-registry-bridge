@@ -14,6 +14,7 @@ import {
   latestVersionByPr,
   registerRef,
 } from './preview/getConfiguredRefs'
+import { parseConfiguredPreviewRefs } from './preview/parseConfiguredPreviewRefs'
 import {
   readMetaIndex,
   removeFromMetaIndex,
@@ -203,17 +204,27 @@ app.put('/-/tarball/*', async (c) => {
 })
 
 /**
- * Publish preview metadata and register the ref (admin), in one call. Body:
+ * Publish preview metadata and (by default) register the ref (admin). Body:
  * `{ "ref": "commit.<sha>", "packages": [{ name, version, packageJson,
- * integrity, shasum }] }`. The publish action calls this AFTER uploading the
- * tarballs, so a stored meta-with-integrity always has its bytes in R2. Each
- * package's meta is what the packument serves (package.json fields + integrity).
+ * integrity, shasum }], "register"?: boolean }`. The publish action calls this
+ * AFTER uploading each tarball, so a stored meta-with-integrity always has its
+ * bytes in R2. Each package's meta is what the packument serves (package.json
+ * fields + integrity).
+ *
+ * Two-phase protocol (what the publish action uses): one `register: false`
+ * call per package right after its tarball upload, so bytes and meta never
+ * diverge for longer than that single upload, then one final call with
+ * `packages: []` that registers the ref, flipping the whole version visible
+ * atomically. A run cancelled mid-way leaves only invisible (unregistered)
+ * artifacts instead of a mixed served state. A single register-everything
+ * call (the old protocol) still works unchanged.
  */
 app.post('/-/publish', async (c) => {
   admin(c)
   const body = (await c.req.json().catch(() => ({}))) as {
     ref?: string
     prUrl?: string
+    register?: boolean
     packages?: Array<{
       name?: string
       version?: string
@@ -225,9 +236,14 @@ app.post('/-/publish', async (c) => {
   const ref = (body.ref ?? '').trim()
   // Optional: the action runs on push commits too, where there is no PR.
   const prUrl = (body.prUrl ?? '').trim() || undefined
+  const register = body.register !== false
   const packages = Array.isArray(body.packages) ? body.packages : []
   if (!ref) throw new HttpError(400, 'Missing ref')
-  if (packages.length === 0) throw new HttpError(400, 'Missing packages')
+  // A meta-only call with nothing to store is a no-op; only the final
+  // register-only call may carry an empty packages list.
+  if (packages.length === 0 && !register) {
+    throw new HttpError(400, 'Missing packages')
+  }
 
   // Validate everything up front (so a bad package can't leave half-written
   // metas), then write the independent meta keys in parallel.
@@ -267,12 +283,16 @@ app.post('/-/publish', async (c) => {
   let parsed
   try {
     // registerRef parses + validates the ref and returns it. Record this run's
-    // server-stamped publish time and (when present) the source PR url.
-    parsed = await registerRef(c.env, ref, { publishedAt, prUrl })
+    // server-stamped publish time and (when present) the source PR url. A
+    // register:false call only validates the ref; the version stays invisible
+    // until the final register call.
+    parsed = register
+      ? await registerRef(c.env, ref, { publishedAt, prUrl })
+      : parseConfiguredPreviewRefs(ref)[0]
   } catch (err) {
     throw new HttpError(400, `Invalid or unregisterable ref: ${ref} (${err})`)
   }
-  return c.json({ ref, version: parsed.version, published }, 201)
+  return c.json({ ref, version: parsed.version, published, registered: register }, 201)
 })
 
 /** List the registered preview refs (the runtime R2 index). Public read. */
