@@ -541,11 +541,13 @@ async function withRetry(label, fn, attempts = 4) {
   }
   throw new Error(`${label} failed after ${attempts} attempts: ${lastErr}`);
 }
+var TRANSFER_TIMEOUT_MS = 12e4;
+var PUBLISH_TIMEOUT_MS = 3e4;
 async function fetchUpstream(env, name, version) {
   const url = toPkgPrNewUrl(env, name, version);
   if (!url) throw new Error(`cannot build pkg.pr.new url for ${name}@${version}`);
   return withRetry(`download ${name}`, async () => {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(TRANSFER_TIMEOUT_MS) });
     if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
     return new Uint8Array(await res.arrayBuffer());
   });
@@ -555,7 +557,8 @@ async function uploadTarball(bridge, token, name, version, bytes) {
     const res = await fetch(`${bridge}/-/tarball/${name}/${version}.tgz`, {
       method: "PUT",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/gzip" },
-      body: bytes
+      body: bytes,
+      signal: AbortSignal.timeout(TRANSFER_TIMEOUT_MS)
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => "")}`);
   });
@@ -581,7 +584,8 @@ async function main() {
     const res = await fetch(`${bridge}/-/publish`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(PUBLISH_TIMEOUT_MS)
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => "")}`);
   });

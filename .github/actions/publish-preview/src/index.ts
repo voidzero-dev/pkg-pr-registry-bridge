@@ -52,6 +52,15 @@ async function withRetry<T>(label: string, fn: () => Promise<T>, attempts = 4): 
   throw new Error(`${label} failed after ${attempts} attempts: ${lastErr}`)
 }
 
+// Per-attempt fetch deadlines. Without one, a hung connection stalls up to
+// undici's ~5-minute defaults, and 4 retry attempts across ~11 packages can
+// zombie a publish for tens of minutes (the 2026-07-02 incident's cancelled
+// attempt ran 21 minutes mid-publish). Bounding each attempt keeps retries
+// snappy and the whole run inside a predictable window. Transfers move up to
+// ~19 MB per request; the register call is a small JSON POST.
+const TRANSFER_TIMEOUT_MS = 120_000
+const PUBLISH_TIMEOUT_MS = 30_000
+
 async function fetchUpstream(
   env: RewriteEnv,
   name: string,
@@ -60,7 +69,7 @@ async function fetchUpstream(
   const url = toPkgPrNewUrl(env, name, version)
   if (!url) throw new Error(`cannot build pkg.pr.new url for ${name}@${version}`)
   return withRetry(`download ${name}`, async () => {
-    const res = await fetch(url)
+    const res = await fetch(url, { signal: AbortSignal.timeout(TRANSFER_TIMEOUT_MS) })
     if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)
     return new Uint8Array(await res.arrayBuffer())
   })
@@ -78,6 +87,7 @@ async function uploadTarball(
       method: 'PUT',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/gzip' },
       body: bytes,
+      signal: AbortSignal.timeout(TRANSFER_TIMEOUT_MS),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => '')}`)
   })
@@ -111,6 +121,7 @@ async function main(): Promise<void> {
         method: 'POST',
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(PUBLISH_TIMEOUT_MS),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => '')}`)
     })
