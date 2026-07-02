@@ -30,7 +30,7 @@
     "typescript": "^6.0.0",
     "vite": "^8.1.0",
     "vitest": "^4.1.0",
-    "void": "^0.9.3",
+    "void": "^0.10.5",
     "wrangler": "^4.105.0"
   },
   "devEngines": {

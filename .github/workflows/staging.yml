@@ -34,6 +34,11 @@ jobs:
       # unit tests can't (e.g. the Void Cache API ban that 500'd every packument)
       # BEFORE the change reaches main. Make this a required status check so a
       # failing smoke test blocks the merge.
+      #
+      # This deploy keeps the long-lived VOID_TOKEN secret: the GitHub OIDC
+      # exchange that void-deploy.yml uses is rejected for pull_request events
+      # by the Void platform (PR runs execute untrusted code, so they may not
+      # mint deploy tokens), so OIDC cannot replace the token here.
       - name: Deploy to staging
         run: pnpm exec void deploy --project pkg-pr-registry-bridge-staging
         env:

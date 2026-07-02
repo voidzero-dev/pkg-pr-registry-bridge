@@ -8,3 +8,5 @@ allowBuilds:
   workerd: true
   sharp: true
   better-sqlite3: false
+minimumReleaseAgeExclude:
+  - void@0.10.5
