@@ -13,9 +13,12 @@ The bridge ships a reusable action that does the CPU-heavy work in CI: for each
 package (the two preview packages and every platform binary in vite-plus's
 `optionalDependencies`) it downloads the pkg.pr.new build, rewrites
 `package/package.json` (name/version, plus deps for the preview packages),
-re-packs, hashes, `PUT`s the tarball, then `POST`s the metadata and registers the
-ref. The Worker then only serves bytes from R2, with `dist.integrity` matching the
-exact bytes served.
+re-packs, hashes, `PUT`s the tarball, and immediately `POST`s that package's
+metadata (`/-/publish`), so stored bytes and served metadata can never diverge
+for longer than one package's upload. A final `POST /-/register` registers the
+ref, flipping the whole version visible atomically; a run cancelled mid-way
+leaves only invisible artifacts. The Worker then only serves bytes from R2,
+with `dist.integrity` matching the exact bytes served.
 
 ## Setup
 
