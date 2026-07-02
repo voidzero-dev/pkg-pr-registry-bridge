@@ -13,6 +13,7 @@ import {
   getConfiguredRefsWithEtag,
   latestVersionByPr,
   registerRef,
+  unregisterRef,
 } from './preview/getConfiguredRefs'
 import { parseConfiguredPreviewRefs } from './preview/parseConfiguredPreviewRefs'
 import {
@@ -323,13 +324,19 @@ app.get('/-/refs', async (c) => {
 
 /**
  * Purge a generated build from R2. Body:
- * `{ "package": "vite-plus", "version": "0.0.0-commit.<sha>" }`.
+ * `{ "package": "vite-plus", "version": "0.0.0-commit.<sha>", "unregister"?: boolean }`.
+ *
+ * `unregister: true` also removes the version's ref from the runtime index
+ * (e.g. to fully clean up a smoke-test artifact). It is opt-in because the ref
+ * is shared by every package published at that version: unregistering hides
+ * them all, while a plain purge only removes this one package's artifacts.
  */
 app.post('/-/purge', async (c) => {
   admin(c)
   const body = (await c.req.json().catch(() => ({}))) as {
     package?: string
     version?: string
+    unregister?: boolean
   }
   const name = body.package ?? ''
   const version = body.version ?? ''
@@ -337,7 +344,8 @@ app.post('/-/purge', async (c) => {
   if (!isWorkspacePackage(name, c.env)) {
     throw new HttpError(400, `Unknown preview package: ${name || '(empty)'}`)
   }
-  if (!parsePreviewVersion(version)) {
+  const parsed = parsePreviewVersion(version)
+  if (!parsed) {
     throw new HttpError(400, `Invalid preview version: ${version || '(empty)'}`)
   }
 
@@ -345,6 +353,9 @@ app.post('/-/purge', async (c) => {
     c.env.STORAGE.delete(tarballKey(name, version)),
     c.env.STORAGE.delete(metaKey(name, version)),
     removeFromMetaIndex(c.env, name, version),
+    ...(body.unregister === true
+      ? [unregisterRef(c.env, `${parsed.type}.${parsed.ref}`)]
+      : []),
   ])
   return c.json({ purged: { package: name, version } })
 })
