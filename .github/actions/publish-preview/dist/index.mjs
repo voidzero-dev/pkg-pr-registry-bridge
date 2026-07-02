@@ -580,8 +580,8 @@ async function main() {
   };
   console.log(`publishing ${version} to ${bridge}`);
   let published = 0;
-  const postPublish = (body, label) => withRetry(label, async () => {
-    const res = await fetch(`${bridge}/-/publish`, {
+  const post = (path, body, label) => withRetry(label, async () => {
+    const res = await fetch(`${bridge}${path}`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -600,7 +600,7 @@ async function main() {
       integrity: build.integrity,
       shasum: build.shasum
     };
-    await postPublish({ ref, prUrl, register: false, packages: [pkg] }, `publish ${name}`);
+    await post("/-/publish", { ref, packages: [pkg] }, `publish ${name}`);
     published++;
     console.log(`  \u2713 ${name}@${ver} (${build.tarball.byteLength} bytes)`);
     return pkg;
@@ -617,7 +617,7 @@ async function main() {
   for (const [name, depVersion] of binaries) {
     await publishPackage(name, depVersion);
   }
-  await postPublish({ ref, prUrl, packages: [] }, "register ref");
+  await post("/-/register", { ref, prUrl }, "register ref");
   console.log(`published ${published} packages, registered ${ref}`);
   const out = process.env.GITHUB_OUTPUT;
   if (out) {

@@ -115,9 +115,9 @@ async function main(): Promise<void> {
   console.log(`publishing ${version} to ${bridge}`)
   let published = 0
 
-  const postPublish = (body: Record<string, unknown>, label: string) =>
+  const post = (path: string, body: Record<string, unknown>, label: string) =>
     withRetry(label, async () => {
-      const res = await fetch(`${bridge}/-/publish`, {
+      const res = await fetch(`${bridge}${path}`, {
         method: 'POST',
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
         body: JSON.stringify(body),
@@ -127,13 +127,12 @@ async function main(): Promise<void> {
     })
 
   // Download from pkg.pr.new, rewrite + re-pack + hash, upload the bytes, and
-  // immediately publish this package's meta (register: false), so the stored
-  // tarball and the meta the packument serves can never diverge for longer
-  // than this one package's upload. A run cancelled part-way leaves later
-  // packages untouched instead of stranding bytes without metas (the mixed
-  // state a cancelled run previously served for its whole upload window).
-  // Reuses the Worker's own build so CI's artifact is exactly what the Worker
-  // would describe.
+  // immediately publish this package's meta, so the stored tarball and the
+  // meta the packument serves can never diverge for longer than this one
+  // package's upload. A run cancelled part-way leaves later packages untouched
+  // instead of stranding bytes without metas (the mixed state a cancelled run
+  // previously served for its whole upload window). Reuses the Worker's own
+  // build so CI's artifact is exactly what the Worker would describe.
   const publishPackage = async (name: string, ver: string): Promise<PublishPackage> => {
     const upstream = await fetchUpstream(env, name, ver)
     const build = await buildPreviewTarball(upstream, name, ver, env)
@@ -145,7 +144,7 @@ async function main(): Promise<void> {
       integrity: build.integrity,
       shasum: build.shasum,
     }
-    await postPublish({ ref, prUrl, register: false, packages: [pkg] }, `publish ${name}`)
+    await post('/-/publish', { ref, packages: [pkg] }, `publish ${name}`)
     published++
     console.log(`  ✓ ${name}@${ver} (${build.tarball.byteLength} bytes)`)
     return pkg
@@ -170,7 +169,7 @@ async function main(): Promise<void> {
   // Every package's bytes + meta are stored; registering the ref last flips
   // the whole version visible atomically (a brand-new ref is not served at
   // all until this succeeds).
-  await postPublish({ ref, prUrl, packages: [] }, 'register ref')
+  await post('/-/register', { ref, prUrl }, 'register ref')
   console.log(`published ${published} packages, registered ${ref}`)
 
   const out = process.env.GITHUB_OUTPUT

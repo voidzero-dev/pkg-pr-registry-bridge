@@ -140,50 +140,67 @@ afterAll(() => {
   vi.unstubAllGlobals()
 })
 
+// Publish metas + register the ref, the way the CI action does it: one
+// /-/publish for the metas and a final /-/register that makes the versions
+// visible. Returns the register response (the visibility-flipping call).
+async function publishAndRegister(body: {
+  ref: string
+  prUrl?: string
+  packages: Array<Record<string, any>>
+}): Promise<Response> {
+  const headers = {
+    authorization: 'Bearer test-admin-token',
+    'content-type': 'application/json',
+  }
+  const pub = await SELF.fetch(`${BASE}/-/publish`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ ref: body.ref, packages: body.packages }),
+  })
+  if (pub.status !== 201) return pub
+  return SELF.fetch(`${BASE}/-/register`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ ref: body.ref, prUrl: body.prUrl }),
+  })
+}
+
 // The suite's fixture preview ref (`commit.a832a55`), published before each test
 // (idempotent, so it survives storage isolation). Publishing vite-plus + core
 // with their rewritten package.json is exactly what a CI publish stores, so
-// packuments inject the ref the way they do in production. (`POST /-/refs`
-// register-only was removed; a ref exists only once it has been published.)
+// packuments inject the ref the way they do in production.
 const FIXTURE_VERSION = '0.0.0-commit.a832a55'
 beforeEach(async () => {
-  await SELF.fetch(`${BASE}/-/publish`, {
-    method: 'POST',
-    headers: {
-      authorization: 'Bearer test-admin-token',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      ref: 'commit.a832a55',
-      packages: [
-        {
+  await publishAndRegister({
+    ref: 'commit.a832a55',
+    packages: [
+      {
+        name: 'vite-plus',
+        version: FIXTURE_VERSION,
+        packageJson: {
           name: 'vite-plus',
           version: FIXTURE_VERSION,
-          packageJson: {
-            name: 'vite-plus',
-            version: FIXTURE_VERSION,
-            dependencies: { '@voidzero-dev/vite-plus-core': FIXTURE_VERSION },
-            optionalDependencies: {
-              '@voidzero-dev/vite-plus-darwin-arm64': `0.0.0-commit.${PLATFORM_SHA}`,
-            },
-            bin: { vp: './bin/vp' },
+          dependencies: { '@voidzero-dev/vite-plus-core': FIXTURE_VERSION },
+          optionalDependencies: {
+            '@voidzero-dev/vite-plus-darwin-arm64': `0.0.0-commit.${PLATFORM_SHA}`,
           },
-          integrity: 'sha512-Zm9vYmFy',
-          shasum: 'a'.repeat(40),
+          bin: { vp: './bin/vp' },
         },
-        {
+        integrity: 'sha512-Zm9vYmFy',
+        shasum: 'a'.repeat(40),
+      },
+      {
+        name: '@voidzero-dev/vite-plus-core',
+        version: FIXTURE_VERSION,
+        packageJson: {
           name: '@voidzero-dev/vite-plus-core',
           version: FIXTURE_VERSION,
-          packageJson: {
-            name: '@voidzero-dev/vite-plus-core',
-            version: FIXTURE_VERSION,
-            dependencies: { 'vite-plus': FIXTURE_VERSION },
-          },
-          integrity: 'sha512-Y29yZQ',
-          shasum: 'b'.repeat(40),
+          dependencies: { 'vite-plus': FIXTURE_VERSION },
         },
-      ],
-    }),
+        integrity: 'sha512-Y29yZQ',
+        shasum: 'b'.repeat(40),
+      },
+    ],
   })
 })
 
@@ -289,21 +306,17 @@ describe('packument endpoint', () => {
     for (let i = 1; i <= 10; i++) {
       const sha = `f1${String(i).padStart(5, '0')}`
       const ver = `0.0.0-commit.${sha}`
-      const pub = await SELF.fetch(`${BASE}/-/publish`, {
-        method: 'POST',
-        headers: { ...AUTH, 'content-type': 'application/json' },
-        body: JSON.stringify({
-          ref: `commit.${sha}`,
-          packages: [
-            {
-              name: 'vite-plus',
-              version: ver,
-              packageJson: { name: 'vite-plus', version: ver },
-              integrity: `sha512-${sha}`,
-              shasum: sha,
-            },
-          ],
-        }),
+      const pub = await publishAndRegister({
+        ref: `commit.${sha}`,
+        packages: [
+          {
+            name: 'vite-plus',
+            version: ver,
+            packageJson: { name: 'vite-plus', version: ver },
+            integrity: `sha512-${sha}`,
+            shasum: sha,
+          },
+        ],
       })
       expect(pub.status).toBe(201)
       await env.STORAGE.delete(metaKey('vite-plus', ver))
@@ -330,21 +343,17 @@ describe('packument endpoint', () => {
     const ver = `0.0.0-commit.${sha}`
     // Warm the output cache for vite-plus under the current etag.
     await SELF.fetch(`${BASE}/vite-plus`, { headers: { accept: 'application/json' } })
-    const pub = await SELF.fetch(`${BASE}/-/publish`, {
-      method: 'POST',
-      headers: { ...AUTH, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        ref: `commit.${sha}`,
-        packages: [
-          {
-            name: 'vite-plus',
-            version: ver,
-            packageJson: { name: 'vite-plus', version: ver },
-            integrity: 'sha512-f5',
-            shasum: 'f5',
-          },
-        ],
-      }),
+    const pub = await publishAndRegister({
+      ref: `commit.${sha}`,
+      packages: [
+        {
+          name: 'vite-plus',
+          version: ver,
+          packageJson: { name: 'vite-plus', version: ver },
+          integrity: 'sha512-f5',
+          shasum: 'f5',
+        },
+      ],
     })
     expect(pub.status).toBe(201)
     const res = await SELF.fetch(`${BASE}/vite-plus`, {
@@ -360,12 +369,13 @@ describe('packument endpoint', () => {
     const sha = 'feedfacefeedfacefeedfacefeedfacefeedface'
     const ver = `0.0.0-commit.${sha}`
     const before = Date.now()
-    const pub = await SELF.fetch(`${BASE}/-/publish`, {
+    // A client-reported publishedAt in either call must be ignored in favor of
+    // the server's own stamp.
+    const pubMeta = await SELF.fetch(`${BASE}/-/publish`, {
       method: 'POST',
       headers: { ...AUTH, 'content-type': 'application/json' },
       body: JSON.stringify({
         ref: `commit.${sha}`,
-        // A client-reported time must be ignored in favor of the server's.
         publishedAt: '2000-01-01T00:00:00.000Z',
         packages: [
           {
@@ -378,7 +388,16 @@ describe('packument endpoint', () => {
         ],
       }),
     })
-    expect(pub.status).toBe(201)
+    expect(pubMeta.status).toBe(201)
+    const reg = await SELF.fetch(`${BASE}/-/register`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ref: `commit.${sha}`,
+        publishedAt: '2000-01-01T00:00:00.000Z',
+      }),
+    })
+    expect(reg.status).toBe(201)
 
     const timeFor = async () =>
       (
@@ -615,21 +634,17 @@ describe('integrity', () => {
       body: tarball,
     })
     expect(up.status).toBe(201)
-    const pub = await SELF.fetch(`${BASE}/-/publish`, {
-      method: 'POST',
-      headers: { ...AUTH, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        ref: `commit.${PLATFORM_SHA}`,
-        packages: [
-          {
-            name: pkg,
-            version: ver,
-            packageJson: { name: pkg, version: ver, os: ['darwin'], cpu: ['arm64'] },
-            integrity,
-            shasum: '',
-          },
-        ],
-      }),
+    const pub = await publishAndRegister({
+      ref: `commit.${PLATFORM_SHA}`,
+      packages: [
+        {
+          name: pkg,
+          version: ver,
+          packageJson: { name: pkg, version: ver, os: ['darwin'], cpu: ['arm64'] },
+          integrity,
+          shasum: '',
+        },
+      ],
     })
     expect(pub.status).toBe(201)
 
@@ -685,22 +700,18 @@ describe('pkg.pr.new-style download', () => {
   it('redirects /<owner>/<repo>@<pr> to the PR latest commit tarball', async () => {
     const prUrl = 'https://github.com/voidzero-dev/vite-plus/pull/909'
     const publish = (sha: string, version: string) =>
-      SELF.fetch(`${BASE}/-/publish`, {
-        method: 'POST',
-        headers: { ...AUTH, 'content-type': 'application/json' },
-        body: JSON.stringify({
-          ref: `commit.${sha}`,
-          prUrl,
-          packages: [
-            {
-              name: 'vite-plus',
-              version,
-              packageJson: { name: 'vite-plus', version },
-              integrity: 'sha512-test',
-              shasum: '',
-            },
-          ],
-        }),
+      publishAndRegister({
+        ref: `commit.${sha}`,
+        prUrl,
+        packages: [
+          {
+            name: 'vite-plus',
+            version,
+            packageJson: { name: 'vite-plus', version },
+            integrity: 'sha512-test',
+            shasum: '',
+          },
+        ],
       })
     const verB = '0.0.0-commit.ddd9090'
     expect((await publish('ccc9090', '0.0.0-commit.ccc9090')).status).toBe(201)
@@ -739,22 +750,18 @@ describe('pkg.pr.new-style download', () => {
     const prUrl = 'https://github.com/voidzero-dev/vite-plus/pull/808'
     const sha = 'e1e1e10'
     const version = `0.0.0-commit.${sha}`
-    const pub = await SELF.fetch(`${BASE}/-/publish`, {
-      method: 'POST',
-      headers: { ...AUTH, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        ref: `commit.${sha}`,
-        prUrl,
-        packages: [
-          {
-            name: 'vite-plus',
-            version,
-            packageJson: { name: 'vite-plus', version },
-            integrity: 'sha512-test',
-            shasum: '',
-          },
-        ],
-      }),
+    const pub = await publishAndRegister({
+      ref: `commit.${sha}`,
+      prUrl,
+      packages: [
+        {
+          name: 'vite-plus',
+          version,
+          packageJson: { name: 'vite-plus', version },
+          integrity: 'sha512-test',
+          shasum: '',
+        },
+      ],
     })
     expect(pub.status).toBe(201)
     const res = await SELF.fetch(`${BASE}/voidzero-dev/vite-plus@808`, {
@@ -814,22 +821,18 @@ describe('admin: refs', () => {
     const sha = 'deadbee'
     const version = `0.0.0-commit.${sha}`
     const prUrl = 'https://github.com/voidzero-dev/vite-plus/pull/123'
-    const pub = await SELF.fetch(`${BASE}/-/publish`, {
-      method: 'POST',
-      headers: { ...AUTH, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        ref: `commit.${sha}`,
-        prUrl,
-        packages: [
-          {
-            name: 'vite-plus',
-            version,
-            packageJson: { name: 'vite-plus', version },
-            integrity: 'sha512-test',
-            shasum: '',
-          },
-        ],
-      }),
+    const pub = await publishAndRegister({
+      ref: `commit.${sha}`,
+      prUrl,
+      packages: [
+        {
+          name: 'vite-plus',
+          version,
+          packageJson: { name: 'vite-plus', version },
+          integrity: 'sha512-test',
+          shasum: '',
+        },
+      ],
     })
     expect(pub.status).toBe(201)
 
@@ -862,21 +865,17 @@ describe('admin: refs', () => {
   it('omits the PR url for a ref published without one (push run)', async () => {
     const sha = 'beefca0'
     const version = `0.0.0-commit.${sha}`
-    const pub = await SELF.fetch(`${BASE}/-/publish`, {
-      method: 'POST',
-      headers: { ...AUTH, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        ref: `commit.${sha}`,
-        packages: [
-          {
-            name: 'vite-plus',
-            version,
-            packageJson: { name: 'vite-plus', version },
-            integrity: 'sha512-test',
-            shasum: '',
-          },
-        ],
-      }),
+    const pub = await publishAndRegister({
+      ref: `commit.${sha}`,
+      packages: [
+        {
+          name: 'vite-plus',
+          version,
+          packageJson: { name: 'vite-plus', version },
+          integrity: 'sha512-test',
+          shasum: '',
+        },
+      ],
     })
     expect(pub.status).toBe(201)
 
@@ -899,22 +898,18 @@ describe('admin: refs', () => {
   it('injects a mutable pr-<n> dist-tag pointing at the PR latest commit', async () => {
     const prUrl = 'https://github.com/voidzero-dev/vite-plus/pull/777'
     const publish = (sha: string, version: string) =>
-      SELF.fetch(`${BASE}/-/publish`, {
-        method: 'POST',
-        headers: { ...AUTH, 'content-type': 'application/json' },
-        body: JSON.stringify({
-          ref: `commit.${sha}`,
-          prUrl,
-          packages: [
-            {
-              name: 'vite-plus',
-              version,
-              packageJson: { name: 'vite-plus', version },
-              integrity: 'sha512-test',
-              shasum: '',
-            },
-          ],
-        }),
+      publishAndRegister({
+        ref: `commit.${sha}`,
+        prUrl,
+        packages: [
+          {
+            name: 'vite-plus',
+            version,
+            packageJson: { name: 'vite-plus', version },
+            integrity: 'sha512-test',
+            shasum: '',
+          },
+        ],
       })
     const verA = '0.0.0-commit.aaa7770'
     const verB = '0.0.0-commit.bbb7770'
@@ -956,23 +951,20 @@ describe('admin: refs', () => {
 
   it('publishes concurrently without overwriting (incremental)', async () => {
     const publish = (sha: string) =>
-      SELF.fetch(`${BASE}/-/publish`, {
-        method: 'POST',
-        headers: { ...AUTH, 'content-type': 'application/json' },
-        body: JSON.stringify({
-          ref: `commit.${sha}`,
-          packages: [
-            {
-              name: 'vite-plus',
-              version: `0.0.0-commit.${sha}`,
-              packageJson: { name: 'vite-plus', version: `0.0.0-commit.${sha}` },
-              integrity: 'sha512-x',
-              shasum: 'x',
-            },
-          ],
-        }),
+      publishAndRegister({
+        ref: `commit.${sha}`,
+        packages: [
+          {
+            name: 'vite-plus',
+            version: `0.0.0-commit.${sha}`,
+            packageJson: { name: 'vite-plus', version: `0.0.0-commit.${sha}` },
+            integrity: 'sha512-x',
+            shasum: 'x',
+          },
+        ],
       })
-    // Two PRs publishing at the same time: both refs must survive the CAS.
+    // Two PRs publishing at the same time: both refs must survive the CAS
+    // (the refs-index compare-and-swap runs at /-/register).
     await Promise.all([publish('aaaaaaa'), publish('bbbbbbb')])
     const list = (await (
       await SELF.fetch(`${BASE}/-/refs`)
@@ -1062,12 +1054,8 @@ describe('admin: publish', () => {
     expect(res.status).toBe(401)
   })
 
-  it('stores meta, registers the ref, and injects it into the packument', async () => {
-    const res = await SELF.fetch(`${BASE}/-/publish`, {
-      method: 'POST',
-      headers: { ...AUTH, 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    })
+  it('stores meta and, once registered, injects it into the packument', async () => {
+    const res = await publishAndRegister(body)
     expect(res.status).toBe(201)
     expect(await res.json()).toMatchObject({ ref: 'commit.f00dface', version: ver })
 
@@ -1090,11 +1078,11 @@ describe('admin: publish', () => {
 })
 
 describe('admin: per-package atomic publish', () => {
-  // The publish action uploads each tarball and publishes its meta immediately
-  // (register: false), then registers the ref once at the end (packages: []).
-  // A cancelled run can then never leave tarball bytes visible without their
-  // matching meta: metas travel with bytes, and visibility flips atomically at
-  // the final register call.
+  // The publish action uploads each tarball and publishes its meta immediately,
+  // then registers the ref once at the end via the dedicated /-/register
+  // endpoint. A cancelled run can then never leave tarball bytes visible
+  // without their matching meta: metas travel with bytes, and visibility flips
+  // atomically at the final register call.
   const sha = 'abc1234'
   const ver = `0.0.0-commit.${sha}`
   const pkg = {
@@ -1105,20 +1093,19 @@ describe('admin: per-package atomic publish', () => {
     shasum: 'a1'.repeat(20),
   }
 
-  const publish = (body: Record<string, any>) =>
-    SELF.fetch(`${BASE}/-/publish`, {
+  const post = (path: string, body: Record<string, any>, withAuth = true) =>
+    SELF.fetch(`${BASE}${path}`, {
       method: 'POST',
-      headers: { ...AUTH, 'content-type': 'application/json' },
+      headers: { ...(withAuth ? AUTH : {}), 'content-type': 'application/json' },
       body: JSON.stringify(body),
     })
 
-  it('register:false stores the meta without registering the ref; a final packages-empty call registers it', async () => {
-    // Phase 1: meta-only publish.
-    const res1 = await publish({ ref: `commit.${sha}`, register: false, packages: [pkg] })
+  it('publish stores the meta without registering; /-/register flips visibility', async () => {
+    // Phase 1: meta-only publish (registration is not publish's job).
+    const res1 = await post('/-/publish', { ref: `commit.${sha}`, packages: [pkg] })
     expect(res1.status).toBe(201)
-    expect(await res1.json()).toMatchObject({ registered: false })
 
-    // Meta and index are written...
+    // Meta is written...
     const meta = (await (await env.STORAGE.get(metaKey('vite-plus', ver)))!.json()) as Record<string, any>
     expect(meta.integrity).toBe('sha512-atomic')
 
@@ -1130,10 +1117,10 @@ describe('admin: per-package atomic publish', () => {
     ).json()) as Record<string, any>
     expect(pack1.versions[ver]).toBeUndefined()
 
-    // Phase 2: register-only call (empty packages) flips visibility.
-    const res2 = await publish({ ref: `commit.${sha}`, packages: [] })
+    // Phase 2: the dedicated register call flips visibility.
+    const res2 = await post('/-/register', { ref: `commit.${sha}` })
     expect(res2.status).toBe(201)
-    expect(await res2.json()).toMatchObject({ registered: true })
+    expect(await res2.json()).toMatchObject({ ref: `commit.${sha}`, version: ver })
 
     const refs2 = (await (await SELF.fetch(`${BASE}/-/refs`)).json()) as Record<string, any>
     expect(refs2.refs.some((r: any) => r.ref === `commit.${sha}`)).toBe(true)
@@ -1143,9 +1130,28 @@ describe('admin: per-package atomic publish', () => {
     expect(pack2.versions[ver]?.dist?.integrity).toBe('sha512-atomic')
   })
 
-  it('rejects a register:false call with no packages (would be a no-op)', async () => {
-    const res = await publish({ ref: `commit.${sha}`, register: false, packages: [] })
+  it('publish rejects an empty packages list (registration lives on /-/register)', async () => {
+    const res = await post('/-/publish', { ref: `commit.${sha}`, packages: [] })
     expect(res.status).toBe(400)
+  })
+
+  it('register requires auth and a valid commit ref', async () => {
+    expect((await post('/-/register', { ref: `commit.${sha}` }, false)).status).toBe(401)
+    expect((await post('/-/register', { ref: 'pr.123' })).status).toBe(400)
+    expect((await post('/-/register', {})).status).toBe(400)
+  })
+
+  it('register records the prUrl and publish time', async () => {
+    await post('/-/publish', { ref: `commit.${sha}`, packages: [pkg] })
+    const res = await post('/-/register', {
+      ref: `commit.${sha}`,
+      prUrl: 'https://github.com/voidzero-dev/vite-plus/pull/1891',
+    })
+    expect(res.status).toBe(201)
+    const refs = (await (await SELF.fetch(`${BASE}/-/refs`)).json()) as Record<string, any>
+    const entry = refs.refs.find((r: any) => r.ref === `commit.${sha}`)
+    expect(entry.prUrl).toBe('https://github.com/voidzero-dev/vite-plus/pull/1891')
+    expect(entry.publishedAt).toBeTruthy()
   })
 })
 
