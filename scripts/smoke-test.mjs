@@ -232,12 +232,18 @@ async function runAdminLifecycle() {
     assert(dist, 'version absent from packument after register')
     assert(dist.integrity === integrity, `packument integrity != uploaded integrity`)
 
-    // 6. Fetch the actually-served tarball and confirm its bytes hash to the
-    // advertised integrity (catches a stale/mismatched served body directly).
-    const tres = await fetch(dist.tarball)
+    // 6. Fetch the actually-served tarball from the runtime under test and
+    // confirm its bytes hash to the advertised integrity (catches a stale or
+    // mismatched served body directly). Use dist.tarball's PATH against `base`
+    // rather than its absolute URL: a staging deploy sets PUBLIC_BASE_URL to
+    // the production host, so dist.tarball points at prod, where this staging
+    // artifact does not exist. We want to verify the bytes THIS runtime serves.
+    assert(dist.tarball, 'no dist.tarball in packument')
+    const tarUrl = `${base}${new URL(dist.tarball).pathname}`
+    const tres = await fetch(tarUrl)
     const served = new Uint8Array(await tres.arrayBuffer())
     const servedIntegrity = sri(served)
-    console.log(`    GET ${dist.tarball} -> ${tres.status}, served integrity=${servedIntegrity.slice(0, 20)}…`)
+    console.log(`    GET ${tarUrl} -> ${tres.status}, served integrity=${servedIntegrity.slice(0, 20)}…`)
     assert(tres.status === 200, `served tarball status ${tres.status}`)
     assert(servedIntegrity === integrity, 'served tarball bytes != advertised integrity')
   } finally {
