@@ -1089,6 +1089,98 @@ describe('admin: publish', () => {
   })
 })
 
+describe('admin: per-package atomic publish', () => {
+  // The publish action uploads each tarball and publishes its meta immediately
+  // (register: false), then registers the ref once at the end (packages: []).
+  // A cancelled run can then never leave tarball bytes visible without their
+  // matching meta: metas travel with bytes, and visibility flips atomically at
+  // the final register call.
+  const sha = 'abc1234'
+  const ver = `0.0.0-commit.${sha}`
+  const pkg = {
+    name: 'vite-plus',
+    version: ver,
+    packageJson: { name: 'vite-plus', version: ver },
+    integrity: 'sha512-atomic',
+    shasum: 'a1'.repeat(20),
+  }
+
+  const publish = (body: Record<string, any>) =>
+    SELF.fetch(`${BASE}/-/publish`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
+  it('register:false stores the meta without registering the ref; a final packages-empty call registers it', async () => {
+    // Phase 1: meta-only publish.
+    const res1 = await publish({ ref: `commit.${sha}`, register: false, packages: [pkg] })
+    expect(res1.status).toBe(201)
+    expect(await res1.json()).toMatchObject({ registered: false })
+
+    // Meta and index are written...
+    const meta = (await (await env.STORAGE.get(metaKey('vite-plus', ver)))!.json()) as Record<string, any>
+    expect(meta.integrity).toBe('sha512-atomic')
+
+    // ...but the ref is NOT registered: not listed, not injected.
+    const refs = (await (await SELF.fetch(`${BASE}/-/refs`)).json()) as Record<string, any>
+    expect(refs.refs.some((r: any) => r.ref === `commit.${sha}`)).toBe(false)
+    const pack1 = (await (
+      await SELF.fetch(`${BASE}/vite-plus`, { headers: { accept: 'application/json' } })
+    ).json()) as Record<string, any>
+    expect(pack1.versions[ver]).toBeUndefined()
+
+    // Phase 2: register-only call (empty packages) flips visibility.
+    const res2 = await publish({ ref: `commit.${sha}`, packages: [] })
+    expect(res2.status).toBe(201)
+    expect(await res2.json()).toMatchObject({ registered: true })
+
+    const refs2 = (await (await SELF.fetch(`${BASE}/-/refs`)).json()) as Record<string, any>
+    expect(refs2.refs.some((r: any) => r.ref === `commit.${sha}`)).toBe(true)
+    const pack2 = (await (
+      await SELF.fetch(`${BASE}/vite-plus`, { headers: { accept: 'application/json' } })
+    ).json()) as Record<string, any>
+    expect(pack2.versions[ver]?.dist?.integrity).toBe('sha512-atomic')
+  })
+
+  it('rejects a register:false call with no packages (would be a no-op)', async () => {
+    const res = await publish({ ref: `commit.${sha}`, register: false, packages: [] })
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('on-demand build consistency', () => {
+  it('an in-worker rebuild updates the meta-index along with the per-version meta', async () => {
+    // Simulate the gap state that caused meta flapping in production: the
+    // version is registered but its meta artifacts are gone. The packument
+    // request triggers the on-demand build, which must repopulate BOTH meta
+    // sources; a divergent index (stale or missing entry) makes the packument
+    // flip between integrities depending on which source a rebuild reads.
+    await env.STORAGE.delete(metaKey('vite-plus', FIXTURE_VERSION))
+    const idx = (await (await env.STORAGE.get(metaIndexKey('vite-plus')))?.json()) as
+      | Record<string, any>
+      | undefined
+    if (idx) {
+      delete idx[FIXTURE_VERSION]
+      await env.STORAGE.put(metaIndexKey('vite-plus'), JSON.stringify(idx))
+    }
+
+    // Triggers getPreviewMeta -> buildAndStore for the fixture version.
+    const pack = (await (
+      await SELF.fetch(`${BASE}/vite-plus`, { headers: { accept: 'application/json' } })
+    ).json()) as Record<string, any>
+    const built = pack.versions[FIXTURE_VERSION]?.dist?.integrity
+    expect(built).toBeTruthy()
+
+    // The rebuild must keep the two meta sources consistent.
+    const meta = (await (await env.STORAGE.get(metaKey('vite-plus', FIXTURE_VERSION)))!.json()) as Record<string, any>
+    const index = (await (await env.STORAGE.get(metaIndexKey('vite-plus')))!.json()) as Record<string, any>
+    expect(index[FIXTURE_VERSION]).toBeTruthy()
+    expect(index[FIXTURE_VERSION].integrity).toBe(meta.integrity)
+    expect(built).toBe(meta.integrity)
+  })
+})
+
 describe('health', () => {
   it('responds ok', async () => {
     const res = await SELF.fetch(`${BASE}/_health`)

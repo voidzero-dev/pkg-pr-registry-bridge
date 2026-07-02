@@ -52,6 +52,15 @@ async function withRetry<T>(label: string, fn: () => Promise<T>, attempts = 4): 
   throw new Error(`${label} failed after ${attempts} attempts: ${lastErr}`)
 }
 
+// Per-attempt fetch deadlines. Without one, a hung connection stalls up to
+// undici's ~5-minute defaults, and 4 retry attempts across ~11 packages can
+// zombie a publish for tens of minutes (the 2026-07-02 incident's cancelled
+// attempt ran 21 minutes mid-publish). Bounding each attempt keeps retries
+// snappy and the whole run inside a predictable window. Transfers move up to
+// ~19 MB per request; the register call is a small JSON POST.
+const TRANSFER_TIMEOUT_MS = 120_000
+const PUBLISH_TIMEOUT_MS = 30_000
+
 async function fetchUpstream(
   env: RewriteEnv,
   name: string,
@@ -60,7 +69,7 @@ async function fetchUpstream(
   const url = toPkgPrNewUrl(env, name, version)
   if (!url) throw new Error(`cannot build pkg.pr.new url for ${name}@${version}`)
   return withRetry(`download ${name}`, async () => {
-    const res = await fetch(url)
+    const res = await fetch(url, { signal: AbortSignal.timeout(TRANSFER_TIMEOUT_MS) })
     if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)
     return new Uint8Array(await res.arrayBuffer())
   })
@@ -78,6 +87,7 @@ async function uploadTarball(
       method: 'PUT',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/gzip' },
       body: bytes,
+      signal: AbortSignal.timeout(TRANSFER_TIMEOUT_MS),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => '')}`)
   })
@@ -103,31 +113,49 @@ async function main(): Promise<void> {
   }
 
   console.log(`publishing ${version} to ${bridge}`)
-  const packages: PublishPackage[] = []
+  let published = 0
+
+  const postPublish = (body: Record<string, unknown>, label: string) =>
+    withRetry(label, async () => {
+      const res = await fetch(`${bridge}/-/publish`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(PUBLISH_TIMEOUT_MS),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => '')}`)
+    })
 
   // Download from pkg.pr.new, rewrite + re-pack + hash, upload the bytes, and
-  // return the meta to publish. Reuses the Worker's own build so CI's artifact
-  // is exactly what the Worker would describe.
-  const buildAndUpload = async (name: string, ver: string): Promise<PublishPackage> => {
+  // immediately publish this package's meta (register: false), so the stored
+  // tarball and the meta the packument serves can never diverge for longer
+  // than this one package's upload. A run cancelled part-way leaves later
+  // packages untouched instead of stranding bytes without metas (the mixed
+  // state a cancelled run previously served for its whole upload window).
+  // Reuses the Worker's own build so CI's artifact is exactly what the Worker
+  // would describe.
+  const publishPackage = async (name: string, ver: string): Promise<PublishPackage> => {
     const upstream = await fetchUpstream(env, name, ver)
     const build = await buildPreviewTarball(upstream, name, ver, env)
     await uploadTarball(bridge, token, name, ver, build.tarball)
-    console.log(`  ✓ ${name}@${ver} (${build.tarball.byteLength} bytes)`)
-    return {
+    const pkg: PublishPackage = {
       name,
       version: ver,
       packageJson: build.packageJson,
       integrity: build.integrity,
       shasum: build.shasum,
     }
+    await postPublish({ ref, prUrl, register: false, packages: [pkg] }, `publish ${name}`)
+    published++
+    console.log(`  ✓ ${name}@${ver} (${build.tarball.byteLength} bytes)`)
+    return pkg
   }
 
   // Preview packages first; vite-plus's rewritten optionalDependencies name the
   // platform binaries (each at the version vite-plus declares for it).
   let vitePlusPackageJson: Record<string, any> | undefined
   for (const name of PREVIEW_PACKAGES) {
-    const pkg = await buildAndUpload(name, version)
-    packages.push(pkg)
+    const pkg = await publishPackage(name, version)
     if (name === 'vite-plus') vitePlusPackageJson = pkg.packageJson
   }
 
@@ -136,20 +164,14 @@ async function main(): Promise<void> {
     ([name]) => isWorkspacePackage(name, env) && !isPreviewPackage(name),
   )
   for (const [name, depVersion] of binaries) {
-    packages.push(await buildAndUpload(name, depVersion))
+    await publishPackage(name, depVersion)
   }
 
-  // Publish the metas + register the ref in one call (after every upload, so a
-  // stored meta-with-integrity always has its bytes in R2).
-  await withRetry('publish', async () => {
-    const res = await fetch(`${bridge}/-/publish`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ ref, prUrl, packages }),
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => '')}`)
-  })
-  console.log(`published ${packages.length} packages, registered ${ref}`)
+  // Every package's bytes + meta are stored; registering the ref last flips
+  // the whole version visible atomically (a brand-new ref is not served at
+  // all until this succeeds).
+  await postPublish({ ref, prUrl, packages: [] }, 'register ref')
+  console.log(`published ${published} packages, registered ${ref}`)
 
   const out = process.env.GITHUB_OUTPUT
   if (out) {
