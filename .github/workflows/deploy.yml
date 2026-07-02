@@ -36,8 +36,13 @@ jobs:
         env:
           VOID_TOKEN: ${{ secrets.VOID_TOKEN }}
 
+      # SMOKE_ADMIN_TOKEN runs the admin write lifecycle against staging only;
+      # production smoke (below) never gets it, so no test artifacts are ever
+      # written to the live bridge.
       - name: Smoke-test staging
         run: node scripts/smoke-test.mjs https://pkg-pr-registry-bridge-staging.void.app
+        env:
+          SMOKE_ADMIN_TOKEN: ${{ secrets.STAGING_ADMIN_TOKEN }}
 
       # Only reached when the staging smoke test passed.
       - name: Deploy to production
@@ -48,5 +53,6 @@ jobs:
           # gitignored, so there is nothing to resolve from in CI.
           VOID_PROJECT: pkg-pr-registry-bridge
 
+      # Read-only: no SMOKE_ADMIN_TOKEN, so the write lifecycle is skipped.
       - name: Smoke-test production
         run: node scripts/smoke-test.mjs https://registry-bridge.viteplus.dev

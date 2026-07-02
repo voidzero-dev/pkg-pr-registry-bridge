@@ -39,5 +39,12 @@ jobs:
         env:
           VOID_TOKEN: ${{ secrets.VOID_TOKEN }}
 
+      # SMOKE_ADMIN_TOKEN enables the admin write lifecycle checks (publish ->
+      # register -> serve -> integrity) against the real staging runtime, the
+      # path two production incidents broke while unit tests stayed green. It is
+      # the staging bridge's ADMIN_TOKEN; production smoke never receives it, so
+      # the write flow only ever runs against disposable staging.
       - name: Smoke-test staging
         run: node scripts/smoke-test.mjs https://pkg-pr-registry-bridge-staging.void.app
+        env:
+          SMOKE_ADMIN_TOKEN: ${{ secrets.STAGING_ADMIN_TOKEN }}
