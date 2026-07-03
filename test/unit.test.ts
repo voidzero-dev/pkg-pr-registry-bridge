@@ -309,6 +309,63 @@ describe('rewritePackageJson', () => {
       `0.0.0-commit.${sha}`,
     )
   })
+
+  it('pins deps on batch members to the synthetic version', () => {
+    // The publish action packs local directories, so batch-internal deps
+    // arrive as plain workspace versions (pnpm pack resolved `workspace:*`),
+    // not pkg.pr.new URLs.
+    const out = rewritePackageJson(
+      {
+        name: 'vite-plus',
+        version: '0.2.2',
+        dependencies: {
+          '@voidzero-dev/vite-plus-core': '0.2.2',
+          picomatch: '^2.3.1',
+        },
+        optionalDependencies: {
+          '@voidzero-dev/vite-plus-darwin-arm64': '0.2.2',
+        },
+      },
+      'vite-plus',
+      `0.0.0-commit.${sha}`,
+      {
+        ...env,
+        batchPackages: new Set([
+          'vite-plus',
+          '@voidzero-dev/vite-plus-core',
+          '@voidzero-dev/vite-plus-darwin-arm64',
+        ]),
+      },
+    )
+    expect(out.version).toBe(`0.0.0-commit.${sha}`)
+    expect(out.dependencies['@voidzero-dev/vite-plus-core']).toBe(
+      `0.0.0-commit.${sha}`,
+    )
+    expect(out.dependencies.picomatch).toBe('^2.3.1')
+    expect(out.optionalDependencies['@voidzero-dev/vite-plus-darwin-arm64']).toBe(
+      `0.0.0-commit.${sha}`,
+    )
+  })
+
+  it('leaves non-batch workspace versions alone without a batch', () => {
+    // Worker path (no batchPackages): a plain version dep on a non-preview
+    // workspace package stays as-is; only pkg.pr.new URLs are routed.
+    const out = rewritePackageJson(
+      {
+        name: 'vite-plus',
+        version: '0.2.2',
+        optionalDependencies: {
+          '@voidzero-dev/vite-plus-darwin-arm64': '0.2.2',
+        },
+      },
+      'vite-plus',
+      `0.0.0-commit.${sha}`,
+      env,
+    )
+    expect(out.optionalDependencies['@voidzero-dev/vite-plus-darwin-arm64']).toBe(
+      '0.2.2',
+    )
+  })
 })
 
 describe('validateTarballPath', () => {

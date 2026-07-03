@@ -44,7 +44,7 @@ jobs:
           git diff --exit-code -- .github/actions/publish-preview/dist
 
       # vitest runs the Worker in workerd (Miniflare); no network or secrets.
-      # The deploy-time checks (warm + bun e2e) need a live deployment and run
-      # from `pnpm run deploy`, not here.
+      # The deploy-time check (bun e2e) needs a live deployment and runs from
+      # `pnpm run deploy`, not here.
       - name: Test
         run: pnpm test

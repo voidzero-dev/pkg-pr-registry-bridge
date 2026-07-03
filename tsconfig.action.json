@@ -1,5 +1,8 @@
 {
-  "extends": "./.void/tsconfig.json",
+  // The publish action and its tests run in Node (GitHub runner), not the
+  // Worker, so they typecheck against Node types instead of `void/env`. The
+  // Worker modules the action imports are checked transitively; they only use
+  // web-standard globals present in both runtimes.
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
@@ -8,7 +11,7 @@
       "ES2022"
     ],
     "types": [
-      "void/env"
+      "node"
     ],
     "strict": true,
     "skipLibCheck": true,
@@ -19,17 +22,7 @@
     "forceConsistentCasingInFileNames": true
   },
   "include": [
-    "src",
-    "routes",
-    "crons",
-    "env.ts",
-    "test",
-    "vite.config.ts",
-    "vitest.config.ts"
-  ],
-  // The action tests run in Node, not the Worker: tsconfig.action.json checks
-  // them (and the action source) against Node types.
-  "exclude": [
+    ".github/actions/publish-preview/src",
     "test/action"
   ]
 }

@@ -8,6 +8,15 @@ export interface RewriteEnv {
   PREVIEW_OWNER: string
   PREVIEW_REPO: string
   WORKSPACE_PACKAGES: string
+  /**
+   * Names of the packages being published together in one batch. Set by the
+   * publish action (which packs local directories, so inter-package deps
+   * arrive as plain workspace versions, e.g. `0.2.2`): any dep on a batch
+   * member is pinned to the synthetic version, the coherence pkg.pr.new's URL
+   * rewriting used to provide. Unset in the Worker, whose upstream tarballs
+   * carry pkg.pr.new URLs instead (handled by pkgPrNewUrlToVersion).
+   */
+  batchPackages?: ReadonlySet<string>
 }
 
 /**
@@ -39,6 +48,7 @@ export function pkgPrNewUrlToVersion(
 /**
  * Rewrite a dependency map:
  *  - preview packages (vite-plus, core) -> the synthetic preview version,
+ *  - packages published in the same batch -> the synthetic preview version,
  *  - direct pkg.pr.new URLs -> the synthetic version string for that ref,
  *  - everything else -> unchanged.
  */
@@ -50,7 +60,7 @@ function rewriteDependencies(
   if (!deps) return deps
   const next = { ...deps }
   for (const [name, spec] of Object.entries(deps)) {
-    if (PREVIEW_PACKAGES.has(name)) {
+    if (PREVIEW_PACKAGES.has(name) || env.batchPackages?.has(name)) {
       next[name] = version
       continue
     }
