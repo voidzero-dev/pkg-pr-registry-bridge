@@ -116,6 +116,18 @@ export function latestVersionByPr(
   return out
 }
 
+/**
+ * Remove a ref from the runtime index (used by purge with `unregister: true`,
+ * e.g. to fully clean up a smoke-test artifact). Concurrency-safe via the
+ * conditional put; removing an absent ref is a no-op.
+ */
+export async function unregisterRef(env: Env, ref: string): Promise<void> {
+  const [parsed] = parseConfiguredPreviewRefs(ref)
+  await mutateRefIndex(env, (index) => {
+    delete index[canonical(parsed)]
+  })
+}
+
 /** Validate and register a ref. Concurrency-safe via the conditional put. */
 export async function registerRef(
   env: Env,

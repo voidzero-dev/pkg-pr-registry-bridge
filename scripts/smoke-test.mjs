@@ -4,14 +4,36 @@
 // while all unit tests passed). Run it against staging before promoting to
 // production.
 //
-//   node scripts/smoke-test.mjs https://pkg-pr-registry-bridge-staging.void.app
+//   node scripts/smoke-test.mjs <base-url> [--write]
 //
 // Each check prints the actual response (status + key fields/headers) BEFORE
 // asserting, so a failure is debuggable straight from the CI log.
+//
+// `--write` (staging only, never production) additionally runs the full admin
+// write lifecycle end-to-end against the real runtime: upload a tarball,
+// publish its meta, assert the version is NOT served until the ref is
+// registered, register it, then assert the packument advertises an integrity
+// that matches the exact served tarball bytes. This is the publish -> register
+// -> serve -> integrity path that two production incidents broke while every
+// unit test stayed green; it self-cleans by purging (and unregistering) the
+// artifact afterward. The flag is explicit so a missing SMOKE_ADMIN_TOKEN
+// fails loudly instead of silently skipping the coverage.
 
-const base = (process.argv[2] || '').replace(/\/+$/, '')
+import { createTarGzip } from 'nanotar'
+import { createHash } from 'node:crypto'
+import { refToVersion } from './lib/config.mjs'
+
+const args = process.argv.slice(2)
+const WRITE = args.includes('--write')
+const base = (args.find((a) => !a.startsWith('--')) ?? '').replace(/\/+$/, '')
 if (!base) {
-  console.error('usage: node scripts/smoke-test.mjs <base-url>')
+  console.error('usage: node scripts/smoke-test.mjs <base-url> [--write]')
+  process.exit(2)
+}
+
+const ADMIN_TOKEN = process.env.SMOKE_ADMIN_TOKEN
+if (WRITE && !ADMIN_TOKEN) {
+  console.error('--write requires SMOKE_ADMIN_TOKEN (the deployment\'s ADMIN_TOKEN)')
   process.exit(2)
 }
 
@@ -25,6 +47,104 @@ const truncate = (s, n = 300) => (s.length > n ? `${s.slice(0, n)}…` : s)
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg)
+}
+
+// npm dist.integrity SRI from tarball bytes.
+const sri = (buf) => `sha512-${createHash('sha512').update(buf).digest('base64')}`
+
+const postJson = (path, body) =>
+  fetch(`${base}${path}`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${ADMIN_TOKEN}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+
+/**
+ * The full admin write lifecycle against the real runtime. Uses a unique,
+ * clearly-labelled `e2e` commit sha per run so it never collides with real
+ * refs, and purges + unregisters the artifact at the end.
+ */
+async function runAdminLifecycle() {
+  const name = 'vite-plus'
+  // Unique per run, valid [0-9a-f]{7,40}, recognizable as a smoke artifact.
+  const ref = `commit.e2e${Date.now().toString(16)}`
+  const version = refToVersion(ref)
+
+  // Build a real, valid preview tarball and derive its integrity from the exact
+  // bytes we upload, the same way CI's publish action does.
+  const tarball = await createTarGzip([
+    { name: 'package/package.json', data: JSON.stringify({ name, version }) },
+    { name: 'package/index.js', data: 'export const smoke = true\n' },
+  ])
+  const integrity = sri(tarball)
+
+  const fetchDist = async () => {
+    const res = await fetch(`${base}/${name}`, {
+      headers: { accept: 'application/vnd.npm.install-v1+json' },
+    })
+    const body = await res.json()
+    return body?.versions?.[version]?.dist ?? null
+  }
+
+  try {
+    // 1. Upload the tarball bytes (worker streams them straight into R2).
+    const up = await fetch(`${base}/-/tarball/${name}/${version}.tgz`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}`, 'content-type': 'application/gzip' },
+      body: tarball,
+    })
+    console.log(`    PUT tarball -> ${up.status}`)
+    assert(up.status === 201, `upload status ${up.status}`)
+
+    // 2. Publish the meta. This must NOT make the version visible on its own.
+    const shasum = createHash('sha1').update(tarball).digest('hex')
+    const pub = await postJson('/-/publish', {
+      ref,
+      packages: [{ name, version, packageJson: { name, version }, integrity, shasum }],
+    })
+    console.log(`    POST /-/publish -> ${pub.status}`)
+    assert(pub.status === 201, `publish status ${pub.status}`)
+
+    // 3. The atomic gate: an unregistered version is invisible in the packument.
+    const beforeRegister = await fetchDist()
+    console.log(`    packument before register: ${beforeRegister ? 'PRESENT (bug)' : 'absent'}`)
+    assert(!beforeRegister, 'version visible before /-/register (atomic gate broken)')
+
+    // 4. Register the ref: flips the version visible.
+    const reg = await postJson('/-/register', { ref })
+    console.log(`    POST /-/register -> ${reg.status}`)
+    assert(reg.status === 201, `register status ${reg.status}`)
+
+    // 5. Now it is served, and its advertised integrity must match the bytes
+    // (the invariant both production incidents violated).
+    const dist = await fetchDist()
+    console.log(`    packument after register: integrity=${dist?.integrity?.slice(0, 20)}…`)
+    assert(dist, 'version absent from packument after register')
+    assert(dist.integrity === integrity, 'packument integrity != uploaded integrity')
+
+    // 6. Fetch the actually-served tarball from the runtime under test and
+    // confirm its bytes hash to the advertised integrity (catches a stale or
+    // mismatched served body directly). Use dist.tarball's PATH against `base`
+    // rather than its absolute URL: a staging deploy sets PUBLIC_BASE_URL to
+    // the production host, so dist.tarball points at prod, where this staging
+    // artifact does not exist. We want to verify the bytes THIS runtime serves.
+    assert(dist.tarball, 'no dist.tarball in packument')
+    const tarUrl = `${base}${new URL(dist.tarball).pathname}`
+    const tres = await fetch(tarUrl)
+    const served = new Uint8Array(await tres.arrayBuffer())
+    const servedIntegrity = sri(served)
+    console.log(`    GET ${tarUrl} -> ${tres.status}, served integrity=${servedIntegrity.slice(0, 20)}…`)
+    assert(tres.status === 200, `served tarball status ${tres.status}`)
+    assert(servedIntegrity === integrity, 'served tarball bytes != advertised integrity')
+  } finally {
+    // Fully clean up: unregister too, or every run leaks a registered e2e ref
+    // into /-/refs (and packument rebuilds) until the 90-day TTL.
+    const p = await postJson('/-/purge', { package: name, version, unregister: true }).catch(() => null)
+    console.log(`    cleanup: purge+unregister -> ${p ? p.status : 'error (ignored)'}`)
+  }
 }
 
 const checks = [
@@ -102,6 +222,18 @@ const checks = [
   },
 ]
 
+if (WRITE) {
+  // Not retried (`retry: false`): a retry after a partial run would false-fail
+  // the "invisible before register" gate, and the sha is unique per run anyway.
+  checks.push({
+    name: 'admin publish -> register -> serve -> integrity (lifecycle)',
+    retry: false,
+    run: runAdminLifecycle,
+  })
+} else {
+  console.log('read-only mode (pass --write to include the admin lifecycle)')
+}
+
 console.log(`smoke-testing ${base}`)
 
 // Retry each check until it passes or a shared deadline, to ride out edge
@@ -128,7 +260,7 @@ async function runWithRetry(check) {
 let failed = 0
 for (const check of checks) {
   try {
-    await runWithRetry(check)
+    await (check.retry === false ? check.run() : runWithRetry(check))
     console.log(`  ✓ ${check.name}`)
   } catch (err) {
     console.error(`  ✗ ${check.name}: ${err.message}`)

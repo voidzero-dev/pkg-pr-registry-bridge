@@ -1002,6 +1002,33 @@ describe('admin: purge', () => {
     })
   })
 
+  it('unregister:true also removes the ref; default leaves it registered', async () => {
+    const listedRefs = async () =>
+      ((await (await SELF.fetch(`${BASE}/-/refs`)).json()) as any).refs.map(
+        (r: any) => r.ref,
+      )
+    const purge = (unregister?: boolean) =>
+      SELF.fetch(`${BASE}/-/purge`, {
+        method: 'POST',
+        headers: { ...AUTH, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          package: 'vite-plus',
+          version: FIXTURE_VERSION,
+          ...(unregister === undefined ? {} : { unregister }),
+        }),
+      })
+
+    // Default purge: artifacts go, the ref stays registered (other packages of
+    // the same version keep being served).
+    expect((await purge()).status).toBe(200)
+    expect(await listedRefs()).toContain('commit.a832a55')
+
+    // unregister:true removes the ref too, so a fully-cleaned-up version (e.g.
+    // a smoke-test artifact) stops appearing in /-/refs and packuments.
+    expect((await purge(true)).status).toBe(200)
+    expect(await listedRefs()).not.toContain('commit.a832a55')
+  })
+
   it('drops the purged version from the meta aggregate', async () => {
     const sha = 'cdcdcd0'
     const ver = `0.0.0-commit.${sha}`

@@ -39,5 +39,9 @@ jobs:
         env:
           VOID_TOKEN: ${{ secrets.VOID_TOKEN }}
 
+      # --write runs the admin write lifecycle too (see scripts/smoke-test.mjs
+      # header); staging only, and it fails loudly if the token secret is missing.
       - name: Smoke-test staging
-        run: node scripts/smoke-test.mjs https://pkg-pr-registry-bridge-staging.void.app
+        run: node scripts/smoke-test.mjs https://pkg-pr-registry-bridge-staging.void.app --write
+        env:
+          SMOKE_ADMIN_TOKEN: ${{ secrets.STAGING_ADMIN_TOKEN }}
