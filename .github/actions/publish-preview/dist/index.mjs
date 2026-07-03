@@ -345,7 +345,15 @@ function shaToVersion(ref) {
 }
 
 // src/tarball/rewritePackageJson.ts
+var DEPENDENCY_FIELDS = [
+  "dependencies",
+  "peerDependencies",
+  "optionalDependencies"
+];
 function pkgPrNewUrlToVersion(spec, env) {
+  if (!env.PKG_PR_NEW_BASE || !env.PREVIEW_OWNER || !env.PREVIEW_REPO) {
+    return null;
+  }
   const prefix = `${env.PKG_PR_NEW_BASE}/${env.PREVIEW_OWNER}/${env.PREVIEW_REPO}/`;
   if (!spec.startsWith(prefix)) return null;
   const rest = spec.slice(prefix.length);
@@ -355,11 +363,11 @@ function pkgPrNewUrlToVersion(spec, env) {
   if (!isWorkspacePackage(name, env)) return null;
   return shaToVersion(rest.slice(at + 1));
 }
-function rewriteDependencies(deps, version, env) {
+function rewriteDependencies(deps, version, env, pinned) {
   if (!deps) return deps;
   const next = { ...deps };
   for (const [name, spec] of Object.entries(deps)) {
-    if (PREVIEW_PACKAGES.has(name) || env.batchPackages?.has(name)) {
+    if (pinned.has(name)) {
       next[name] = version;
       continue;
     }
@@ -368,22 +376,15 @@ function rewriteDependencies(deps, version, env) {
   }
   return next;
 }
-function rewritePackageJson(pkg, packageName, version, env) {
+function rewritePackageJson(pkg, packageName, version, env, batch) {
+  const pinned = batch ?? PREVIEW_PACKAGES;
   const next = { ...pkg };
   next.name = packageName;
   next.version = version;
-  if (next.dependencies) {
-    next.dependencies = rewriteDependencies(next.dependencies, version, env);
-  }
-  if (next.peerDependencies) {
-    next.peerDependencies = rewriteDependencies(next.peerDependencies, version, env);
-  }
-  if (next.optionalDependencies) {
-    next.optionalDependencies = rewriteDependencies(
-      next.optionalDependencies,
-      version,
-      env
-    );
+  for (const field of DEPENDENCY_FIELDS) {
+    if (next[field]) {
+      next[field] = rewriteDependencies(next[field], version, env, pinned);
+    }
   }
   return next;
 }
@@ -466,9 +467,9 @@ async function parsePackageJson(gzippedTarball) {
     throw new HttpError(422, "Invalid package/package.json in upstream tarball");
   }
 }
-async function buildPreviewTarball(gzippedTarball, packageName, version, env) {
+async function buildPreviewTarball(gzippedTarball, packageName, version, env, batch) {
   const { files, pkgEntry, pkg } = await parsePackageJson(gzippedTarball);
-  const rewritten = rewritePackageJson(pkg, packageName, version, env);
+  const rewritten = rewritePackageJson(pkg, packageName, version, env, batch);
   const rewrittenBytes = encodePackageJson(rewritten);
   const out = [];
   for (const file of files) {
@@ -562,6 +563,32 @@ function expandPackageDirs(patterns, cwd) {
 function readManifest(dir) {
   return JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
 }
+function assertValidBatch(packages, env) {
+  if (packages.length === 0) {
+    throw new Error("packages matched no package directories");
+  }
+  const batch = /* @__PURE__ */ new Set();
+  for (const { dir, manifest } of packages) {
+    const name = manifest.name;
+    if (!name || !isWorkspacePackage(name, env)) {
+      throw new Error(`not an allowed workspace package: ${name} (${dir})`);
+    }
+    if (batch.has(name)) throw new Error(`duplicate package in batch: ${name}`);
+    batch.add(name);
+  }
+  for (const { manifest } of packages) {
+    for (const field of DEPENDENCY_FIELDS) {
+      for (const dep of Object.keys(manifest[field] ?? {})) {
+        if (isWorkspacePackage(dep, env) && !batch.has(dep)) {
+          throw new Error(
+            `${manifest.name} ${field} needs ${dep}, which is not in this publish batch`
+          );
+        }
+      }
+    }
+  }
+  return batch;
+}
 async function packDirectory(dir) {
   const dest = mkdtempSync(join(tmpdir(), "bridge-pack-"));
   try {
@@ -581,6 +608,7 @@ async function packDirectory(dir) {
 }
 
 // .github/actions/publish-preview/src/index.ts
+var DEFAULT_PACKAGES = "packages/cli,packages/core,packages/prompts,packages/cli/npm/*,packages/cli/cli-npm/*";
 function input(name, required = false) {
   const value = (process.env[`INPUT_${name.toUpperCase()}`] ?? "").trim();
   if (required && !value) throw new Error(`missing required input: ${name}`);
@@ -620,38 +648,16 @@ async function main() {
   const token = input("admin-token", true);
   const prUrl = input("pr-url") || void 0;
   const cwd = process.cwd();
-  const dirs = expandPackageDirs(parsePackagesInput(input("packages", true)), cwd);
+  const dirs = expandPackageDirs(
+    parsePackagesInput(input("packages") || DEFAULT_PACKAGES),
+    cwd
+  );
   const packages = dirs.map((dir) => ({ dir, manifest: readManifest(dir) }));
   const env = {
     PUBLIC_BASE_URL: bridge,
-    // Only used to recognize pkg.pr.new URL deps in a manifest; locally packed
-    // manifests never contain them, so these just satisfy the shared config.
-    PKG_PR_NEW_BASE: "https://pkg.pr.new",
-    PREVIEW_OWNER: "voidzero-dev",
-    PREVIEW_REPO: "vite-plus",
     WORKSPACE_PACKAGES: input("workspace-packages") || "vite-plus,@voidzero-dev/vite-plus-*"
   };
-  const batch = /* @__PURE__ */ new Set();
-  for (const { dir, manifest } of packages) {
-    const name = manifest.name;
-    if (!name || !isWorkspacePackage(name, env)) {
-      throw new Error(`not an allowed workspace package: ${name} (${dir})`);
-    }
-    if (batch.has(name)) throw new Error(`duplicate package in batch: ${name}`);
-    batch.add(name);
-  }
-  env.batchPackages = batch;
-  for (const { manifest } of packages) {
-    for (const field of ["dependencies", "peerDependencies", "optionalDependencies"]) {
-      for (const dep of Object.keys(manifest[field] ?? {})) {
-        if (isWorkspacePackage(dep, env) && !batch.has(dep)) {
-          throw new Error(
-            `${manifest.name} ${field} needs ${dep}, which is not in this publish batch`
-          );
-        }
-      }
-    }
-  }
+  const batch = assertValidBatch(packages, env);
   console.log(`publishing ${version} (${packages.length} packages) to ${bridge}`);
   const post = (path, body, label) => withRetry(label, async () => {
     const res = await fetch(`${bridge}${path}`, {
@@ -662,9 +668,18 @@ async function main() {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => "")}`);
   });
-  for (const { dir, manifest } of packages) {
-    const packed = await packDirectory(dir);
-    const build = await buildPreviewTarball(packed, manifest.name, version, env);
+  const startPack = (i) => {
+    const packed = packDirectory(packages[i].dir);
+    packed.catch(() => {
+    });
+    return packed;
+  };
+  let nextPack = startPack(0);
+  for (let i = 0; i < packages.length; i++) {
+    const { dir, manifest } = packages[i];
+    const packed = await nextPack;
+    if (i + 1 < packages.length) nextPack = startPack(i + 1);
+    const build = await buildPreviewTarball(packed, manifest.name, version, env, batch);
     await uploadTarball(bridge, token, manifest.name, version, build.tarball);
     const pkg = {
       name: manifest.name,

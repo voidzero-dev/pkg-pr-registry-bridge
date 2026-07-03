@@ -328,14 +328,12 @@ describe('rewritePackageJson', () => {
       },
       'vite-plus',
       `0.0.0-commit.${sha}`,
-      {
-        ...env,
-        batchPackages: new Set([
-          'vite-plus',
-          '@voidzero-dev/vite-plus-core',
-          '@voidzero-dev/vite-plus-darwin-arm64',
-        ]),
-      },
+      env,
+      new Set([
+        'vite-plus',
+        '@voidzero-dev/vite-plus-core',
+        '@voidzero-dev/vite-plus-darwin-arm64',
+      ]),
     )
     expect(out.version).toBe(`0.0.0-commit.${sha}`)
     expect(out.dependencies['@voidzero-dev/vite-plus-core']).toBe(

@@ -16,6 +16,8 @@ import {
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
+import { isWorkspacePackage } from '../../../../src/preview/packages'
+import { DEPENDENCY_FIELDS } from '../../../../src/tarball/rewritePackageJson'
 
 const execFileAsync = promisify(execFile)
 
@@ -71,6 +73,51 @@ export function expandPackageDirs(patterns: string[], cwd: string): string[] {
 /** Read a directory's package.json (the manifest as authored on disk). */
 export function readManifest(dir: string): Record<string, any> {
   return JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
+}
+
+/** A package directory queued for publishing, with its on-disk manifest. */
+export interface PackageDir {
+  dir: string
+  manifest: Record<string, any>
+}
+
+/**
+ * Validate the publish batch and return its package names (the set that
+ * dependency rewriting pins to the synthetic version). Every manifest must be
+ * an allowed workspace package, named once; and every workspace dep must be
+ * satisfied by the batch, since a missing member (e.g. a platform dir a
+ * failed build never produced) would leave a dep pinned to a version that
+ * will never exist on the bridge, breaking installs only on that platform.
+ * Runs before anything is packed or uploaded.
+ */
+export function assertValidBatch(
+  packages: PackageDir[],
+  env: { WORKSPACE_PACKAGES?: string },
+): Set<string> {
+  if (packages.length === 0) {
+    throw new Error('packages matched no package directories')
+  }
+  const batch = new Set<string>()
+  for (const { dir, manifest } of packages) {
+    const name = manifest.name as string | undefined
+    if (!name || !isWorkspacePackage(name, env)) {
+      throw new Error(`not an allowed workspace package: ${name} (${dir})`)
+    }
+    if (batch.has(name)) throw new Error(`duplicate package in batch: ${name}`)
+    batch.add(name)
+  }
+  for (const { manifest } of packages) {
+    for (const field of DEPENDENCY_FIELDS) {
+      for (const dep of Object.keys(manifest[field] ?? {})) {
+        if (isWorkspacePackage(dep, env) && !batch.has(dep)) {
+          throw new Error(
+            `${manifest.name} ${field} needs ${dep}, which is not in this publish batch`,
+          )
+        }
+      }
+    }
+  }
+  return batch
 }
 
 /** Pack one directory with `pnpm pack` and return the gzipped tarball bytes. */

@@ -130,10 +130,11 @@ export async function buildPreviewTarball(
   packageName: string,
   version: string,
   env: RewriteEnv,
+  batch?: ReadonlySet<string>,
 ): Promise<PreviewBuild> {
   const { files, pkgEntry, pkg } = await parsePackageJson(gzippedTarball)
 
-  const rewritten = rewritePackageJson(pkg, packageName, version, env)
+  const rewritten = rewritePackageJson(pkg, packageName, version, env, batch)
   const rewrittenBytes = encodePackageJson(rewritten)
 
   const out: TarFileInput[] = []

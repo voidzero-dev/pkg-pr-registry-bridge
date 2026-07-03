@@ -19,16 +19,13 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { parseArgs } from 'node:util'
 import { readConfig, normalizeSha } from './lib/config.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ACTION = path.join(root, '.github/actions/publish-preview/dist/index.mjs')
 const ADMIN_TOKEN =
   process.env.PKG_PR_BRIDGE_ADMIN_TOKEN || process.env.ADMIN_TOKEN || ''
-
-// Mirrors the directories vite-plus's publish workflow passes to the action.
-const DEFAULT_PACKAGES =
-  'packages/cli,packages/core,packages/prompts,packages/cli/npm/*,packages/cli/cli-npm/*'
 
 function publish(sha, bridge, repo, packages) {
   return new Promise((resolve, reject) => {
@@ -38,7 +35,8 @@ function publish(sha, bridge, repo, packages) {
       env: {
         ...process.env,
         INPUT_SHA: sha,
-        INPUT_PACKAGES: packages,
+        // Omitted unless overridden: the action's default matches vite-plus.
+        ...(packages ? { INPUT_PACKAGES: packages } : {}),
         'INPUT_BRIDGE-URL': bridge,
         'INPUT_ADMIN-TOKEN': ADMIN_TOKEN,
       },
@@ -60,14 +58,24 @@ if (!ADMIN_TOKEN) {
   process.exit(1)
 }
 
-const cliArgs = process.argv.slice(2).map((s) => s.trim()).filter(Boolean)
 let repo = ''
-let packages = DEFAULT_PACKAGES
-const positional = []
-for (let i = 0; i < cliArgs.length; i++) {
-  if (cliArgs[i] === '--repo') repo = cliArgs[++i] ?? ''
-  else if (cliArgs[i] === '--packages') packages = cliArgs[++i] ?? ''
-  else positional.push(cliArgs[i])
+let packages = ''
+let positional = []
+try {
+  const { values, positionals } = parseArgs({
+    options: {
+      repo: { type: 'string' },
+      packages: { type: 'string' },
+    },
+    allowPositionals: true,
+  })
+  repo = values.repo ?? ''
+  packages = values.packages ?? ''
+  positional = positionals
+} catch (err) {
+  console.error(`warm: ${err.message}`)
+  console.error('usage: node scripts/warm.mjs --repo <vite-plus-checkout> [--packages "<list>"] <sha>')
+  process.exit(1)
 }
 
 if (positional.length === 0) {

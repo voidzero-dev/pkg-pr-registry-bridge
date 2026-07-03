@@ -15,8 +15,10 @@ inputs:
       the workspace. A trailing "/*" expands to every direct subdirectory
       containing a package.json (e.g. packages/cli/npm/*). Pass the same
       directories a registry publish would cover; deps between them are pinned
-      to the synthetic version.
-    required: true
+      to the synthetic version. Defaults to the vite-plus layout (packages/cli,
+      packages/core, packages/prompts, packages/cli/npm/*,
+      packages/cli/cli-npm/*); the authoritative default lives in the action.
+    required: false
   bridge-url:
     description: 'Base URL of the registry bridge.'
     required: false

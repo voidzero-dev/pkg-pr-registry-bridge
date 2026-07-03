@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
+  assertValidBatch,
   expandPackageDirs,
   packDirectory,
   parsePackagesInput,
@@ -15,11 +16,10 @@ import type { RewriteEnv } from '../../src/tarball/rewritePackageJson'
 const SHA = '6acea1aa818e96365b5811d47360367ba18a3a05'
 const VERSION = `0.0.0-commit.${SHA}`
 
+// The action's env: no pkg.pr.new fields, locally packed manifests never
+// carry pkg.pr.new URL deps.
 const env: RewriteEnv = {
   PUBLIC_BASE_URL: 'https://bridge.example.com',
-  PKG_PR_NEW_BASE: 'https://pkg.pr.new',
-  PREVIEW_OWNER: 'voidzero-dev',
-  PREVIEW_REPO: 'vite-plus',
   WORKSPACE_PACKAGES: 'vite-plus,@voidzero-dev/vite-plus-*',
 }
 
@@ -116,6 +116,40 @@ describe('expandPackageDirs', () => {
   })
 })
 
+describe('assertValidBatch', () => {
+  const pkg = (name: string, deps?: Record<string, string>) => ({
+    dir: `/fixture/${name}`,
+    manifest: { name, version: '0.2.2', ...(deps ? { dependencies: deps } : {}) },
+  })
+
+  it('returns the batch names when every workspace dep is covered', () => {
+    const batch = assertValidBatch(
+      [pkg('vite-plus', { '@voidzero-dev/vite-plus-prompts': '0.2.2', picomatch: '^2.3.1' }), pkg('@voidzero-dev/vite-plus-prompts')],
+      env,
+    )
+    expect(batch).toEqual(new Set(['vite-plus', '@voidzero-dev/vite-plus-prompts']))
+  })
+
+  it('rejects an empty batch, non-workspace names, and duplicates', () => {
+    expect(() => assertValidBatch([], env)).toThrow(/matched no package/)
+    expect(() => assertValidBatch([pkg('left-pad')], env)).toThrow(
+      /not an allowed workspace package/,
+    )
+    expect(() =>
+      assertValidBatch([pkg('vite-plus'), pkg('vite-plus')], env),
+    ).toThrow(/duplicate package/)
+  })
+
+  it('rejects a workspace dep missing from the batch', () => {
+    expect(() =>
+      assertValidBatch(
+        [pkg('vite-plus', { '@voidzero-dev/vite-plus-prompts': '0.2.2' })],
+        env,
+      ),
+    ).toThrow(/not in this publish batch/)
+  })
+})
+
 describe('packDirectory', () => {
   it('packs a workspace member; the batch rewrite pins its workspace dep', async () => {
     const packed = await packDirectory(join(root, 'packages/cli'))
@@ -129,10 +163,13 @@ describe('packDirectory', () => {
 
     // Publishing prompts in the same batch pins the dep to the synthetic
     // version, so the whole batch resolves through the bridge.
-    const build = await buildPreviewTarball(packed, 'vite-plus', VERSION, {
-      ...env,
-      batchPackages: new Set(['vite-plus', '@voidzero-dev/vite-plus-prompts']),
-    })
+    const build = await buildPreviewTarball(
+      packed,
+      'vite-plus',
+      VERSION,
+      env,
+      new Set(['vite-plus', '@voidzero-dev/vite-plus-prompts']),
+    )
     expect(build.packageJson.version).toBe(VERSION)
     expect(build.packageJson.dependencies['@voidzero-dev/vite-plus-prompts']).toBe(
       VERSION,

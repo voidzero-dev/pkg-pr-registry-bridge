@@ -41,22 +41,18 @@ prepares `packages/cli/npm/*` and `packages/cli/cli-npm/*` on disk):
 - uses: voidzero-dev/pkg-pr-registry-bridge@main
   with:
     sha: ${{ github.event.pull_request.head.sha }}
-    packages: |
-      packages/cli
-      packages/core
-      packages/prompts
-      packages/cli/npm/*
-      packages/cli/cli-npm/*
     admin-token: ${{ secrets.PKG_PR_BRIDGE_ADMIN_TOKEN }}
     # Optional: surfaced by /-/refs. Omit/empty on push runs (no PR).
     pr-url: ${{ github.event.pull_request.html_url }}
     # bridge-url defaults to https://registry-bridge.viteplus.dev
+    # packages defaults to the vite-plus layout: packages/cli, packages/core,
+    # packages/prompts, packages/cli/npm/*, packages/cli/cli-npm/*
 ```
 
 The runner needs pnpm on `PATH` (pnpm/action-setup) and the workspace
 installed (`pnpm install`), or `pnpm pack` cannot resolve `workspace:` specs.
-Deps between the listed packages are pinned to the synthetic version, so a
-package whose dep is missing from the list fails the run up front (before
+Deps between the published packages are pinned to the synthetic version, so a
+package whose dep is missing from the batch fails the run up front (before
 anything uploads) rather than publishing a version with a dangling dep.
 
 > Use `github.event.pull_request.head.sha`, not `github.sha`: on `pull_request`

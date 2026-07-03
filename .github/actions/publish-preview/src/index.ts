@@ -21,15 +21,21 @@
  */
 import { relative } from 'node:path'
 import { buildPreviewTarball } from '../../../../src/tarball/buildPreviewTarball'
-import { isWorkspacePackage } from '../../../../src/preview/packages'
 import { parseConfiguredPreviewRefs } from '../../../../src/preview/parseConfiguredPreviewRefs'
 import type { RewriteEnv } from '../../../../src/tarball/rewritePackageJson'
 import {
+  assertValidBatch,
   expandPackageDirs,
   packDirectory,
   parsePackagesInput,
   readManifest,
 } from './localPack'
+
+// The vite-plus layout, overridable via the `packages` input. Lives here (not
+// action.yml) so direct invocations of the bundle (scripts/warm.mjs) get the
+// same default.
+const DEFAULT_PACKAGES =
+  'packages/cli,packages/core,packages/prompts,packages/cli/npm/*,packages/cli/cli-npm/*'
 
 function input(name: string, required = false): string {
   const value = (process.env[`INPUT_${name.toUpperCase()}`] ?? '').trim()
@@ -90,47 +96,22 @@ async function main(): Promise<void> {
   const prUrl = input('pr-url') || undefined
 
   const cwd = process.cwd()
-  const dirs = expandPackageDirs(parsePackagesInput(input('packages', true)), cwd)
+  const dirs = expandPackageDirs(
+    parsePackagesInput(input('packages') || DEFAULT_PACKAGES),
+    cwd,
+  )
   const packages = dirs.map((dir) => ({ dir, manifest: readManifest(dir) }))
 
+  // Locally packed manifests never carry pkg.pr.new URL deps, so the
+  // pkg.pr.new fields of the shared config stay unset here.
   const env: RewriteEnv = {
     PUBLIC_BASE_URL: bridge,
-    // Only used to recognize pkg.pr.new URL deps in a manifest; locally packed
-    // manifests never contain them, so these just satisfy the shared config.
-    PKG_PR_NEW_BASE: 'https://pkg.pr.new',
-    PREVIEW_OWNER: 'voidzero-dev',
-    PREVIEW_REPO: 'vite-plus',
     WORKSPACE_PACKAGES: input('workspace-packages') || 'vite-plus,@voidzero-dev/vite-plus-*',
   }
 
-  // The batch (every name publishing together) drives dependency rewriting.
-  // Validate it up front, before anything is packed or uploaded.
-  const batch = new Set<string>()
-  for (const { dir, manifest } of packages) {
-    const name = manifest.name as string | undefined
-    if (!name || !isWorkspacePackage(name, env)) {
-      throw new Error(`not an allowed workspace package: ${name} (${dir})`)
-    }
-    if (batch.has(name)) throw new Error(`duplicate package in batch: ${name}`)
-    batch.add(name)
-  }
-  env.batchPackages = batch
-
-  // Every workspace dep must be satisfied by this batch: a missing member
-  // (e.g. a platform dir a failed build never produced) would leave a dep
-  // pointing at a version that will never exist on the bridge, breaking
-  // installs only on that platform. Fail before publishing anything.
-  for (const { manifest } of packages) {
-    for (const field of ['dependencies', 'peerDependencies', 'optionalDependencies'] as const) {
-      for (const dep of Object.keys(manifest[field] ?? {})) {
-        if (isWorkspacePackage(dep, env) && !batch.has(dep)) {
-          throw new Error(
-            `${manifest.name} ${field} needs ${dep}, which is not in this publish batch`,
-          )
-        }
-      }
-    }
-  }
+  // The batch (every name publishing together) drives dependency rewriting;
+  // validation fails up front, before anything is packed or uploaded.
+  const batch = assertValidBatch(packages, env)
 
   console.log(`publishing ${version} (${packages.length} packages) to ${bridge}`)
 
@@ -151,9 +132,23 @@ async function main(): Promise<void> {
   // cancelled part-way leaves later packages untouched instead of stranding
   // bytes without metas. Reuses the Worker's own build so CI's artifact is
   // exactly what the Worker would describe.
-  for (const { dir, manifest } of packages) {
-    const packed = await packDirectory(dir)
-    const build = await buildPreviewTarball(packed, manifest.name, version, env)
+  //
+  // The next `pnpm pack` runs while the current package uploads (one ahead,
+  // bounding memory to two tarballs); the bridge-visible order, upload then
+  // publish per package with register last, is unchanged. The swallowed
+  // rejection resurfaces at the `await`; it only avoids an unhandled-rejection
+  // crash when an upload fails first.
+  const startPack = (i: number) => {
+    const packed = packDirectory(packages[i].dir)
+    packed.catch(() => {})
+    return packed
+  }
+  let nextPack = startPack(0)
+  for (let i = 0; i < packages.length; i++) {
+    const { dir, manifest } = packages[i]
+    const packed = await nextPack
+    if (i + 1 < packages.length) nextPack = startPack(i + 1)
+    const build = await buildPreviewTarball(packed, manifest.name, version, env, batch)
     await uploadTarball(bridge, token, manifest.name, version, build.tarball)
     const pkg = {
       name: manifest.name,
