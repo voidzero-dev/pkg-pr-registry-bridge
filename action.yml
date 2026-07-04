@@ -1,13 +1,24 @@
-name: 'Publish pkg.pr.new preview to the registry bridge'
+name: 'Publish preview packages to the registry bridge'
 description: >-
-  Build and hash a commit's pkg.pr.new preview artifacts (the small preview
-  packages are rewritten and re-packed; the platform binaries are taken as-is)
-  and upload them, plus their integrity, to the pkg-pr-registry-bridge. Runs the
-  CPU-heavy work in CI so the Worker only serves.
+  Pack locally built package directories and publish them, plus their
+  integrity, to the pkg-pr-registry-bridge as the synthetic commit version.
+  Packs with `pnpm pack` (resolving workspace:/catalog: specs), so run
+  pnpm/action-setup and `pnpm install` first. Runs the CPU-heavy work in CI so
+  the Worker only serves. No pkg.pr.new involvement.
 inputs:
   sha:
     description: 'The commit sha to publish (a 7-40 hex sha, or commit.<sha>).'
     required: true
+  packages:
+    description: >-
+      Package directories to publish, newline- or comma-separated, relative to
+      the workspace. A trailing "/*" expands to every direct subdirectory
+      containing a package.json (e.g. packages/cli/npm/*). Pass the same
+      directories a registry publish would cover; deps between them are pinned
+      to the synthetic version. Defaults to the vite-plus layout (packages/cli,
+      packages/core, packages/prompts, packages/cli/npm/*,
+      packages/cli/cli-npm/*); the authoritative default lives in the action.
+    required: false
   bridge-url:
     description: 'Base URL of the registry bridge.'
     required: false
@@ -21,18 +32,6 @@ inputs:
       github.event.pull_request.html_url on pull_request runs; leave empty on
       push/commit runs.
     required: false
-  pkg-pr-new-base:
-    description: 'pkg.pr.new base URL.'
-    required: false
-    default: 'https://pkg.pr.new'
-  owner:
-    description: 'Upstream repo owner.'
-    required: false
-    default: 'voidzero-dev'
-  repo:
-    description: 'Upstream repo name.'
-    required: false
-    default: 'vite-plus'
   workspace-packages:
     description: 'Allowlist (comma-separated exact names or prefix* patterns).'
     required: false

@@ -49,23 +49,28 @@ for a runnable example.
   (`GET /<pkg>/-/<name>-<version>.tgz`) for clients and lockfiles that synthesize
   that URL instead of reading `dist.tarball`; non-preview packages/versions there
   are redirected to npm.
-- **Transitive deps**: a preview build's `optionalDependencies` point at
-  pkg.pr.new (the platform binaries). The bridge rewrites those URLs to
-  synthetic **version strings** (`0.0.0-commit.<sha>`) and serves packuments for
-  those packages too, so they resolve through the bridge like the other preview
-  packages, and the package manager downloads only the binary for the current
-  platform (reading os/cpu from the packument) instead of all of them. The
-  binaries are large (tens of MB), so they are repacked + hashed in CI (where
-  there is no per-request limit) and uploaded; the binary's `package.json`
-  version is rewritten to the synthetic version so it matches what the resolver
-  expects (pnpm's strict store check rejects a mismatch). A platform binary not
-  yet uploaded for a registered ref redirects to pkg.pr.new as a best-effort
-  fallback. The small preview packages can also be built in-Worker on demand as a
-  fallback (they are small enough to stay within the limits).
+- **Transitive deps**: a preview build's `optionalDependencies` (the platform
+  binaries) are pinned to the same synthetic **version string**
+  (`0.0.0-commit.<sha>`), and the bridge serves packuments for those packages
+  too, so they resolve through the bridge like the other preview packages, and
+  the package manager downloads only the binary for the current platform
+  (reading os/cpu from the packument) instead of all of them. The publish
+  action pins any dep on a package of the same publish batch; the Worker's
+  on-demand fallback equivalently rewrites the pkg.pr.new dependency URLs
+  found in upstream tarballs. The binaries are large (tens of MB), so they are
+  packed + hashed in CI (where there is no per-request limit) and uploaded;
+  the binary's `package.json` version is rewritten to the synthetic version so
+  it matches what the resolver expects (pnpm's strict store check rejects a
+  mismatch). A platform binary not yet uploaded for a registered ref redirects
+  to pkg.pr.new as a best-effort fallback. The small preview packages can also
+  be built in-Worker on demand as a fallback (they are small enough to stay
+  within the limits).
 - **Publishing** (`POST /-/publish`, `PUT /-/tarball/...`): the
-  [publish action](#publishing-from-ci) downloads each package from pkg.pr.new,
-  rewrites + re-packs + hashes it, `PUT`s the bytes, and `POST`s the metadata
-  (rewritten package.json + integrity) and registers the ref, all in one CI run.
+  [publish action](#publishing-from-ci) packs each locally built package
+  directory (in the same CI job that produced the artifacts, no pkg.pr.new
+  round-trip), rewrites + re-packs + hashes it, `PUT`s the bytes, and `POST`s
+  the metadata (rewritten package.json + integrity) and registers the ref, all
+  in one CI run.
   Because integrity is computed over the exact bytes served, every package
   manager that verifies it (npm, pnpm, yarn) gets a match, and bun/yarn-berry pin
   it on first install.
@@ -189,15 +194,15 @@ then `POST /-/publish` (stores metadata + registers the ref), both admin-guarded
 and driven by the [publish action](#publishing-from-ci), not by hand.
 
 A published ref is reflected immediately and built into the packument on the next
-request. This is the no-redeploy path for exposing new pkg.pr.new builds.
+request. This is the no-redeploy path for exposing new preview builds.
 
 ### Publishing from CI
 
-The heavy work (download, rewrite, re-pack, hash) runs in CI via a reusable
-action, so the Worker only serves. Wire it into vite-plus's pkg.pr.new workflow:
-see [`docs/ci-setup.md`](./docs/ci-setup.md). To publish by hand (same code
-path), run `PKG_PR_BRIDGE_ADMIN_TOKEN=… pnpm warm <sha>`; with no arguments it
-publishes the refs in `.env` (also part of `pnpm run deploy`).
+The heavy work (pack, rewrite, re-pack, hash) runs in CI via a reusable
+action, in the same job that built the artifacts, so the Worker only serves
+and pkg.pr.new is not involved. Wire it into vite-plus's publish workflow: see
+[`docs/ci-setup.md`](./docs/ci-setup.md). To publish by hand (same code path),
+run `PKG_PR_BRIDGE_ADMIN_TOKEN=… pnpm warm --repo <built-vite-plus-checkout> <sha>`.
 
 The action's bundle is committed
 (`.github/actions/publish-preview/dist/index.mjs`); rebuild it with
@@ -250,16 +255,15 @@ needed).
 void auth login
 void secret put ADMIN_TOKEN              # guards the admin write endpoints
 
-# Deploy, warm the caches, and run the end-to-end bun install check.
+# Deploy and run the end-to-end bun install check.
 # Use `pnpm run deploy` (not `pnpm deploy`, which is pnpm's built-in command).
-pnpm run deploy                          # void deploy + warm + e2e
+pnpm run deploy                          # void deploy + e2e
 ```
 
-`pnpm run deploy` runs `void deploy`, then `pnpm warm` (publishes the configured
-preview refs into R2 via the action so installs are served from cache), then
-`pnpm test:e2e` (a real `bun install` against the live bridge that asserts the
-alias/override resolves to the synthetic version). Use `pnpm run deploy:only`
-for `void deploy` alone.
+`pnpm run deploy` runs `void deploy`, then `pnpm test:e2e` (a real
+`bun install` against the live bridge that asserts the alias/override resolves
+to the synthetic version, using a ref the bridge already serves). Use
+`pnpm run deploy:only` for `void deploy` alone.
 
 The public origin (`PUBLIC_BASE_URL` in `.env.production`) is the custom domain
 `https://registry-bridge.viteplus.dev`, attached with `void domain add` (the

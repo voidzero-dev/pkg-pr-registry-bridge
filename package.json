@@ -13,7 +13,7 @@
     "warm": "node scripts/warm.mjs",
     "smoke": "node scripts/smoke-test.mjs",
     "deploy:staging": "void deploy --project pkg-pr-registry-bridge-staging",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.action.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "node scripts/e2e-bun.mjs",
@@ -25,6 +25,7 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.16.20",
+    "@types/node": "^24.13.2",
     "esbuild": "^0.28.1",
     "typescript": "^6.0.0",
     "vite": "^8.1.0",

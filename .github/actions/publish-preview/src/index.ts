@@ -1,37 +1,41 @@
 /**
- * GitHub Action: build + hash a commit's pkg.pr.new preview artifacts and
- * upload them to the registry bridge.
+ * GitHub Action: pack a commit's locally built packages and publish them to
+ * the registry bridge.
  *
- * This runs the CPU/memory-heavy work (decompress, rewrite, re-pack, hash) in
- * CI, where there is no per-invocation limit, so the Cloudflare Worker only ever
- * streams bytes. It reuses the Worker's own rewrite/digest modules, so the
- * artifacts CI produces are exactly what the Worker would describe.
+ * Runs in the same CI job that assembled the build artifacts (the exact
+ * directories pkg.pr.new publishes from), so the bridge does not depend on a
+ * pkg.pr.new upload -> download round-trip. Each directory is packed with
+ * `pnpm pack` (resolving workspace:/catalog: specs; run `pnpm install`
+ * first), then rewritten, re-packed and hashed with the Worker's own modules,
+ * so CI's artifacts are exactly what the Worker would describe. This also
+ * runs the CPU/memory-heavy work (rewrite, re-pack, hash) in CI, where there
+ * is no per-invocation limit, so the Cloudflare Worker only ever streams
+ * bytes.
  *
- * Every package, the small preview packages (vite-plus, core) AND the platform
- * binaries, is rewritten (name/version, plus deps for the preview packages) and
- * re-packed, with integrity over the re-packed bytes. The binary's version is
- * rewritten too so the tarball's internal version matches the resolved version:
- * pnpm's `strict-store-pkg-content-check` rejects a tarball whose package.json
- * version differs from what it resolved, so an as-is upload (version 0.2.1) would
- * fail there even though npm/yarn/bun tolerate it.
+ * Every package is rewritten to the synthetic commit version, and deps
+ * between packages of the same batch are pinned to it (the coherence
+ * pkg.pr.new's URL rewriting used to provide). The version rewrite matters
+ * even for the platform binaries: pnpm's `strict-store-pkg-content-check`
+ * rejects a tarball whose package.json version differs from the version it
+ * resolved.
  */
+import { relative } from 'node:path'
 import { buildPreviewTarball } from '../../../../src/tarball/buildPreviewTarball'
-import { toPkgPrNewUrl } from '../../../../src/preview/toPkgPrNewUrl'
-import {
-  isPreviewPackage,
-  isWorkspacePackage,
-  PREVIEW_PACKAGES,
-} from '../../../../src/preview/packages'
 import { parseConfiguredPreviewRefs } from '../../../../src/preview/parseConfiguredPreviewRefs'
 import type { RewriteEnv } from '../../../../src/tarball/rewritePackageJson'
+import {
+  assertValidBatch,
+  expandPackageDirs,
+  packDirectory,
+  parsePackagesInput,
+  readManifest,
+} from './localPack'
 
-interface PublishPackage {
-  name: string
-  version: string
-  packageJson: Record<string, any>
-  integrity: string
-  shasum: string
-}
+// The vite-plus layout, overridable via the `packages` input. Lives here (not
+// action.yml) so direct invocations of the bundle (scripts/warm.mjs) get the
+// same default.
+const DEFAULT_PACKAGES =
+  'packages/cli,packages/core,packages/prompts,packages/cli/npm/*,packages/cli/cli-npm/*'
 
 function input(name: string, required = false): string {
   const value = (process.env[`INPUT_${name.toUpperCase()}`] ?? '').trim()
@@ -56,24 +60,10 @@ async function withRetry<T>(label: string, fn: () => Promise<T>, attempts = 4): 
 // undici's ~5-minute defaults, and 4 retry attempts across ~11 packages can
 // zombie a publish for tens of minutes (the 2026-07-02 incident's cancelled
 // attempt ran 21 minutes mid-publish). Bounding each attempt keeps retries
-// snappy and the whole run inside a predictable window. Transfers move up to
-// ~19 MB per request; the register call is a small JSON POST.
+// snappy and the whole run inside a predictable window. Uploads move up to
+// ~19 MB per request; the publish/register calls are small JSON POSTs.
 const TRANSFER_TIMEOUT_MS = 120_000
 const PUBLISH_TIMEOUT_MS = 30_000
-
-async function fetchUpstream(
-  env: RewriteEnv,
-  name: string,
-  version: string,
-): Promise<Uint8Array> {
-  const url = toPkgPrNewUrl(env, name, version)
-  if (!url) throw new Error(`cannot build pkg.pr.new url for ${name}@${version}`)
-  return withRetry(`download ${name}`, async () => {
-    const res = await fetch(url, { signal: AbortSignal.timeout(TRANSFER_TIMEOUT_MS) })
-    if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)
-    return new Uint8Array(await res.arrayBuffer())
-  })
-}
 
 async function uploadTarball(
   bridge: string,
@@ -104,16 +94,26 @@ async function main(): Promise<void> {
   const token = input('admin-token', true)
   // Optional: present on pull_request runs, empty on push/commit runs.
   const prUrl = input('pr-url') || undefined
+
+  const cwd = process.cwd()
+  const dirs = expandPackageDirs(
+    parsePackagesInput(input('packages') || DEFAULT_PACKAGES),
+    cwd,
+  )
+  const packages = dirs.map((dir) => ({ dir, manifest: readManifest(dir) }))
+
+  // Locally packed manifests never carry pkg.pr.new URL deps, so the
+  // pkg.pr.new fields of the shared config stay unset here.
   const env: RewriteEnv = {
     PUBLIC_BASE_URL: bridge,
-    PKG_PR_NEW_BASE: (input('pkg-pr-new-base') || 'https://pkg.pr.new').replace(/\/+$/, ''),
-    PREVIEW_OWNER: input('owner') || 'voidzero-dev',
-    PREVIEW_REPO: input('repo') || 'vite-plus',
     WORKSPACE_PACKAGES: input('workspace-packages') || 'vite-plus,@voidzero-dev/vite-plus-*',
   }
 
-  console.log(`publishing ${version} to ${bridge}`)
-  let published = 0
+  // The batch (every name publishing together) drives dependency rewriting;
+  // validation fails up front, before anything is packed or uploaded.
+  const batch = assertValidBatch(packages, env)
+
+  console.log(`publishing ${version} (${packages.length} packages) to ${bridge}`)
 
   const post = (path: string, body: Record<string, unknown>, label: string) =>
     withRetry(label, async () => {
@@ -126,51 +126,48 @@ async function main(): Promise<void> {
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => '')}`)
     })
 
-  // Download from pkg.pr.new, rewrite + re-pack + hash, upload the bytes, and
-  // immediately publish this package's meta, so the stored tarball and the
-  // meta the packument serves can never diverge for longer than this one
-  // package's upload. A run cancelled part-way leaves later packages untouched
-  // instead of stranding bytes without metas (the mixed state a cancelled run
-  // previously served for its whole upload window). Reuses the Worker's own
-  // build so CI's artifact is exactly what the Worker would describe.
-  const publishPackage = async (name: string, ver: string): Promise<PublishPackage> => {
-    const upstream = await fetchUpstream(env, name, ver)
-    const build = await buildPreviewTarball(upstream, name, ver, env)
-    await uploadTarball(bridge, token, name, ver, build.tarball)
-    const pkg: PublishPackage = {
-      name,
-      version: ver,
+  // Pack, rewrite + re-pack + hash, upload the bytes, and immediately publish
+  // this package's meta, so the stored tarball and the meta the packument
+  // serves can never diverge for longer than this one package's upload. A run
+  // cancelled part-way leaves later packages untouched instead of stranding
+  // bytes without metas. Reuses the Worker's own build so CI's artifact is
+  // exactly what the Worker would describe.
+  //
+  // The next `pnpm pack` runs while the current package uploads (one ahead,
+  // bounding memory to two tarballs); the bridge-visible order, upload then
+  // publish per package with register last, is unchanged. The swallowed
+  // rejection resurfaces at the `await`; it only avoids an unhandled-rejection
+  // crash when an upload fails first.
+  const startPack = (i: number) => {
+    const packed = packDirectory(packages[i].dir)
+    packed.catch(() => {})
+    return packed
+  }
+  let nextPack = startPack(0)
+  for (let i = 0; i < packages.length; i++) {
+    const { dir, manifest } = packages[i]
+    const packed = await nextPack
+    if (i + 1 < packages.length) nextPack = startPack(i + 1)
+    const build = await buildPreviewTarball(packed, manifest.name, version, env, batch)
+    await uploadTarball(bridge, token, manifest.name, version, build.tarball)
+    const pkg = {
+      name: manifest.name,
+      version,
       packageJson: build.packageJson,
       integrity: build.integrity,
       shasum: build.shasum,
     }
-    await post('/-/publish', { ref, packages: [pkg] }, `publish ${name}`)
-    published++
-    console.log(`  ✓ ${name}@${ver} (${build.tarball.byteLength} bytes)`)
-    return pkg
-  }
-
-  // Preview packages first; vite-plus's rewritten optionalDependencies name the
-  // platform binaries (each at the version vite-plus declares for it).
-  let vitePlusPackageJson: Record<string, any> | undefined
-  for (const name of PREVIEW_PACKAGES) {
-    const pkg = await publishPackage(name, version)
-    if (name === 'vite-plus') vitePlusPackageJson = pkg.packageJson
-  }
-
-  const optionalDeps = (vitePlusPackageJson?.optionalDependencies ?? {}) as Record<string, string>
-  const binaries = Object.entries(optionalDeps).filter(
-    ([name]) => isWorkspacePackage(name, env) && !isPreviewPackage(name),
-  )
-  for (const [name, depVersion] of binaries) {
-    await publishPackage(name, depVersion)
+    await post('/-/publish', { ref, packages: [pkg] }, `publish ${manifest.name}`)
+    console.log(
+      `  ✓ ${manifest.name}@${version} (${build.tarball.byteLength} bytes, from ${relative(cwd, dir)})`,
+    )
   }
 
   // Every package's bytes + meta are stored; registering the ref last flips
   // the whole version visible atomically (a brand-new ref is not served at
   // all until this succeeds).
   await post('/-/register', { ref, prUrl }, 'register ref')
-  console.log(`published ${published} packages, registered ${ref}`)
+  console.log(`published ${packages.length} packages, registered ${ref}`)
 
   const out = process.env.GITHUB_OUTPUT
   if (out) {
