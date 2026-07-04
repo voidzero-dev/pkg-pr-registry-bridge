@@ -233,8 +233,8 @@ importers:
         specifier: ^4.1.0
         version: 4.1.9(@types/node@24.13.2)(vite@8.1.0(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4))
       void:
-        specifier: ^0.9.3
-        version: 0.9.3(arktype@2.2.1)(kysely@0.29.2)(valibot@1.4.1(typescript@6.0.3))(vite@8.1.0(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4))(vitest@4.1.9(@types/node@24.13.2)(vite@8.1.0(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4)))(workerd@1.20260625.1)(zod@4.4.3)
+        specifier: ^0.10.0
+        version: 0.10.4(arktype@2.2.1)(kysely@0.29.2)(valibot@1.4.1(typescript@6.0.3))(vite@8.1.0(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4))(vitest@4.1.9(@types/node@24.13.2)(vite@8.1.0(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4)))(workerd@1.20260625.1)(zod@4.4.3)
       wrangler:
         specifier: ^4.105.0
         version: 4.105.0(@cloudflare/workers-types@4.20260626.1)
@@ -2064,11 +2064,11 @@ packages:
       jsdom:
         optional: true
 
-  void@0.9.3:
-    resolution: {integrity: sha512-qCQrUTAjp2bOSbr9JeIysghEkDcUWG7KszgCpQ9ZzHmbmbPkWlkyRpQ8hhVmvO62h/QXEK6N7CXHTpMfg8iNMA==}
+  void@0.10.4:
+    resolution: {integrity: sha512-Ab5KgB0ERcZINe9oFfxNXBN9tdyvM5sYaCq5BGOHgAzB0/SwTaxYQRdoQgy8CoCK5z2bAJfoFxZVVip/hDF/iw==}
     hasBin: true
     peerDependencies:
-      '@void/md': 0.9.3
+      '@void/md': 0.10.4
       arktype: '>=2.0.0'
       valibot: '>=1.0.0-beta.7'
       vite: ^8.0.0
@@ -3452,7 +3452,7 @@ snapshots:
     transitivePeerDependencies:
       - msw
 
-  void@0.9.3(arktype@2.2.1)(kysely@0.29.2)(valibot@1.4.1(typescript@6.0.3))(vite@8.1.0(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4))(vitest@4.1.9(@types/node@24.13.2)(vite@8.1.0(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4)))(workerd@1.20260625.1)(zod@4.4.3):
+  void@0.10.4(arktype@2.2.1)(kysely@0.29.2)(valibot@1.4.1(typescript@6.0.3))(vite@8.1.0(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4))(vitest@4.1.9(@types/node@24.13.2)(vite@8.1.0(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4)))(workerd@1.20260625.1)(zod@4.4.3):
     dependencies:
       '@cloudflare/sandbox': 0.10.3
       '@cloudflare/vite-plugin': 1.42.3(vite@8.1.0(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4))(workerd@1.20260625.1)(wrangler@4.105.0(@cloudflare/workers-types@4.20260626.1))
