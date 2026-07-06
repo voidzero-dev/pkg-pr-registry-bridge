@@ -270,25 +270,25 @@ The public origin (`PUBLIC_BASE_URL` in `.env.production`) is the custom domain
 underlying Void platform URL `pkg-pr-registry-bridge.void.app` keeps working
 too).
 
-CI deploys in two stages, both smoke-testing the REAL Void runtime, which the
-`pool-workers` unit tests can't emulate (e.g. the platform forbidding
-`caches.default`, which 500'd every packument while all unit tests passed):
+A single workflow (`.github/workflows/void-deploy.yml`) deploys in stages,
+smoke-testing the REAL Void runtime, which the `pool-workers` unit tests can't
+emulate (e.g. the platform forbidding `caches.default`, which 500'd every
+packument while all unit tests passed):
 
-- **Every PR** (`.github/workflows/staging.yml`) deploys the change to the
-  shared **staging** project (`pkg-pr-registry-bridge-staging.void.app`) and
-  runs `scripts/smoke-test.mjs` against it. Make `Staging` a required status
-  check (branch protection) so a failing smoke test blocks the merge. (Skipped
-  for fork PRs, which can't read `VOID_TOKEN`.)
-- **Push to `main`** (`.github/workflows/void-deploy.yml`) re-runs the staging
-  deploy + smoke as a gate, then deploys to production and smoke-tests it. The
-  gate is necessary because a change can reach `main` without the PR check, a
-  fork PR or a direct push, so production never ships unless staging passes
-  first.
+- **Every PR** deploys the change to the shared **staging** project
+  (`pkg-pr-registry-bridge-staging.void.app`) and runs
+  `scripts/smoke-test.mjs` against it; production steps are skipped. Make
+  `deploy` a required status check (branch protection) so a failing smoke test
+  blocks the merge. (Skipped for fork PRs, which can't read `VOID_TOKEN`.)
+- **Push to `main`** re-runs the staging deploy + smoke as a gate, then
+  deploys to production and smoke-tests it. The gate is necessary because a
+  change can reach `main` without the PR check, a fork PR or a direct push, so
+  production never ships unless staging passes first.
 
 The smoke test hits `/_health`, the `/vite-plus` packument (200 with `time`),
 `/-/refs`, and a download redirect.
 
-The push-to-`main` workflow authenticates with GitHub OIDC: `void deploy`
+Push and manual-dispatch runs authenticate with GitHub OIDC: `void deploy`
 exchanges a short-lived OIDC token for a project-scoped deploy token, so no
 secret is involved. This requires the repo to be connected once per project
 (`void github connect <project> --repo voidzero-dev/pkg-pr-registry-bridge

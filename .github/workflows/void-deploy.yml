@@ -1,19 +1,27 @@
 name: Deploy
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
 
-# A newer push cancels an in-flight deploy for the same branch.
+# The staging environment is a single shared project, so PR runs serialize in
+# one queue (never cancel another PR's deploy+smoke mid-flight). Pushes keep
+# latest-wins semantics instead: a newer main commit cancels the in-flight
+# deploy so an older commit can never overtake it.
 concurrency:
-  group: void-deploy-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'pull_request' && 'void-staging' || format('void-deploy-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'pull_request' }}
 
-# `void deploy` authenticates via GitHub OIDC, so there is no long-lived
-# VOID_TOKEN secret here: id-token lets the job mint an OIDC token that the
-# CLI exchanges for a short-lived project-scoped deploy token. The Void
-# platform only honors the exchange from `.github/workflows/void-deploy.yml`
-# on a push to the connected branch, so this file must keep exactly that name.
+# On push/dispatch `void deploy` authenticates via GitHub OIDC, so there is no
+# long-lived VOID_TOKEN secret in those runs: id-token lets the job mint an
+# OIDC token that the CLI exchanges for a short-lived project-scoped deploy
+# token. The Void platform only honors the exchange from
+# `.github/workflows/void-deploy.yml` on a push to the connected branch, so
+# this file must keep exactly that name. PR runs cannot use the exchange (the
+# platform rejects pull_request events, which run untrusted code) and
+# authenticate with the VOID_TOKEN secret instead.
 permissions:
   id-token: write
   contents: read
@@ -21,6 +29,8 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # Fork PRs can't read VOID_TOKEN; they still get ci.yml (typecheck + test).
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     steps:
       # Actions are pinned to a full commit SHA (org policy); kept in sync with ci.yml.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -36,11 +46,24 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Staging-first gate, even though PRs already smoke-test staging
-      # (staging.yml), a change can still reach main without that check: a fork
-      # PR can't read VOID_TOKEN, and direct pushes skip PR CI. So re-run the
-      # staging deploy + smoke here and only ship to production when it passes.
-      - name: Deploy to staging
+      # Every run deploys to the shared staging project and smoke-tests the
+      # REAL Void runtime, which catches platform-only failures the
+      # pool-workers unit tests can't (e.g. the Void Cache API ban that 500'd
+      # every packument) BEFORE the change reaches main or production. On push
+      # this doubles as the staging-first gate: a change can reach main without
+      # PR CI (a fork PR, or a direct push), so production only ships when
+      # staging passes.
+      #
+      # Two steps because the auth differs by event (see the permissions
+      # comment): PRs use the VOID_TOKEN secret, push/dispatch use OIDC.
+      - name: Deploy to staging (pull request)
+        if: github.event_name == 'pull_request'
+        run: pnpm exec void deploy --project pkg-pr-registry-bridge-staging
+        env:
+          VOID_TOKEN: ${{ secrets.VOID_TOKEN }}
+
+      - name: Deploy to staging (OIDC)
+        if: github.event_name != 'pull_request'
         run: pnpm exec void deploy --project pkg-pr-registry-bridge-staging
 
       # --write runs the admin write lifecycle too (see scripts/smoke-test.mjs
@@ -50,8 +73,10 @@ jobs:
         env:
           SMOKE_ADMIN_TOKEN: ${{ secrets.STAGING_ADMIN_TOKEN }}
 
-      # Only reached when the staging smoke test passed.
+      # Production ships only outside PRs (push to main, or a manual dispatch
+      # for redeploys), and only after the staging smoke above passed.
       - name: Deploy to production
+        if: github.event_name != 'pull_request'
         run: pnpm exec void deploy
         env:
           # VOID_PROJECT is required because the project link in `.void/` is
@@ -61,4 +86,5 @@ jobs:
 
       # No --write: read-only against the live bridge.
       - name: Smoke-test production
+        if: github.event_name != 'pull_request'
         run: node scripts/smoke-test.mjs https://registry-bridge.viteplus.dev
