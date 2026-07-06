@@ -279,14 +279,22 @@ CI deploys in two stages, both smoke-testing the REAL Void runtime, which the
   runs `scripts/smoke-test.mjs` against it. Make `Staging` a required status
   check (branch protection) so a failing smoke test blocks the merge. (Skipped
   for fork PRs, which can't read `VOID_TOKEN`.)
-- **Push to `main`** (`.github/workflows/deploy.yml`) re-runs the staging deploy
-  + smoke as a gate, then deploys to production and smoke-tests it. The gate is
-  necessary because a change can reach `main` without the PR check, a fork PR or
-  a direct push, so production never ships unless staging passes first.
+- **Push to `main`** (`.github/workflows/void-deploy.yml`) re-runs the staging
+  deploy + smoke as a gate, then deploys to production and smoke-tests it. The
+  gate is necessary because a change can reach `main` without the PR check, a
+  fork PR or a direct push, so production never ships unless staging passes
+  first.
 
 The smoke test hits `/_health`, the `/vite-plus` packument (200 with `time`),
 `/-/refs`, and a download redirect.
 
-Add a `VOID_TOKEN` repository secret (`void auth token` copies one to your
-clipboard); the same token deploys both projects. Run the smoke test locally
-with `pnpm smoke <url>`, and deploy staging by hand with `pnpm deploy:staging`.
+The push-to-`main` workflow authenticates with GitHub OIDC: `void deploy`
+exchanges a short-lived OIDC token for a project-scoped deploy token, so no
+secret is involved. This requires the repo to be connected once per project
+(`void github connect <project> --repo voidzero-dev/pkg-pr-registry-bridge
+--branch main --executor github_actions`) and the workflow file to be named
+exactly `void-deploy.yml`. The PR staging deploy still needs a `VOID_TOKEN`
+repository secret (`void auth token` copies one to your clipboard): the
+platform refuses to mint deploy tokens for pull_request events, which run
+untrusted code. Run the smoke test locally with `pnpm smoke <url>`, and deploy
+staging by hand with `pnpm deploy:staging`.
