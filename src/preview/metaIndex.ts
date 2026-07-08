@@ -1,6 +1,6 @@
 import type { Env } from '../config'
 import type { PreviewMeta } from '../tarball/buildPreviewTarball'
-import { metaIndexKey } from '../cache/r2Cache'
+import { metaIndexKey, metaKey } from '../cache/r2Cache'
 import { casR2Json, readR2Json } from '../cache/r2Cas'
 import { REF_TTL_MS } from './getConfiguredRefs'
 
@@ -14,6 +14,25 @@ export type MetaIndex = Record<string, PreviewMeta>
  */
 export async function readMetaIndex(env: Env, name: string): Promise<MetaIndex> {
   return (await readR2Json<MetaIndex>(env, metaIndexKey(name))).value
+}
+
+/**
+ * Resolve a version's current meta WITHOUT triggering an in-Worker build: the
+ * per-package aggregate first (one R2 get), then the per-version `metaKey`
+ * fallback. Used by the serve + download-redirect paths to map a version to its
+ * current build's shasum (and thus its content-addressed URL). Returns undefined
+ * when nothing is published yet, so the caller falls back to the version URL.
+ */
+export async function resolveVersionMeta(
+  env: Env,
+  name: string,
+  version: string,
+): Promise<PreviewMeta | undefined> {
+  const fromIndex = (await readMetaIndex(env, name))[version]
+  if (fromIndex) return fromIndex
+  const obj = await env.STORAGE.get(metaKey(name, version))
+  if (!obj) return undefined
+  return obj.json<PreviewMeta>().catch(() => undefined)
 }
 
 /**

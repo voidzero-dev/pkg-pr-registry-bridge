@@ -19,6 +19,7 @@ import { parseConfiguredPreviewRefs } from './preview/parseConfiguredPreviewRefs
 import {
   readMetaIndex,
   removeFromMetaIndex,
+  resolveVersionMeta,
   upsertMetaIndex,
 } from './preview/metaIndex'
 import {
@@ -39,7 +40,15 @@ import {
   getPreviewTarballBody,
 } from './tarball/getPreviewBuild'
 import type { PreviewMeta } from './tarball/buildPreviewTarball'
-import { metaKey, tarballKey, tarballUrl } from './cache/r2Cache'
+import {
+  casKey,
+  casVersionPrefix,
+  isShasum,
+  metaKey,
+  tarballContentUrl,
+  tarballKey,
+  tarballUrl,
+} from './cache/r2Cache'
 import { kvCachedText } from './cache/kvCache'
 import { requireAdmin } from './security/auth'
 import {
@@ -114,19 +123,23 @@ async function serveTarball(
   env: Env,
   name: string,
   version: string,
+  shasum?: string,
 ): Promise<Response> {
   assertPreviewTarget(env, name, version)
-  const result = await getPreviewTarballBody(env, name, version)
+  const result = await getPreviewTarballBody(env, name, version, shasum)
   if (result.kind === 'redirect') {
     return new Response(null, {
       status: 302,
       headers: { location: result.location, 'cache-control': 'no-store' },
     })
   }
+  // Content-addressed bytes are immutable (the URL pins them); a version-
+  // addressed body (no shasum published yet) is only short-lived cacheable
+  // because the version->build mapping can still change.
   return new Response(result.body, {
     headers: {
       'content-type': 'application/gzip',
-      'cache-control': tarballCacheControl(),
+      'cache-control': result.immutable ? tarballCacheControl() : packumentCacheControl(),
       'content-length': String(result.contentLength),
     },
   })
@@ -167,9 +180,17 @@ async function serveDownloadRedirect(
       headers: { ...headers, 'content-type': 'application/tar+gzip' },
     })
   }
+  // Point at the version's CURRENT build's content URL when a shasum is
+  // published (so the download resolves the exact advertised bytes), else the
+  // version URL (nothing published yet, or a meta without a shasum).
+  const meta = await resolveVersionMeta(env, download.pkg, version)
+  const location =
+    meta && isShasum(meta.shasum)
+      ? tarballContentUrl(env, download.pkg, version, meta.shasum)
+      : tarballUrl(env, download.pkg, version)
   return new Response(null, {
     status: 302,
-    headers: { ...headers, location: tarballUrl(env, download.pkg, version) },
+    headers: { ...headers, location },
   })
 }
 
@@ -179,7 +200,7 @@ app.get('/tarballs/*', async (c) => {
   if (!parsed) throw new HttpError(404, 'Not found')
   // `await` so a thrown HttpError unwinds inside this handler's frame and is
   // routed to onError, rather than rejecting the returned promise unhandled.
-  return await serveTarball(c.env, parsed.name, parsed.version)
+  return await serveTarball(c.env, parsed.name, parsed.version, parsed.shasum)
 })
 
 /**
@@ -192,16 +213,22 @@ app.put('/-/tarball/*', async (c) => {
   admin(c)
   const parsed = parseUploadPath(new URL(c.req.url).pathname)
   if (!parsed) throw new HttpError(404, 'Not found')
-  const { name, version } = parsed
+  const { name, version, shasum } = parsed
   assertPreviewTarget(c.env, name, version)
   if (!c.req.raw.body) throw new HttpError(400, 'Missing request body')
-  await c.env.STORAGE.put(tarballKey(name, version), c.req.raw.body, {
+  // Store content-addressed (keyed by the shasum in the path) when the upload
+  // is a content path; else fall back to the legacy version-addressed key.
+  const key = isShasum(shasum) ? casKey(name, version, shasum) : tarballKey(name, version)
+  await c.env.STORAGE.put(key, c.req.raw.body, {
     httpMetadata: {
       contentType: 'application/gzip',
       cacheControl: tarballCacheControl(),
     },
   })
-  return c.json({ uploaded: { package: name, version } }, 201)
+  return c.json(
+    { uploaded: { package: name, version, ...(isShasum(shasum) ? { shasum } : {}) } },
+    201,
+  )
 })
 
 /**
@@ -349,6 +376,22 @@ app.post('/-/purge', async (c) => {
     throw new HttpError(400, `Invalid preview version: ${version || '(empty)'}`)
   }
 
+  // Every content-addressed build of the version lives under casVersionPrefix
+  // (one object per shasum). Delete them all, so NO /tarballs/.../<shasum>.tgz
+  // stays installable after a purge, not just the current build's. Page through
+  // the listing (a heavily re-run commit can exceed one 1000-key list page, and
+  // R2 bulk delete also caps at 1000 keys), deleting each page as we go.
+  let cursor: string | undefined
+  do {
+    const listing = await c.env.STORAGE.list({
+      prefix: casVersionPrefix(name, version),
+      cursor,
+    })
+    if (listing.objects.length > 0) {
+      await c.env.STORAGE.delete(listing.objects.map((o) => o.key))
+    }
+    cursor = listing.truncated ? listing.cursor : undefined
+  } while (cursor)
   await Promise.all([
     c.env.STORAGE.delete(tarballKey(name, version)),
     c.env.STORAGE.delete(metaKey(name, version)),

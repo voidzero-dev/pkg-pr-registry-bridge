@@ -171,6 +171,22 @@ describe('parseTarballPath', () => {
     })
   })
 
+  it('parses a content-addressed path (trailing 40-hex shasum)', () => {
+    const shasum = 'a'.repeat(40)
+    expect(
+      parseTarballPath(`/tarballs/vite-plus/0.0.0-commit.a832a55/${shasum}.tgz`),
+    ).toEqual({ name: 'vite-plus', version: '0.0.0-commit.a832a55', shasum })
+    expect(
+      parseTarballPath(
+        `/tarballs/@voidzero-dev/vite-plus-core/0.0.0-commit.a832a55/${shasum}.tgz`,
+      ),
+    ).toEqual({
+      name: '@voidzero-dev/vite-plus-core',
+      version: '0.0.0-commit.a832a55',
+      shasum,
+    })
+  })
+
   it('returns null for non-tarball paths', () => {
     expect(parseTarballPath('/vite-plus')).toBeNull()
     expect(parseTarballPath('/tarballs/vite-plus/0.0.0-pr.1891')).toBeNull()
@@ -382,6 +398,7 @@ describe('validateTarballPath', () => {
 
 describe('buildVersionMetadata', () => {
   it('drops devDependencies, sets dist.tarball/_id/integrity', () => {
+    const shasum = 'a'.repeat(40)
     const meta = buildVersionMetadata(env, 'vite-plus', '0.0.0-pr.1891', {
       packageJson: {
         name: 'vite-plus',
@@ -390,17 +407,34 @@ describe('buildVersionMetadata', () => {
         devDependencies: { typescript: '^5' },
         bin: { vp: './bin/vp' },
       },
-      shasum: 'abc123',
+      shasum,
       integrity: 'sha512-deadbeef',
     })
     expect(meta.devDependencies).toBeUndefined()
     expect(meta.bin).toEqual({ vp: './bin/vp' })
     expect(meta._id).toBe('vite-plus@0.0.0-pr.1891')
+    // With a valid (40-hex) shasum, dist.tarball is the content-addressed URL
+    // (the shasum in the path), so a client fetches the exact advertised build.
+    expect(meta.dist.tarball).toBe(
+      `https://bridge.example.com/tarballs/vite-plus/0.0.0-pr.1891/${shasum}.tgz`,
+    )
+    expect(meta.dist.shasum).toBe(shasum)
+    expect(meta.dist.integrity).toBe('sha512-deadbeef')
+  })
+
+  it('falls back to the version URL when the shasum is not a valid 40-hex digest', () => {
+    // A malformed shasum must not emit a content URL: parseTarballPath only
+    // treats a 40-hex trailing segment as content-addressed, so a bad one would
+    // 404. It falls back to the version URL (which redirects to the current build).
+    const meta = buildVersionMetadata(env, 'vite-plus', '0.0.0-pr.1891', {
+      packageJson: { name: 'vite-plus', version: '0.0.0-pr.1891' },
+      shasum: 'abc123',
+      integrity: 'sha512-deadbeef',
+    })
     expect(meta.dist.tarball).toBe(
       'https://bridge.example.com/tarballs/vite-plus/0.0.0-pr.1891.tgz',
     )
     expect(meta.dist.shasum).toBe('abc123')
-    expect(meta.dist.integrity).toBe('sha512-deadbeef')
   })
 })
 

@@ -1,23 +1,27 @@
 import type { Env } from '../config'
-import { META_PREFIX, TARBALL_PREFIX } from '../cache/r2Cache'
+import { CAS_PREFIX, META_PREFIX, TARBALL_PREFIX } from '../cache/r2Cache'
 import { REF_TTL_MS } from './getConfiguredRefs'
 
-// The per-version artifact prefixes (shared with the key builders). NOT
-// `meta-index/` or `refs/`: those are the live indexes (self-pruned on write),
-// not per-version orphans, and their prefixes are disjoint from these.
-const ARTIFACT_PREFIXES = [META_PREFIX, TARBALL_PREFIX]
+// The per-version/per-content artifact prefixes (shared with the key builders).
+// NOT `meta-index/` or `refs/`: those are the live indexes (self-pruned on
+// write), not per-version orphans, and their prefixes are disjoint from these.
+const ARTIFACT_PREFIXES = [META_PREFIX, TARBALL_PREFIX, CAS_PREFIX]
 
 /**
- * Delete per-version preview artifacts (meta + tarball) whose ref TTL has lapsed,
- * so R2 storage stays bounded to the active-ref window rather than growing with
- * every ref ever published.
+ * Delete per-version preview artifacts (meta + tarball) and content-addressed
+ * bytes (cas) whose ref TTL has lapsed, so R2 storage stays bounded to the
+ * active-ref window rather than growing with every ref (or every republish)
+ * ever seen.
  *
- * A ref's objects are (re-)uploaded on each publish, so an object's `uploaded`
- * age equals its ref's age, and the ref TTL maps exactly to
+ * A still-referenced ref (re-)uploads its objects on each publish, so an
+ * object's `uploaded` age equals its ref's age, and the ref TTL maps exactly to
  * `uploaded < now - REF_TTL_MS`. An active ref (published within the window) is
  * therefore never touched; an expired ref's objects, which are no longer served
- * (the packument skips expired refs), are the orphans this removes. `now` is
- * injectable for tests.
+ * (the packument skips expired refs), are the orphans this removes. A cas object
+ * is swept the same way: a rerun uploads a NEW cas object and re-publishes the
+ * meta (both refreshed), so a still-referenced build's cas is always freshly
+ * uploaded and ages with its ref, while a superseded build's cas (no longer
+ * advertised) ages out. `now` is injectable for tests.
  */
 export async function cleanupExpiredArtifacts(
   env: Pick<Env, 'STORAGE'>,
