@@ -377,20 +377,24 @@ app.post('/-/purge', async (c) => {
   }
 
   // Every content-addressed build of the version lives under casVersionPrefix
-  // (one object per shasum). List and delete them all, so NO
-  // /tarballs/.../<shasum>.tgz stays installable after a purge — not just the
-  // current build's. Resolving a single meta shasum would leave every earlier
-  // republish's CAS object serving until the age sweep. One list page suffices
-  // (a version won't exceed 1000 builds).
-  const casObjects = (
-    await c.env.STORAGE.list({ prefix: casVersionPrefix(name, version) })
-  ).objects
+  // (one object per shasum). Delete them all, so NO /tarballs/.../<shasum>.tgz
+  // stays installable after a purge, not just the current build's. Page through
+  // the listing (a heavily re-run commit can exceed one 1000-key list page, and
+  // R2 bulk delete also caps at 1000 keys), deleting each page as we go.
+  let cursor: string | undefined
+  do {
+    const listing = await c.env.STORAGE.list({
+      prefix: casVersionPrefix(name, version),
+      cursor,
+    })
+    if (listing.objects.length > 0) {
+      await c.env.STORAGE.delete(listing.objects.map((o) => o.key))
+    }
+    cursor = listing.truncated ? listing.cursor : undefined
+  } while (cursor)
   await Promise.all([
     c.env.STORAGE.delete(tarballKey(name, version)),
     c.env.STORAGE.delete(metaKey(name, version)),
-    ...(casObjects.length
-      ? [c.env.STORAGE.delete(casObjects.map((o) => o.key))]
-      : []),
     removeFromMetaIndex(c.env, name, version),
     ...(body.unregister === true
       ? [unregisterRef(c.env, `${parsed.type}.${parsed.ref}`)]
