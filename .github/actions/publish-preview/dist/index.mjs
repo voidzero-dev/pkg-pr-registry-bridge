@@ -628,9 +628,9 @@ async function withRetry(label, fn, attempts = 4) {
 }
 var TRANSFER_TIMEOUT_MS = 12e4;
 var PUBLISH_TIMEOUT_MS = 3e4;
-async function uploadTarball(bridge, token, name, version, bytes) {
+async function uploadTarball(bridge, token, name, version, bytes, shasum) {
   await withRetry(`upload ${name}`, async () => {
-    const res = await fetch(`${bridge}/-/tarball/${name}/${version}.tgz`, {
+    const res = await fetch(`${bridge}/-/tarball/${name}/${version}/${shasum}.tgz`, {
       method: "PUT",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/gzip" },
       body: bytes,
@@ -680,7 +680,7 @@ async function main() {
     const packed = await nextPack;
     if (i + 1 < packages.length) nextPack = startPack(i + 1);
     const build = await buildPreviewTarball(packed, manifest.name, version, env, batch);
-    await uploadTarball(bridge, token, manifest.name, version, build.tarball);
+    await uploadTarball(bridge, token, manifest.name, version, build.tarball, build.shasum);
     const pkg = {
       name: manifest.name,
       version,

@@ -8,6 +8,8 @@
  *   /@voidzero-dev%2Fvite-plus-core   (encoded scoped)
  */
 
+import { isShasum } from '../cache/r2Cache'
+
 export interface PackumentRequest {
   name: string
 }
@@ -49,9 +51,17 @@ export function parsePackagePath(pathname: string): PackumentRequest | null {
 export interface TarballRequest {
   name: string
   version: string
+  /** Present for a content-addressed path (`<name>/<version>/<shasum>.tgz`). */
+  shasum?: string
 }
 
-/** Parse a `<prefix><name>/<version>.tgz` path (name may be scoped). */
+/**
+ * Parse a `<prefix><name>/<version>.tgz` (version-addressed) or
+ * `<prefix><name>/<version>/<shasum>.tgz` (content-addressed) path; the name
+ * may be scoped. The two shapes are told apart by the basename: a content-
+ * addressed build's basename is a 40-hex shasum, which a `0.0.0-commit.<sha>`
+ * version can never be, so there is no ambiguity.
+ */
 function parsePrefixedTarballPath(
   pathname: string,
   prefix: string,
@@ -62,8 +72,21 @@ function parsePrefixedTarballPath(
   const segments = decoded.slice(prefix.length).split('/')
   const file = segments.pop()
   if (!file || !file.endsWith('.tgz')) return null
+  const base = file.slice(0, -'.tgz'.length)
 
-  const version = file.slice(0, -'.tgz'.length)
+  // Content-addressed `<name>/<version>/<shasum>.tgz`: the basename is a 40-hex
+  // shasum (a `0.0.0-commit.<sha>` version never is), and the prior segment is
+  // the version. `isShasum` is the shared content-vs-version disambiguator, so
+  // the parser and `buildVersionMetadata`'s gate stay in lockstep.
+  if (isShasum(base)) {
+    const version = segments.pop()
+    const name = segments.join('/')
+    if (!name || !version) return null
+    return { name, version, shasum: base }
+  }
+
+  // Legacy version-addressed `<name>/<version>.tgz`.
+  const version = base
   const name = segments.join('/')
   if (!name || !version) return null
   return { name, version }
@@ -71,7 +94,8 @@ function parsePrefixedTarballPath(
 
 /**
  * Parse the bridge's own preview tarball path:
- *   /tarballs/vite-plus/0.0.0-commit.a832a55.tgz
+ *   /tarballs/vite-plus/0.0.0-commit.a832a55.tgz                    (version)
+ *   /tarballs/vite-plus/0.0.0-commit.a832a55/<shasum>.tgz          (content)
  *   /tarballs/@voidzero-dev/vite-plus-core/0.0.0-commit.a832a55.tgz
  */
 export function parseTarballPath(pathname: string): TarballRequest | null {
@@ -80,7 +104,7 @@ export function parseTarballPath(pathname: string): TarballRequest | null {
 
 /**
  * Parse the admin artifact-upload path (CI uploads a prebuilt tarball here):
- *   /-/tarball/vite-plus/0.0.0-commit.a832a55.tgz
+ *   /-/tarball/vite-plus/0.0.0-commit.a832a55/<shasum>.tgz         (content)
  *   /-/tarball/@voidzero-dev/vite-plus-core/0.0.0-commit.a832a55.tgz
  */
 export function parseUploadPath(pathname: string): TarballRequest | null {

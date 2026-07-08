@@ -1,6 +1,6 @@
 import type { Env } from '../config'
 import type { PreviewMeta } from '../tarball/buildPreviewTarball'
-import { tarballUrl } from '../cache/r2Cache'
+import { isShasum, tarballContentUrl, tarballUrl } from '../cache/r2Cache'
 
 /**
  * Fields from a package.json that should not appear in a registry version
@@ -48,8 +48,18 @@ export function buildVersionMetadata(
   meta.version = version
   meta._id = `${packageName}@${version}`
 
+  // Point `dist.tarball` at the content-addressed URL (shasum in the path) when
+  // a shasum is known, so a client always fetches the exact build this meta
+  // advertises. Platform binaries without a published shasum yet fall back to
+  // the version URL (which the bridge redirects to the current build).
   const dist: Record<string, any> = {
-    tarball: tarballUrl(env, packageName, version),
+    // Only a valid sha1 hex builds a content URL: `parseTarballPath` recognises
+    // the trailing segment as a shasum only when it is 40-hex, so a malformed
+    // shasum must fall back to the version URL rather than emit an unparseable
+    // (404ing) content URL.
+    tarball: isShasum(preview.shasum)
+      ? tarballContentUrl(env, packageName, version, preview.shasum)
+      : tarballUrl(env, packageName, version),
   }
   if (preview.shasum) dist.shasum = preview.shasum
   if (preview.integrity) dist.integrity = preview.integrity

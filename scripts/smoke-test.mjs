@@ -80,6 +80,8 @@ async function runAdminLifecycle() {
     { name: 'package/index.js', data: 'export const smoke = true\n' },
   ])
   const integrity = sri(tarball)
+  // sha1 hex, the content id in the content-addressed tarball URL/key.
+  const shasum = createHash('sha1').update(tarball).digest('hex')
 
   const fetchDist = async () => {
     const res = await fetch(`${base}/${name}`, {
@@ -90,8 +92,9 @@ async function runAdminLifecycle() {
   }
 
   try {
-    // 1. Upload the tarball bytes (worker streams them straight into R2).
-    const up = await fetch(`${base}/-/tarball/${name}/${version}.tgz`, {
+    // 1. Upload the tarball bytes to the content-addressed path (shasum in the
+    // key); the worker streams them straight into R2.
+    const up = await fetch(`${base}/-/tarball/${name}/${version}/${shasum}.tgz`, {
       method: 'PUT',
       headers: { authorization: `Bearer ${ADMIN_TOKEN}`, 'content-type': 'application/gzip' },
       body: tarball,
@@ -100,7 +103,6 @@ async function runAdminLifecycle() {
     assert(up.status === 201, `upload status ${up.status}`)
 
     // 2. Publish the meta. This must NOT make the version visible on its own.
-    const shasum = createHash('sha1').update(tarball).digest('hex')
     const pub = await postJson('/-/publish', {
       ref,
       packages: [{ name, version, packageJson: { name, version }, integrity, shasum }],
@@ -121,9 +123,15 @@ async function runAdminLifecycle() {
     // 5. Now it is served, and its advertised integrity must match the bytes
     // (the invariant both production incidents violated).
     const dist = await fetchDist()
-    console.log(`    packument after register: integrity=${dist?.integrity?.slice(0, 20)}…`)
+    console.log(`    packument after register: integrity=${dist?.integrity?.slice(0, 20)}… tarball=${dist?.tarball}`)
     assert(dist, 'version absent from packument after register')
     assert(dist.integrity === integrity, 'packument integrity != uploaded integrity')
+    // dist.tarball is the content-addressed URL: the shasum lives in the path,
+    // so the URL pins the exact build the integrity was computed from.
+    assert(
+      dist.tarball && dist.tarball.endsWith(`/tarballs/${name}/${version}/${shasum}.tgz`),
+      `dist.tarball is not the content URL: ${dist.tarball}`,
+    )
 
     // 6. Fetch the actually-served tarball from the runtime under test and
     // confirm its bytes hash to the advertised integrity (catches a stale or

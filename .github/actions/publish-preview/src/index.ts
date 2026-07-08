@@ -71,9 +71,13 @@ async function uploadTarball(
   name: string,
   version: string,
   bytes: Uint8Array,
+  shasum: string,
 ): Promise<void> {
   await withRetry(`upload ${name}`, async () => {
-    const res = await fetch(`${bridge}/-/tarball/${name}/${version}.tgz`, {
+    // Content-addressed path: the shasum (sha1 of these exact bytes) is in the
+    // key, so a republish with different bytes lands at a different URL and the
+    // packument's shasum always selects the matching bytes.
+    const res = await fetch(`${bridge}/-/tarball/${name}/${version}/${shasum}.tgz`, {
       method: 'PUT',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/gzip' },
       body: bytes,
@@ -149,7 +153,7 @@ async function main(): Promise<void> {
     const packed = await nextPack
     if (i + 1 < packages.length) nextPack = startPack(i + 1)
     const build = await buildPreviewTarball(packed, manifest.name, version, env, batch)
-    await uploadTarball(bridge, token, manifest.name, version, build.tarball)
+    await uploadTarball(bridge, token, manifest.name, version, build.tarball, build.shasum)
     const pkg = {
       name: manifest.name,
       version,

@@ -1,5 +1,6 @@
 import { SELF, env } from 'cloudflare:test'
-import { metaIndexKey, metaKey } from '../src/cache/r2Cache'
+import { casKey, metaIndexKey, metaKey } from '../src/cache/r2Cache'
+import { computeDigests } from '../src/tarball/digests'
 import { cleanupExpiredArtifacts } from '../src/preview/cleanupExpired'
 import { REF_TTL_MS } from '../src/preview/getConfiguredRefs'
 import {
@@ -168,40 +169,66 @@ async function publishAndRegister(body: {
 // The suite's fixture preview ref (`commit.a832a55`), published before each test
 // (idempotent, so it survives storage isolation). Publishing vite-plus + core
 // with their rewritten package.json is exactly what a CI publish stores, so
-// packuments inject the ref the way they do in production.
+// packuments inject the ref the way they do in production. The tarball bytes are
+// uploaded content-addressed (shasum in the path) and published with their REAL
+// shasum/integrity, so `dist.tarball` (the content URL) resolves to real bytes
+// that hash to the advertised integrity, exactly like a CI publish.
 const FIXTURE_VERSION = '0.0.0-commit.a832a55'
-beforeEach(async () => {
-  await publishAndRegister({
-    ref: 'commit.a832a55',
-    packages: [
-      {
-        name: 'vite-plus',
-        version: FIXTURE_VERSION,
-        packageJson: {
-          name: 'vite-plus',
-          version: FIXTURE_VERSION,
-          dependencies: { '@voidzero-dev/vite-plus-core': FIXTURE_VERSION },
-          optionalDependencies: {
-            '@voidzero-dev/vite-plus-darwin-arm64': `0.0.0-commit.${PLATFORM_SHA}`,
-          },
-          bin: { vp: './bin/vp' },
-        },
-        integrity: 'sha512-Zm9vYmFy',
-        shasum: 'a'.repeat(40),
-      },
-      {
-        name: '@voidzero-dev/vite-plus-core',
-        version: FIXTURE_VERSION,
-        packageJson: {
-          name: '@voidzero-dev/vite-plus-core',
-          version: FIXTURE_VERSION,
-          dependencies: { 'vite-plus': FIXTURE_VERSION },
-        },
-        integrity: 'sha512-Y29yZQ',
-        shasum: 'b'.repeat(40),
-      },
-    ],
+const FIXTURE_PKG_JSON: Record<string, Record<string, any>> = {
+  'vite-plus': {
+    name: 'vite-plus',
+    version: FIXTURE_VERSION,
+    dependencies: { '@voidzero-dev/vite-plus-core': FIXTURE_VERSION },
+    optionalDependencies: {
+      '@voidzero-dev/vite-plus-darwin-arm64': `0.0.0-commit.${PLATFORM_SHA}`,
+    },
+    bin: { vp: './bin/vp' },
+  },
+  '@voidzero-dev/vite-plus-core': {
+    name: '@voidzero-dev/vite-plus-core',
+    version: FIXTURE_VERSION,
+    dependencies: { 'vite-plus': FIXTURE_VERSION },
+  },
+}
+// Each fixture build's shasum, recomputed every beforeEach so tests can name the
+// exact content URL (`/tarballs/<name>/<version>/<shasum>.tgz`) the packument
+// advertises.
+const fixtureShasum: Record<string, string> = {}
+
+/**
+ * Upload a real preview tarball to the content-addressed path and return the
+ * digests the packument will advertise for it — the same shape a CI publish
+ * produces (build bytes, hash, PUT to the content path).
+ */
+async function uploadFixtureTarball(
+  name: string,
+  version: string,
+  packageJson: Record<string, any>,
+): Promise<{ shasum: string; integrity: string }> {
+  const bytes = await makeTarball(packageJson)
+  const { shasum, integrity } = await computeDigests(bytes)
+  const up = await SELF.fetch(`${BASE}/-/tarball/${name}/${version}/${shasum}.tgz`, {
+    method: 'PUT',
+    headers: { authorization: 'Bearer test-admin-token' },
+    body: bytes,
   })
+  expect(up.status).toBe(201)
+  return { shasum, integrity }
+}
+
+beforeEach(async () => {
+  const packages = await Promise.all(
+    Object.entries(FIXTURE_PKG_JSON).map(async ([name, packageJson]) => {
+      const { shasum, integrity } = await uploadFixtureTarball(
+        name,
+        FIXTURE_VERSION,
+        packageJson,
+      )
+      fixtureShasum[name] = shasum
+      return { name, version: FIXTURE_VERSION, packageJson, integrity, shasum }
+    }),
+  )
+  await publishAndRegister({ ref: 'commit.a832a55', packages })
 })
 
 describe('packument endpoint', () => {
@@ -224,7 +251,7 @@ describe('packument endpoint', () => {
       '0.0.0-commit.a832a55',
     )
     expect(preview.dist.tarball).toBe(
-      `${BASE}/tarballs/vite-plus/0.0.0-commit.a832a55.tgz`,
+      `${BASE}/tarballs/vite-plus/0.0.0-commit.a832a55/${fixtureShasum['vite-plus']}.tgz`,
     )
     expect(res.headers.get('cache-control')).toContain('max-age=300')
   })
@@ -430,7 +457,7 @@ describe('packument endpoint', () => {
     expect(preview).toBeTruthy()
     expect(preview.dependencies['vite-plus']).toBe('0.0.0-commit.a832a55')
     expect(preview.dist.tarball).toBe(
-      `${BASE}/tarballs/@voidzero-dev/vite-plus-core/0.0.0-commit.a832a55.tgz`,
+      `${BASE}/tarballs/@voidzero-dev/vite-plus-core/0.0.0-commit.a832a55/${fixtureShasum['@voidzero-dev/vite-plus-core']}.tgz`,
     )
     // A synthesized (not-on-npm) packument still needs `time` for the preview,
     // or pnpm errors with ERR_PNPM_MISSING_TIME.
@@ -470,7 +497,9 @@ describe('packument endpoint', () => {
 
   it('injects the version into a platform package packument with os/cpu', async () => {
     // The fixture ref has no darwin meta published, so the platform packument
-    // derives os/cpu from the package name (platformMetaFromName).
+    // derives os/cpu from the package name (platformMetaFromName). With no
+    // published shasum, dist.tarball is the version URL (which the bridge
+    // redirects to the current build), NOT a content URL.
     const res = await SELF.fetch(
       `${BASE}/@voidzero-dev%2Fvite-plus-darwin-arm64`,
       { headers: { accept: 'application/json' } },
@@ -502,15 +531,18 @@ describe('packument endpoint', () => {
     const ver = '0.0.0-commit.cafebabecafebabecafebabecafebabecafebabe'
     const pkg = '@voidzero-dev/vite-plus-darwin-arm64'
     const tarball = await makeTarball({ name: pkg, version: ver, os: ['darwin'], cpu: ['arm64'] })
+    const { shasum } = await computeDigests(tarball)
 
-    const up = await SELF.fetch(`${BASE}/-/tarball/${pkg}/${ver}.tgz`, {
+    // CI uploads content-addressed (shasum in the path); the content URL then
+    // serves those exact bytes.
+    const up = await SELF.fetch(`${BASE}/-/tarball/${pkg}/${ver}/${shasum}.tgz`, {
       method: 'PUT',
       headers: AUTH,
       body: tarball,
     })
     expect(up.status).toBe(201)
 
-    const res = await SELF.fetch(`${BASE}/tarballs/${pkg}/${ver}.tgz`)
+    const res = await SELF.fetch(`${BASE}/tarballs/${pkg}/${ver}/${shasum}.tgz`)
     expect(res.status).toBe(200)
     const bytes = new Uint8Array(await res.arrayBuffer())
     expect(res.headers.get('content-length')).toBe(String(bytes.byteLength))
@@ -536,7 +568,17 @@ describe('packument endpoint', () => {
 
 describe('tarball endpoint', () => {
   it('serves a generated commit tarball with rewritten package.json and immutable cache', async () => {
-    const res = await SELF.fetch(`${BASE}/tarballs/vite-plus/0.0.0-commit.a832a55.tgz`)
+    // The packument advertises the content URL (shasum in the path); fetch that
+    // and confirm it serves the rewritten bytes with immutable caching.
+    const pack = (await (
+      await SELF.fetch(`${BASE}/vite-plus`, { headers: { accept: 'application/json' } })
+    ).json()) as Record<string, any>
+    const tarball = pack.versions[FIXTURE_VERSION].dist.tarball
+    expect(tarball).toBe(
+      `${BASE}/tarballs/vite-plus/0.0.0-commit.a832a55/${fixtureShasum['vite-plus']}.tgz`,
+    )
+
+    const res = await SELF.fetch(tarball)
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toBe('application/gzip')
     expect(res.headers.get('cache-control')).toContain('immutable')
@@ -553,26 +595,29 @@ describe('tarball endpoint', () => {
   })
 
   it('also serves the npm-convention tarball path (/<name>/-/<name>-<version>.tgz)', async () => {
+    // The version-addressed npm-convention path now 302-redirects to the
+    // version's current content URL (the canonical, immutable location).
     const res = await SELF.fetch(
       `${BASE}/vite-plus/-/vite-plus-0.0.0-commit.a832a55.tgz`,
+      { redirect: 'manual' },
     )
-    expect(res.status).toBe(200)
-    expect(res.headers.get('content-type')).toBe('application/gzip')
-
-    const bytes = new Uint8Array(await res.arrayBuffer())
-    const files = await parseTarGzip(bytes)
-    const pkgFile = files.find((f) => f.name === 'package/package.json')
-    const pkg = JSON.parse(new TextDecoder().decode(pkgFile!.data))
-    expect(pkg.name).toBe('vite-plus')
-    expect(pkg.version).toBe('0.0.0-commit.a832a55')
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe(
+      `${BASE}/tarballs/vite-plus/0.0.0-commit.a832a55/${fixtureShasum['vite-plus']}.tgz`,
+    )
+    // The mapping is mutable (last write wins), so the redirect is not cached.
+    expect(res.headers.get('cache-control')).toBe('no-store')
   })
 
   it('serves the npm-convention path for a scoped preview package', async () => {
     const res = await SELF.fetch(
       `${BASE}/@voidzero-dev/vite-plus-core/-/vite-plus-core-0.0.0-commit.a832a55.tgz`,
+      { redirect: 'manual' },
     )
-    expect(res.status).toBe(200)
-    expect(res.headers.get('content-type')).toBe('application/gzip')
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe(
+      `${BASE}/tarballs/@voidzero-dev/vite-plus-core/0.0.0-commit.a832a55/${fixtureShasum['@voidzero-dev/vite-plus-core']}.tgz`,
+    )
   })
 
   it('redirects an npm-convention path to npm for non-preview packages/versions', async () => {
@@ -623,12 +668,11 @@ describe('integrity', () => {
     const ver = `0.0.0-commit.${PLATFORM_SHA}`
     const pkg = '@voidzero-dev/vite-plus-darwin-arm64'
     const tarball = await makeTarball({ name: pkg, version: ver, os: ['darwin'], cpu: ['arm64'] })
-    const integrity = `sha512-${btoa(
-      String.fromCharCode(...new Uint8Array(await crypto.subtle.digest('SHA-512', tarball))),
-    )}`
+    const { shasum, integrity } = await computeDigests(tarball)
 
-    // CI uploads the tarball, then publishes its meta + registers the ref.
-    const up = await SELF.fetch(`${BASE}/-/tarball/${pkg}/${ver}.tgz`, {
+    // CI uploads the tarball content-addressed (shasum in the path), then
+    // publishes its meta + registers the ref.
+    const up = await SELF.fetch(`${BASE}/-/tarball/${pkg}/${ver}/${shasum}.tgz`, {
       method: 'PUT',
       headers: AUTH,
       body: tarball,
@@ -642,27 +686,27 @@ describe('integrity', () => {
           version: ver,
           packageJson: { name: pkg, version: ver, os: ['darwin'], cpu: ['arm64'] },
           integrity,
-          shasum: '',
+          shasum,
         },
       ],
     })
     expect(pub.status).toBe(201)
 
-    // The tarball serves from R2, and the packument advertises an integrity that
-    // matches those exact served bytes.
-    const tres = await SELF.fetch(`${BASE}/tarballs/${pkg}/${ver}.tgz`)
-    expect(tres.status).toBe(200)
-    const served = new Uint8Array(await tres.arrayBuffer())
-    const servedIntegrity = `sha512-${btoa(
-      String.fromCharCode(...new Uint8Array(await crypto.subtle.digest('SHA-512', served))),
-    )}`
-    expect(servedIntegrity).toBe(integrity)
-
+    // The packument advertises the content URL (shasum in the path)...
     const pres = await SELF.fetch(`${BASE}/@voidzero-dev%2Fvite-plus-darwin-arm64`, {
       headers: { accept: 'application/vnd.npm.install-v1+json' },
     })
     const body = (await pres.json()) as Record<string, any>
-    expect(body.versions[ver].dist.integrity).toBe(integrity)
+    const dist = body.versions[ver].dist
+    expect(dist.integrity).toBe(integrity)
+    expect(dist.tarball).toBe(`${BASE}/tarballs/${pkg}/${ver}/${shasum}.tgz`)
+
+    // ...and the bytes fetched from that content URL hash to the advertised
+    // integrity (the invariant both production incidents violated).
+    const tres = await SELF.fetch(dist.tarball)
+    expect(tres.status).toBe(200)
+    const served = new Uint8Array(await tres.arrayBuffer())
+    expect((await computeDigests(served)).integrity).toBe(integrity)
   })
 })
 
@@ -1061,6 +1105,49 @@ describe('admin: purge', () => {
     })
     expect((await readIndex())?.[ver]).toBeUndefined()
   })
+
+  it('removes EVERY content-addressed build of the version, not just the current one', async () => {
+    const sha = 'ba5eba11'
+    const ref = `commit.${sha}`
+    const version = `0.0.0-commit.${sha}`
+    const publish = (d: { shasum: string; integrity: string }) =>
+      publishAndRegister({
+        ref,
+        packages: [
+          {
+            name: 'vite-plus',
+            version,
+            packageJson: { name: 'vite-plus', version },
+            integrity: d.integrity,
+            shasum: d.shasum,
+          },
+        ],
+      })
+
+    // Build A, then republish the same version with different bytes -> build B.
+    // Both CAS objects coexist (last-write-wins only moves the meta/index).
+    const A = await uploadFixtureTarball('vite-plus', version, { name: 'vite-plus', version, marker: 'A' })
+    await publish(A)
+    const B = await uploadFixtureTarball('vite-plus', version, { name: 'vite-plus', version, marker: 'B' })
+    await publish(B)
+    expect(A.shasum).not.toBe(B.shasum)
+
+    // Both builds are installable before the purge.
+    expect((await SELF.fetch(`${BASE}/tarballs/vite-plus/${version}/${A.shasum}.tgz`)).status).toBe(200)
+    expect((await SELF.fetch(`${BASE}/tarballs/vite-plus/${version}/${B.shasum}.tgz`)).status).toBe(200)
+
+    const purged = await SELF.fetch(`${BASE}/-/purge`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({ package: 'vite-plus', version }),
+    })
+    expect(purged.status).toBe(200)
+
+    // Purge lists casVersionPrefix and deletes ALL builds, so the superseded (A)
+    // build's content URL 404s too, not just the current (B) one.
+    expect((await SELF.fetch(`${BASE}/tarballs/vite-plus/${version}/${A.shasum}.tgz`)).status).toBe(404)
+    expect((await SELF.fetch(`${BASE}/tarballs/vite-plus/${version}/${B.shasum}.tgz`)).status).toBe(404)
+  })
 })
 
 describe('admin: publish', () => {
@@ -1223,21 +1310,25 @@ describe('health', () => {
 })
 
 describe('cleanup of expired artifacts (scheduled)', () => {
-  it('deletes per-version meta + tarball past the ref TTL', async () => {
+  it('deletes per-version meta + tarball + cas bytes past the ref TTL', async () => {
     await env.STORAGE.put('meta/vite-plus/0.0.0-commit.old00001.json', '{}')
     await env.STORAGE.put('tarball/vite-plus/0.0.0-commit.old00001.tgz', 'x')
+    // A content-addressed (cas) object is swept the same age-based way.
+    const casObjKey = casKey('vite-plus', '0.0.0-commit.old00001', 'a'.repeat(40))
+    await env.STORAGE.put(casObjKey, 'x')
     // A future "now" makes every object older than the TTL, so all are expired.
     const { deleted } = await cleanupExpiredArtifacts(
       env,
       Date.now() + 2 * REF_TTL_MS,
     )
-    expect(deleted).toBeGreaterThanOrEqual(2)
+    expect(deleted).toBeGreaterThanOrEqual(3)
     expect(
       await env.STORAGE.get('meta/vite-plus/0.0.0-commit.old00001.json'),
     ).toBeNull()
     expect(
       await env.STORAGE.get('tarball/vite-plus/0.0.0-commit.old00001.tgz'),
     ).toBeNull()
+    expect(await env.STORAGE.get(casObjKey)).toBeNull()
   })
 
   it('keeps artifacts within the TTL and never touches the indexes', async () => {
