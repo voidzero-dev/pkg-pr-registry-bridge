@@ -151,9 +151,9 @@ describe('packDirectory', () => {
   it('packs a workspace member; the batch rewrite pins its workspace dep', async () => {
     const packed = await packDirectory(join(root, 'packages/cli'))
 
-    // pnpm pack resolved `workspace:*` to the concrete version; without a
-    // batch the rewrite leaves that non-preview workspace dep alone.
-    const solo = await buildPreviewTarball(packed, 'vite-plus', VERSION)
+    // pnpm pack resolved `workspace:*` to the concrete version; a batch of just
+    // vite-plus leaves that (unlisted) workspace dep alone.
+    const solo = await buildPreviewTarball(packed, 'vite-plus', VERSION, new Set(['vite-plus']))
     expect(solo.packageJson.dependencies['@voidzero-dev/vite-plus-prompts']).toBe(
       '0.2.2',
     )
@@ -180,6 +180,7 @@ describe('packDirectory', () => {
       packed,
       '@voidzero-dev/vite-plus-darwin-arm64',
       VERSION,
+      new Set(['@voidzero-dev/vite-plus-darwin-arm64']),
     )
     expect(build.packageJson.version).toBe(VERSION)
     expect(build.packageJson.os).toEqual(['darwin'])

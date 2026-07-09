@@ -77,9 +77,8 @@ export interface PreviewBuild extends PreviewMeta {
 }
 
 /**
- * Parse the upstream gzipped tarball and locate `package/package.json`,
- * returning all entries, the package.json entry, and its parsed contents.
- * Shared by the meta-only and full-rebuild paths below.
+ * Parse the gzipped tarball and locate `package/package.json`, returning all
+ * entries, the package.json entry, and its parsed contents.
  */
 async function parsePackageJson(gzippedTarball: Uint8Array): Promise<{
   files: ParsedTarFileItem[]
@@ -112,7 +111,7 @@ export async function buildPreviewTarball(
   gzippedTarball: Uint8Array,
   packageName: string,
   version: string,
-  batch?: ReadonlySet<string>,
+  batch: ReadonlySet<string>,
 ): Promise<PreviewBuild> {
   const { files, pkgEntry, pkg } = await parsePackageJson(gzippedTarball)
 

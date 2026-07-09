@@ -8,10 +8,6 @@ export const PREVIEW_PACKAGES = new Set<string>([
   'vite-plus',
 ])
 
-export function isPreviewPackage(name: string): boolean {
-  return PREVIEW_PACKAGES.has(name)
-}
-
 /**
  * Packages the tarball endpoint may serve. Broader than PREVIEW_PACKAGES: it
  * also covers the repo's other workspace artifacts (e.g. the platform binaries).

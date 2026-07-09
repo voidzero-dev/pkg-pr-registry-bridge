@@ -1,5 +1,3 @@
-import { PREVIEW_PACKAGES } from '../preview/packages'
-
 /**
  * The manifest fields whose dependency specs are rewritten, and that the
  * publish action's batch validation checks. One home for this knowledge so
@@ -34,24 +32,22 @@ function rewriteDependencies(
  * set name/version and pin deps between packages of the same publish batch to
  * the synthetic version. The publish action passes the names it is publishing
  * together (`batch`), whose validation guarantees every workspace dep is
- * covered; without a batch the preview packages are pinned as an implicit
- * default. The package is NOT renamed to `vite` (npm alias semantics handle
+ * covered. The package is NOT renamed to `vite` (npm alias semantics handle
  * that in the consumer's dependency spec).
  */
 export function rewritePackageJson(
   pkg: Record<string, any>,
   packageName: string,
   version: string,
-  batch?: ReadonlySet<string>,
+  batch: ReadonlySet<string>,
 ): Record<string, any> {
-  const pinned = batch ?? PREVIEW_PACKAGES
   const next: Record<string, any> = { ...pkg }
   next.name = packageName
   next.version = version
 
   for (const field of DEPENDENCY_FIELDS) {
     if (next[field]) {
-      next[field] = rewriteDependencies(next[field], version, pinned)
+      next[field] = rewriteDependencies(next[field], version, batch)
     }
   }
 

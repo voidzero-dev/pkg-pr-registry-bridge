@@ -241,7 +241,7 @@ describe('isWorkspacePackage', () => {
 describe('rewritePackageJson', () => {
   const sha = '6acea1aa818e96365b5811d47360367ba18a3a05'
 
-  it('sets name/version and pins PREVIEW_PACKAGES members by default (no batch)', () => {
+  it('sets name/version and pins batch members', () => {
     const out = rewritePackageJson(
       {
         name: 'vite-plus',
@@ -254,12 +254,13 @@ describe('rewritePackageJson', () => {
       },
       'vite-plus',
       '0.0.0-pr.1891',
+      new Set(['vite-plus', '@voidzero-dev/vite-plus-core']),
     )
     expect(out.name).toBe('vite-plus')
     expect(out.version).toBe('0.0.0-pr.1891')
-    // core is a PREVIEW_PACKAGE, so it is pinned to the synthetic version.
+    // a batch member is pinned to the synthetic version.
     expect(out.dependencies['@voidzero-dev/vite-plus-core']).toBe('0.0.0-pr.1891')
-    // non-preview deps are left untouched.
+    // non-batch deps are left untouched.
     expect(out.dependencies.picomatch).toBe('^2.3.1')
     expect(out.peerDependencies.vite).toBe('^5.0.0')
   })
@@ -298,8 +299,7 @@ describe('rewritePackageJson', () => {
   })
 
   it('leaves a dep not in the batch alone', () => {
-    // With no batch only PREVIEW_PACKAGES are pinned; darwin-arm64 is not one,
-    // so its authored spec is preserved.
+    // darwin-arm64 is not in the batch, so its authored spec is preserved.
     const out = rewritePackageJson(
       {
         name: 'vite-plus',
@@ -310,6 +310,7 @@ describe('rewritePackageJson', () => {
       },
       'vite-plus',
       `0.0.0-commit.${sha}`,
+      new Set(['vite-plus']),
     )
     expect(out.optionalDependencies['@voidzero-dev/vite-plus-darwin-arm64']).toBe(
       '0.2.2',

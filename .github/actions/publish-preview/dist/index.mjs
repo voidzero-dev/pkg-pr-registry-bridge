@@ -318,24 +318,6 @@ var HttpError = class extends Error {
   }
 };
 
-// src/preview/packages.ts
-var PREVIEW_PACKAGES = /* @__PURE__ */ new Set([
-  "@voidzero-dev/vite-plus-core",
-  "vite-plus"
-]);
-function isWorkspacePackage(name, env) {
-  const patterns = (env.WORKSPACE_PACKAGES ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  if (patterns.length === 0) return PREVIEW_PACKAGES.has(name);
-  for (const pattern of patterns) {
-    if (pattern.endsWith("*")) {
-      if (name.startsWith(pattern.slice(0, -1))) return true;
-    } else if (name === pattern) {
-      return true;
-    }
-  }
-  return false;
-}
-
 // src/tarball/rewritePackageJson.ts
 var DEPENDENCY_FIELDS = [
   "dependencies",
@@ -351,13 +333,12 @@ function rewriteDependencies(deps, version, pinned) {
   return next;
 }
 function rewritePackageJson(pkg, packageName, version, batch) {
-  const pinned = batch ?? PREVIEW_PACKAGES;
   const next = { ...pkg };
   next.name = packageName;
   next.version = version;
   for (const field of DEPENDENCY_FIELDS) {
     if (next[field]) {
-      next[field] = rewriteDependencies(next[field], version, pinned);
+      next[field] = rewriteDependencies(next[field], version, batch);
     }
   }
   return next;
@@ -503,6 +484,26 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
+
+// src/preview/packages.ts
+var PREVIEW_PACKAGES = /* @__PURE__ */ new Set([
+  "@voidzero-dev/vite-plus-core",
+  "vite-plus"
+]);
+function isWorkspacePackage(name, env) {
+  const patterns = (env.WORKSPACE_PACKAGES ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (patterns.length === 0) return PREVIEW_PACKAGES.has(name);
+  for (const pattern of patterns) {
+    if (pattern.endsWith("*")) {
+      if (name.startsWith(pattern.slice(0, -1))) return true;
+    } else if (name === pattern) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// .github/actions/publish-preview/src/localPack.ts
 var execFileAsync = promisify(execFile);
 function parsePackagesInput(raw) {
   return raw.split(/[\n,]/).map((s) => s.trim()).filter(Boolean);

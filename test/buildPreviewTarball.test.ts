@@ -67,7 +67,7 @@ describe('buildPreviewTarball', () => {
       { name: 'package/README.md', data: '# hi\n' },
     ])
     await expect(
-      buildPreviewTarball(upstream, 'vite-plus', '0.0.0-commit.a832a55'),
+      buildPreviewTarball(upstream, 'vite-plus', '0.0.0-commit.a832a55', new Set(['vite-plus'])),
     ).rejects.toThrow(/missing package\/package\.json/)
   })
 
@@ -110,6 +110,7 @@ describe('buildPreviewTarball', () => {
         upstream,
         'vite-plus',
         '0.0.0-commit.a832a55',
+        new Set(['vite-plus']),
       )
       const tar = await gunzip(build.tarball)
       if (!endsWithMarker(tar)) offenders.push(tar.length)
