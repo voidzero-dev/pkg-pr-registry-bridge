@@ -162,8 +162,12 @@ async function main(): Promise<void> {
       shasum: build.shasum,
     }
     await post('/-/publish', { ref, packages: [pkg] }, `publish ${manifest.name}`)
+    // Log the content-addressed tarball URL (the shasum lives in its path) and
+    // the integrity, so an install mismatch is debuggable straight from the CI
+    // log: fetch the URL, hash it, and compare against the integrity here.
     console.log(
-      `  ✓ ${manifest.name}@${version} (${build.tarball.byteLength} bytes, from ${relative(cwd, dir)})`,
+      `  ✓ ${manifest.name}@${version} (${build.tarball.byteLength} bytes, from ${relative(cwd, dir)})\n` +
+        `      ${bridge}/tarballs/${manifest.name}/${version}/${build.shasum}.tgz  (${build.integrity})`,
     )
   }
 
