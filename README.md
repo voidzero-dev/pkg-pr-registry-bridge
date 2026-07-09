@@ -39,6 +39,17 @@ To run preview builds for a different project, fork and reconfigure: the upstrea
 repo, package allowlist, and origin are all configuration. See
 [`docs/self-hosting.md`](./docs/self-hosting.md).
 
+## Why a separate registry
+
+npm caps a package's packument (the metadata document listing every version) at
+100 MB uncompressed, and clients download it in full on every fresh install. A
+build per commit consumes that budget: Drizzle ORM hit the cap after roughly 763
+releases, and the registry then blocked new publishes for about a month ([vlt.io
+on packument size limits](https://www.vlt.io/blog/packument-size-limits)). The
+bridge keeps per-commit previews out of npm's packument. It serves them from a
+separate registry as synthetic versions over a bounded, TTL-pruned ref set, so
+the real packument stays small and previews install with normal npm semantics.
+
 ## How it works
 
 - **Packument** (`GET /vite-plus`, `GET /@voidzero-dev/vite-plus-core`): fetches
