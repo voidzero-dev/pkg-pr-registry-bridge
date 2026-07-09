@@ -23,9 +23,8 @@ background and focuses on the deployment.
 ## Prerequisites
 
 - **An upstream repo** that produces installable package directories in CI (a
-  `pnpm pack`-able `package/` with a `package.json`). pkg.pr.new is not required
-  at serve time: the publish action packs from the local checkout. You only need
-  pkg.pr.new if you want the Worker's on-demand fallback for small packages.
+  `pnpm pack`-able `package/` with a `package.json`). The publish action packs
+  from the local checkout, so the bridge does not depend on pkg.pr.new.
 - **A [Void](https://void.cloud) account** (`npm i -g void`, or use the pinned
   dev dependency via `pnpm exec void`). Void provisions the Worker plus the R2
   and KV bindings with no Cloudflare account. If you would rather run on raw
@@ -72,9 +71,9 @@ PREVIEW_REPO=acme-bundler
 WORKSPACE_PACKAGES=acme-bundler,@acme/bundler-*
 ```
 
-Leave `NPM_REGISTRY`, `PKG_PR_NEW_BASE`, and `MAX_TARBALL_BYTES` as they are
-unless you have a reason to change them. `PUBLIC_BASE_URL` in `.env` stays the
-local dev origin (`http://localhost:5173`); the production value comes next.
+Leave `NPM_REGISTRY` and `MAX_TARBALL_BYTES` as they are unless you have a reason
+to change them. `PUBLIC_BASE_URL` in `.env` stays the local dev origin
+(`http://localhost:5173`); the production value comes next.
 
 **About `WORKSPACE_PACKAGES`.** This strict allowlist gates the tarball endpoint
 and picks which transitive `pkg.pr.new` dependency URLs the bridge rewrites to
