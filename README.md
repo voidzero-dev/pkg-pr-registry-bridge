@@ -59,16 +59,13 @@ repo, package allowlist, and origin are all configuration. See
   too, so they resolve through the bridge like the other preview packages, and
   the package manager downloads only the binary for the current platform
   (reading os/cpu from the packument) instead of all of them. The publish
-  action pins any dep on a package of the same publish batch; the Worker's
-  on-demand fallback equivalently rewrites the pkg.pr.new dependency URLs
-  found in upstream tarballs. The binaries are large (tens of MB), so they are
-  packed + hashed in CI (where there is no per-request limit) and uploaded;
-  the binary's `package.json` version is rewritten to the synthetic version so
-  it matches what the resolver expects (pnpm's strict store check rejects a
-  mismatch). A platform binary not yet uploaded for a registered ref redirects
-  to pkg.pr.new as a best-effort fallback. The small preview packages can also
-  be built in-Worker on demand as a fallback (they are small enough to stay
-  within the limits).
+  action pins any dep on a package of the same publish batch. The binaries are
+  large (tens of MB), so they are packed + hashed in CI (where there is no
+  per-request limit) and uploaded; the binary's `package.json` version is
+  rewritten to the synthetic version so it matches what the resolver expects
+  (pnpm's strict store check rejects a mismatch). Everything is served from R2:
+  a version whose bytes are not there 404s, the Worker never builds a tarball or
+  redirects to pkg.pr.new on demand.
 - **Publishing** (`POST /-/publish`, `PUT /-/tarball/...`): the
   [publish action](#publishing-from-ci) packs each locally built package
   directory (in the same CI job that produced the artifacts, no pkg.pr.new
@@ -170,8 +167,8 @@ curl -I https://registry-bridge.viteplus.dev/voidzero-dev/vite-plus@1891
 # x-pkg-name-key: vite-plus
 ```
 
-Both `GET` and `HEAD` carry `x-commit-key`/`x-pkg-name-key`. Note the bridge
-rewrites a preview tarball's transitive deps to versions (not pkg.pr.new URLs),
+Both `GET` and `HEAD` carry `x-commit-key`/`x-pkg-name-key`. Note a published
+preview tarball's transitive deps are pinned to versions (not pkg.pr.new URLs),
 so for a full install of the meta-package with its platform binaries, use the
 registry + `pr-<n>` tag above rather than this URL as a bare dependency.
 
@@ -222,10 +219,8 @@ are uploaded with `void secret put`:
 | --- | --- |
 | `PUBLIC_BASE_URL` | Public origin of the bridge; used in `dist.tarball` URLs. Must match the deployed route. |
 | `NPM_REGISTRY` | npm fallback registry (`https://registry.npmjs.org`). |
-| `PKG_PR_NEW_BASE` | pkg.pr.new base (`https://pkg.pr.new`). |
 | `PREVIEW_OWNER` / `PREVIEW_REPO` | Fixed upstream repo (`voidzero-dev` / `vite-plus`). |
-| `WORKSPACE_PACKAGES` | Allowlist for the tarball endpoint and pkg.pr.new-URL dep routing. Exact names or `prefix*`, e.g. `vite-plus,@voidzero-dev/vite-plus-*`. |
-| `MAX_TARBALL_BYTES` | Max upstream tarball size (default 64 MiB). |
+| `WORKSPACE_PACKAGES` | Allowlist for the tarball endpoint. Exact names or `prefix*`, e.g. `vite-plus,@voidzero-dev/vite-plus-*`. |
 
 Bindings/secrets:
 

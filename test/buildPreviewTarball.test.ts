@@ -1,17 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { createTarGzip, parseTarGzip } from 'nanotar'
 import { buildPreviewTarball } from '../src/tarball/buildPreviewTarball'
-import type { RewriteEnv } from '../src/tarball/rewritePackageJson'
 
 const decode = (data?: Uint8Array) => new TextDecoder().decode(data)
-
-const env: RewriteEnv = {
-  PKG_PR_NEW_BASE: 'https://pkg.pr.new',
-  PREVIEW_OWNER: 'voidzero-dev',
-  PREVIEW_REPO: 'vite-plus',
-  PUBLIC_BASE_URL: 'https://bridge.example.com',
-  WORKSPACE_PACKAGES: 'vite-plus,@voidzero-dev/vite-plus-*',
-}
 
 async function makeUpstream(pkg: Record<string, any>) {
   return createTarGzip([
@@ -27,13 +18,12 @@ async function makeUpstream(pkg: Record<string, any>) {
 
 describe('buildPreviewTarball', () => {
   it('rewrites package.json name/version/deps and preserves other files', async () => {
-    const binSha = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef'
     const upstream = await makeUpstream({
       name: '@voidzero-dev/vite-plus-core',
       version: '1891',
       dependencies: { 'vite-plus': '1891', picomatch: '^2.3.1' },
       optionalDependencies: {
-        '@voidzero-dev/vite-plus-darwin-arm64': `https://pkg.pr.new/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-darwin-arm64@${binSha}`,
+        '@voidzero-dev/vite-plus-darwin-arm64': '1891',
       },
       bin: { vp: './bin/vp' },
     })
@@ -42,17 +32,21 @@ describe('buildPreviewTarball', () => {
       upstream,
       '@voidzero-dev/vite-plus-core',
       '0.0.0-commit.a832a55',
-    env,
+      new Set([
+        '@voidzero-dev/vite-plus-core',
+        'vite-plus',
+        '@voidzero-dev/vite-plus-darwin-arm64',
+      ]),
     )
 
     expect(build.packageJson.name).toBe('@voidzero-dev/vite-plus-core')
     expect(build.packageJson.version).toBe('0.0.0-commit.a832a55')
     expect(build.packageJson.dependencies['vite-plus']).toBe('0.0.0-commit.a832a55')
     expect(build.packageJson.dependencies.picomatch).toBe('^2.3.1')
-    // pkg.pr.new optionalDependency URLs are rewritten to version strings.
+    // batch-member deps are pinned to the synthetic version.
     expect(
       build.packageJson.optionalDependencies['@voidzero-dev/vite-plus-darwin-arm64'],
-    ).toBe(`0.0.0-commit.${binSha}`)
+    ).toBe('0.0.0-commit.a832a55')
 
     const files = await parseTarGzip(build.tarball)
 
@@ -73,7 +67,7 @@ describe('buildPreviewTarball', () => {
       { name: 'package/README.md', data: '# hi\n' },
     ])
     await expect(
-      buildPreviewTarball(upstream, 'vite-plus', '0.0.0-commit.a832a55', env),
+      buildPreviewTarball(upstream, 'vite-plus', '0.0.0-commit.a832a55'),
     ).rejects.toThrow(/missing package\/package\.json/)
   })
 
@@ -116,7 +110,6 @@ describe('buildPreviewTarball', () => {
         upstream,
         'vite-plus',
         '0.0.0-commit.a832a55',
-        env,
       )
       const tar = await gunzip(build.tarball)
       if (!endsWithMarker(tar)) offenders.push(tar.length)

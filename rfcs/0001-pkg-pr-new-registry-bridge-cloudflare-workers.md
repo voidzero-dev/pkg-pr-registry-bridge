@@ -18,6 +18,17 @@
 > and `GITHUB_TOKEN` specifics below are historical. See [README.md](../README.md)
 > for the current implementation and deployment.
 
+> Serving-model note: the shipped bridge no longer builds or fetches preview
+> tarballs at request time. The CPU/memory-heavy work (pack, rewrite, re-pack,
+> hash) moved to a CI publish action that uploads finished artifacts to R2 (see
+> [docs/ci-setup.md](../docs/ci-setup.md)); the Worker only streams bytes from
+> R2, and a version whose bytes are not there is a 404. As a result the
+> in-Worker on-demand build and the platform-binary redirect to pkg.pr.new
+> described below, the `PKG_PR_NEW_BASE` and `MAX_TARBALL_BYTES` vars, and the
+> `toPkgPrNewUrl` / `fetchUpstreamTarball` modules were all removed. Read the
+> tarball-build sections (6.x), the upstream-fetch guard, and those vars as
+> historical design; the Worker no longer reaches out to pkg.pr.new at all.
+
 ## 1. Summary
 
 This RFC specifies how to implement the version-gated pkg.pr.new registry

@@ -66,20 +66,19 @@ three project knobs:
 ```ini
 PREVIEW_OWNER=acme-corp
 PREVIEW_REPO=acme-bundler
-# Packages the tarball endpoint serves, and whose pkg.pr.new dependency URLs are
-# routed through the bridge. Exact names or `prefix*` patterns, comma-separated.
+# Packages the tarball endpoint serves. Exact names or `prefix*` patterns,
+# comma-separated.
 WORKSPACE_PACKAGES=acme-bundler,@acme/bundler-*
 ```
 
-Leave `NPM_REGISTRY` and `MAX_TARBALL_BYTES` as they are unless you have a reason
-to change them. `PUBLIC_BASE_URL` in `.env` stays the local dev origin
+Leave `NPM_REGISTRY` as it is unless you have a reason to change it.
+`PUBLIC_BASE_URL` in `.env` stays the local dev origin
 (`http://localhost:5173`); the production value comes next.
 
-**About `WORKSPACE_PACKAGES`.** This strict allowlist gates the tarball endpoint
-and picks which transitive `pkg.pr.new` dependency URLs the bridge rewrites to
-synthetic versions. Include your main package, the alias/meta package a consumer
-overrides `npm:...` to, and a `prefix*` for the per-platform binary packages. The
-bridge redirects anything else to npm untouched.
+**About `WORKSPACE_PACKAGES`.** This strict allowlist gates the tarball endpoint:
+a name outside it 404s there. Include your main package, the alias/meta package a
+consumer overrides `npm:...` to, and a `prefix*` for the per-platform binary
+packages.
 
 ## 3. Set the public origin (`.env.production`)
 

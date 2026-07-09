@@ -11,15 +11,12 @@ import {
   readManifest,
 } from '../../.github/actions/publish-preview/src/localPack'
 import { buildPreviewTarball } from '../../src/tarball/buildPreviewTarball'
-import type { RewriteEnv } from '../../src/tarball/rewritePackageJson'
 
 const SHA = '6acea1aa818e96365b5811d47360367ba18a3a05'
 const VERSION = `0.0.0-commit.${SHA}`
 
-// The action's env: no pkg.pr.new fields, locally packed manifests never
-// carry pkg.pr.new URL deps.
-const env: RewriteEnv = {
-  PUBLIC_BASE_URL: 'https://bridge.example.com',
+// The workspace allowlist assertValidBatch validates against.
+const env = {
   WORKSPACE_PACKAGES: 'vite-plus,@voidzero-dev/vite-plus-*',
 }
 
@@ -156,7 +153,7 @@ describe('packDirectory', () => {
 
     // pnpm pack resolved `workspace:*` to the concrete version; without a
     // batch the rewrite leaves that non-preview workspace dep alone.
-    const solo = await buildPreviewTarball(packed, 'vite-plus', VERSION, env)
+    const solo = await buildPreviewTarball(packed, 'vite-plus', VERSION)
     expect(solo.packageJson.dependencies['@voidzero-dev/vite-plus-prompts']).toBe(
       '0.2.2',
     )
@@ -167,7 +164,6 @@ describe('packDirectory', () => {
       packed,
       'vite-plus',
       VERSION,
-      env,
       new Set(['vite-plus', '@voidzero-dev/vite-plus-prompts']),
     )
     expect(build.packageJson.version).toBe(VERSION)
@@ -184,7 +180,6 @@ describe('packDirectory', () => {
       packed,
       '@voidzero-dev/vite-plus-darwin-arm64',
       VERSION,
-      env,
     )
     expect(build.packageJson.version).toBe(VERSION)
     expect(build.packageJson.os).toEqual(['darwin'])

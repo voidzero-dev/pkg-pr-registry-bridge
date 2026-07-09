@@ -336,54 +336,28 @@ function isWorkspacePackage(name, env) {
   return false;
 }
 
-// src/preview/parsePreviewVersion.ts
-function commitVersion(sha) {
-  return `0.0.0-commit.${sha}`;
-}
-function shaToVersion(ref) {
-  return /^[0-9a-f]{7,40}$/i.test(ref) ? commitVersion(ref) : null;
-}
-
 // src/tarball/rewritePackageJson.ts
 var DEPENDENCY_FIELDS = [
   "dependencies",
   "peerDependencies",
   "optionalDependencies"
 ];
-function pkgPrNewUrlToVersion(spec, env) {
-  if (!env.PKG_PR_NEW_BASE || !env.PREVIEW_OWNER || !env.PREVIEW_REPO) {
-    return null;
-  }
-  const prefix = `${env.PKG_PR_NEW_BASE}/${env.PREVIEW_OWNER}/${env.PREVIEW_REPO}/`;
-  if (!spec.startsWith(prefix)) return null;
-  const rest = spec.slice(prefix.length);
-  const at = rest.lastIndexOf("@");
-  if (at <= 0) return null;
-  const name = rest.slice(0, at);
-  if (!isWorkspacePackage(name, env)) return null;
-  return shaToVersion(rest.slice(at + 1));
-}
-function rewriteDependencies(deps, version, env, pinned) {
+function rewriteDependencies(deps, version, pinned) {
   if (!deps) return deps;
   const next = { ...deps };
-  for (const [name, spec] of Object.entries(deps)) {
-    if (pinned.has(name)) {
-      next[name] = version;
-      continue;
-    }
-    const refVersion = pkgPrNewUrlToVersion(spec, env);
-    if (refVersion) next[name] = refVersion;
+  for (const name of Object.keys(deps)) {
+    if (pinned.has(name)) next[name] = version;
   }
   return next;
 }
-function rewritePackageJson(pkg, packageName, version, env, batch) {
+function rewritePackageJson(pkg, packageName, version, batch) {
   const pinned = batch ?? PREVIEW_PACKAGES;
   const next = { ...pkg };
   next.name = packageName;
   next.version = version;
   for (const field of DEPENDENCY_FIELDS) {
     if (next[field]) {
-      next[field] = rewriteDependencies(next[field], version, env, pinned);
+      next[field] = rewriteDependencies(next[field], version, pinned);
     }
   }
   return next;
@@ -467,9 +441,9 @@ async function parsePackageJson(gzippedTarball) {
     throw new HttpError(422, "Invalid package/package.json in upstream tarball");
   }
 }
-async function buildPreviewTarball(gzippedTarball, packageName, version, env, batch) {
+async function buildPreviewTarball(gzippedTarball, packageName, version, batch) {
   const { files, pkgEntry, pkg } = await parsePackageJson(gzippedTarball);
-  const rewritten = rewritePackageJson(pkg, packageName, version, env, batch);
+  const rewritten = rewritePackageJson(pkg, packageName, version, batch);
   const rewrittenBytes = encodePackageJson(rewritten);
   const out = [];
   for (const file of files) {
@@ -484,6 +458,11 @@ async function buildPreviewTarball(gzippedTarball, packageName, version, env, ba
   const tarball = await gzip(withEndOfArchiveMarker(createTar(out)));
   const { shasum, integrity } = await computeDigests(tarball);
   return { tarball, packageJson: rewritten, shasum, integrity };
+}
+
+// src/preview/parsePreviewVersion.ts
+function commitVersion(sha) {
+  return `0.0.0-commit.${sha}`;
 }
 
 // src/preview/parseConfiguredPreviewRefs.ts
@@ -653,11 +632,8 @@ async function main() {
     cwd
   );
   const packages = dirs.map((dir) => ({ dir, manifest: readManifest(dir) }));
-  const env = {
-    PUBLIC_BASE_URL: bridge,
-    WORKSPACE_PACKAGES: input("workspace-packages") || "vite-plus,@voidzero-dev/vite-plus-*"
-  };
-  const batch = assertValidBatch(packages, env);
+  const workspacePackages = input("workspace-packages") || "vite-plus,@voidzero-dev/vite-plus-*";
+  const batch = assertValidBatch(packages, { WORKSPACE_PACKAGES: workspacePackages });
   console.log(`publishing ${version} (${packages.length} packages) to ${bridge}`);
   const post = (path, body, label) => withRetry(label, async () => {
     const res = await fetch(`${bridge}${path}`, {
@@ -679,7 +655,7 @@ async function main() {
     const { dir, manifest } = packages[i];
     const packed = await nextPack;
     if (i + 1 < packages.length) nextPack = startPack(i + 1);
-    const build = await buildPreviewTarball(packed, manifest.name, version, env, batch);
+    const build = await buildPreviewTarball(packed, manifest.name, version, batch);
     await uploadTarball(bridge, token, manifest.name, version, build.tarball, build.shasum);
     const pkg = {
       name: manifest.name,

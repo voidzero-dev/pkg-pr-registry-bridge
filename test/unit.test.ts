@@ -7,17 +7,13 @@ import {
   parseConfiguredPreviewRefs,
   prNumberFromUrl,
 } from '../src/preview/parseConfiguredPreviewRefs'
-import { toPkgPrNewUrl } from '../src/preview/toPkgPrNewUrl'
 import {
   encodeNpmPackageName,
   parseNpmTarballPath,
   parsePackagePath,
   parseTarballPath,
 } from '../src/registry/parsePackageName'
-import {
-  rewritePackageJson,
-  pkgPrNewUrlToVersion,
-} from '../src/tarball/rewritePackageJson'
+import { rewritePackageJson } from '../src/tarball/rewritePackageJson'
 import { isWorkspacePackage } from '../src/preview/packages'
 import {
   assertSafeTarballPath,
@@ -28,7 +24,6 @@ import { computeDigests } from '../src/tarball/digests'
 import type { Env } from '../src/config'
 
 const env = {
-  PKG_PR_NEW_BASE: 'https://pkg.pr.new',
   PREVIEW_OWNER: 'voidzero-dev',
   PREVIEW_REPO: 'vite-plus',
   PUBLIC_BASE_URL: 'https://bridge.example.com',
@@ -106,25 +101,6 @@ describe('prNumberFromUrl', () => {
     expect(prNumberFromUrl(undefined)).toBeUndefined()
     expect(prNumberFromUrl('')).toBeUndefined()
     expect(prNumberFromUrl('https://github.com/o/r/commit/abc123')).toBeUndefined()
-  })
-})
-
-describe('toPkgPrNewUrl', () => {
-  it('maps scoped and unscoped commit names', () => {
-    expect(
-      toPkgPrNewUrl(env, '@voidzero-dev/vite-plus-core', '0.0.0-commit.a832a55'),
-    ).toBe(
-      'https://pkg.pr.new/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-core@a832a55',
-    )
-    expect(toPkgPrNewUrl(env, 'vite-plus', '0.0.0-commit.a832a55')).toBe(
-      'https://pkg.pr.new/voidzero-dev/vite-plus/vite-plus@a832a55',
-    )
-    // PR-number versions are not preview versions -> null.
-    expect(toPkgPrNewUrl(env, 'vite-plus', '0.0.0-pr.1891')).toBeNull()
-  })
-
-  it('returns null for non-preview versions', () => {
-    expect(toPkgPrNewUrl(env, 'vite-plus', '0.2.1')).toBeNull()
   })
 })
 
@@ -262,43 +238,10 @@ describe('isWorkspacePackage', () => {
   })
 })
 
-describe('pkgPrNewUrlToVersion', () => {
-  const sha = '6acea1aa818e96365b5811d47360367ba18a3a05'
-
-  it('maps a whitelisted pkg.pr.new URL to a synthetic version string', () => {
-    expect(
-      pkgPrNewUrlToVersion(
-        `https://pkg.pr.new/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-darwin-arm64@${sha}`,
-        env,
-      ),
-    ).toBe(`0.0.0-commit.${sha}`)
-    // A PR-number URL is mutable -> not routed (left as the original URL).
-    expect(
-      pkgPrNewUrlToVersion(
-        'https://pkg.pr.new/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-darwin-arm64@1891',
-        env,
-      ),
-    ).toBeNull()
-  })
-
-  it('leaves non-workspace and non-pkg.pr.new specs alone', () => {
-    expect(
-      pkgPrNewUrlToVersion(
-        `https://pkg.pr.new/voidzero-dev/vite-plus/@other/pkg@${sha}`,
-        env,
-      ),
-    ).toBeNull()
-    expect(pkgPrNewUrlToVersion('^2.3.1', env)).toBeNull()
-    expect(
-      pkgPrNewUrlToVersion('https://example.com/foo.tgz', env),
-    ).toBeNull()
-  })
-})
-
 describe('rewritePackageJson', () => {
   const sha = '6acea1aa818e96365b5811d47360367ba18a3a05'
 
-  it('rewrites preview deps and pkg.pr.new URL optional deps to versions', () => {
+  it('sets name/version and pins PREVIEW_PACKAGES members by default (no batch)', () => {
     const out = rewritePackageJson(
       {
         name: 'vite-plus',
@@ -308,28 +251,22 @@ describe('rewritePackageJson', () => {
           picomatch: '^2.3.1',
         },
         peerDependencies: { vite: '^5.0.0' },
-        optionalDependencies: {
-          '@voidzero-dev/vite-plus-darwin-arm64': `https://pkg.pr.new/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-darwin-arm64@${sha}`,
-        },
       },
       'vite-plus',
       '0.0.0-pr.1891',
-      env,
     )
     expect(out.name).toBe('vite-plus')
     expect(out.version).toBe('0.0.0-pr.1891')
+    // core is a PREVIEW_PACKAGE, so it is pinned to the synthetic version.
     expect(out.dependencies['@voidzero-dev/vite-plus-core']).toBe('0.0.0-pr.1891')
+    // non-preview deps are left untouched.
     expect(out.dependencies.picomatch).toBe('^2.3.1')
     expect(out.peerDependencies.vite).toBe('^5.0.0')
-    expect(out.optionalDependencies['@voidzero-dev/vite-plus-darwin-arm64']).toBe(
-      `0.0.0-commit.${sha}`,
-    )
   })
 
   it('pins deps on batch members to the synthetic version', () => {
     // The publish action packs local directories, so batch-internal deps
-    // arrive as plain workspace versions (pnpm pack resolved `workspace:*`),
-    // not pkg.pr.new URLs.
+    // arrive as plain workspace versions (pnpm pack resolved `workspace:*`).
     const out = rewritePackageJson(
       {
         name: 'vite-plus',
@@ -344,7 +281,6 @@ describe('rewritePackageJson', () => {
       },
       'vite-plus',
       `0.0.0-commit.${sha}`,
-      env,
       new Set([
         'vite-plus',
         '@voidzero-dev/vite-plus-core',
@@ -361,9 +297,9 @@ describe('rewritePackageJson', () => {
     )
   })
 
-  it('leaves non-batch workspace versions alone without a batch', () => {
-    // Worker path (no batchPackages): a plain version dep on a non-preview
-    // workspace package stays as-is; only pkg.pr.new URLs are routed.
+  it('leaves a dep not in the batch alone', () => {
+    // With no batch only PREVIEW_PACKAGES are pinned; darwin-arm64 is not one,
+    // so its authored spec is preserved.
     const out = rewritePackageJson(
       {
         name: 'vite-plus',
@@ -374,7 +310,6 @@ describe('rewritePackageJson', () => {
       },
       'vite-plus',
       `0.0.0-commit.${sha}`,
-      env,
     )
     expect(out.optionalDependencies['@voidzero-dev/vite-plus-darwin-arm64']).toBe(
       '0.2.2',

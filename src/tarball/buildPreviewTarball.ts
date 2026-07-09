@@ -5,7 +5,7 @@ import {
   type TarFileInput,
 } from 'nanotar'
 import { HttpError } from '../httpError'
-import { rewritePackageJson, type RewriteEnv } from './rewritePackageJson'
+import { rewritePackageJson } from './rewritePackageJson'
 import { computeDigests } from './digests'
 import {
   assertSafeTarballPath,
@@ -99,24 +99,7 @@ async function parsePackageJson(gzippedTarball: Uint8Array): Promise<{
 }
 
 /**
- * Parse the upstream tarball and return the rewritten `package.json` without
- * re-gzipping. Used to build packument metadata cheaply for large packages
- * (the platform binaries), where re-tarring/re-gzipping every configured ref
- * would exceed the Worker CPU limit. The full tarball is built lazily, only
- * when the matching binary is actually downloaded.
- */
-export async function extractRewrittenPackageJson(
-  gzippedTarball: Uint8Array,
-  packageName: string,
-  version: string,
-  env: RewriteEnv,
-): Promise<Record<string, any>> {
-  const { pkg } = await parsePackageJson(gzippedTarball)
-  return rewritePackageJson(pkg, packageName, version, env)
-}
-
-/**
- * Rewrite an upstream pkg.pr.new tarball into a preview release:
+ * Rewrite a packed package tarball into a preview release:
  *   1. parse gzip + tar,
  *   2. find and rewrite `package/package.json`,
  *   3. repack only entries under the `package/` root, preserving file modes,
@@ -129,12 +112,11 @@ export async function buildPreviewTarball(
   gzippedTarball: Uint8Array,
   packageName: string,
   version: string,
-  env: RewriteEnv,
   batch?: ReadonlySet<string>,
 ): Promise<PreviewBuild> {
   const { files, pkgEntry, pkg } = await parsePackageJson(gzippedTarball)
 
-  const rewritten = rewritePackageJson(pkg, packageName, version, env, batch)
+  const rewritten = rewritePackageJson(pkg, packageName, version, batch)
   const rewrittenBytes = encodePackageJson(rewritten)
 
   const out: TarFileInput[] = []
