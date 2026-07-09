@@ -59,42 +59,16 @@ function json(obj: unknown, status = 200): Response {
   })
 }
 
-function gzip(bytes: Uint8Array): Response {
-  return new Response(bytes, {
-    headers: { 'content-type': 'application/gzip' },
-  })
-}
-
 /**
  * The worker-under-test (reached via SELF.fetch) runs in this same isolate, so
- * a `vi.stubGlobal('fetch', ...)` mock intercepts its outbound calls to npm and
- * pkg.pr.new, while SELF.fetch (a service binding) still routes normally.
+ * a `vi.stubGlobal('fetch', ...)` mock intercepts its outbound calls to npm,
+ * while SELF.fetch (a service binding) still routes normally. The Worker never
+ * fetches pkg.pr.new (there is no on-demand build/redirect), so any outbound
+ * call other than to npm is a bug and rejects loudly.
  */
 const PLATFORM_SHA = '1234567890abcdef1234567890abcdef12345678'
 
-beforeAll(async () => {
-  const darwinBin = await makeTarball({
-    name: '@voidzero-dev/vite-plus-darwin-arm64',
-    version: '0.2.1',
-    os: ['darwin'],
-    cpu: ['arm64'],
-  })
-  // The suite's fixture ref `commit.a832a55` (registered in beforeEach).
-  const vitePlusCommit = await makeTarball({
-    name: 'vite-plus',
-    version: 'a832a55',
-    dependencies: { '@voidzero-dev/vite-plus-core': 'a832a55' },
-    optionalDependencies: {
-      '@voidzero-dev/vite-plus-darwin-arm64': `https://pkg.pr.new/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-darwin-arm64@${PLATFORM_SHA}`,
-    },
-    bin: { vp: './bin/vp' },
-  })
-  const coreCommit = await makeTarball({
-    name: '@voidzero-dev/vite-plus-core',
-    version: 'a832a55',
-    dependencies: { 'vite-plus': 'a832a55' },
-  })
-
+beforeAll(() => {
   const mockFetch = (
     input: RequestInfo | URL,
     init?: RequestInit,
@@ -121,15 +95,6 @@ beforeAll(async () => {
     }
     if (url === 'https://registry.npmjs.org/react') {
       return Promise.resolve(json({ name: 'react', 'dist-tags': { latest: '19.0.0' } }))
-    }
-    if (url.endsWith('/vite-plus@a832a55')) {
-      return Promise.resolve(gzip(vitePlusCommit))
-    }
-    if (url.endsWith('/@voidzero-dev/vite-plus-core@a832a55')) {
-      return Promise.resolve(gzip(coreCommit))
-    }
-    if (url.endsWith(`/@voidzero-dev/vite-plus-darwin-arm64@${PLATFORM_SHA}`)) {
-      return Promise.resolve(gzip(darwinBin))
     }
     return Promise.reject(new Error(`unexpected fetch: ${url}`))
   }
@@ -484,7 +449,9 @@ describe('packument endpoint', () => {
     }
   })
 
-  it('rewrites pkg.pr.new optionalDependency URLs to version strings', async () => {
+  it('serves the stored optionalDependency version strings from the published meta', async () => {
+    // CI stores each package.json already rewritten (batch deps pinned to the
+    // synthetic version), so the packument serves those version strings as-is.
     const res = await SELF.fetch(`${BASE}/vite-plus`, {
       headers: { accept: 'application/json' },
     })
@@ -495,36 +462,27 @@ describe('packument endpoint', () => {
     )
   })
 
-  it('injects the version into a platform package packument with os/cpu', async () => {
-    // The fixture ref has no darwin meta published, so the platform packument
-    // derives os/cpu from the package name (platformMetaFromName). With no
-    // published shasum, dist.tarball is the version URL (which the bridge
-    // redirects to the current build), NOT a content URL.
+  it('omits a platform package version with no published meta (no on-demand build)', async () => {
+    // The fixture ref publishes only vite-plus + core, not the darwin binary.
+    // The Worker no longer derives a name-based meta or builds on demand, so the
+    // version is simply absent from the platform packument until CI publishes it.
     const res = await SELF.fetch(
       `${BASE}/@voidzero-dev%2Fvite-plus-darwin-arm64`,
       { headers: { accept: 'application/json' } },
     )
+    expect(res.status).toBe(200)
     const body = (await res.json()) as Record<string, any>
-    const v = body.versions[FIXTURE_VERSION]
-    expect(v).toBeTruthy()
-    expect(v.os).toEqual(['darwin'])
-    expect(v.cpu).toEqual(['arm64'])
-    expect(v.dist.tarball).toBe(
-      `${BASE}/tarballs/@voidzero-dev/vite-plus-darwin-arm64/${FIXTURE_VERSION}.tgz`,
-    )
+    expect(body.versions[FIXTURE_VERSION]).toBeUndefined()
   })
 
-  it('redirects an un-uploaded platform binary to pkg.pr.new', async () => {
-    // The Worker never builds platform binaries; until CI uploads one, the
-    // tarball endpoint redirects to pkg.pr.new (which serves identical bytes).
+  it('404s a tarball whose bytes are not in R2 (no upstream redirect)', async () => {
+    // The Worker never redirects to pkg.pr.new: an unpublished platform binary
+    // (or any version whose bytes are not in R2) is a hard 404.
     const res = await SELF.fetch(
       `${BASE}/tarballs/@voidzero-dev/vite-plus-darwin-arm64/0.0.0-commit.deadbeefdeadbeefdeadbeefdeadbeefdeadbeef.tgz`,
       { redirect: 'manual' },
     )
-    expect(res.status).toBe(302)
-    expect(res.headers.get('location')).toBe(
-      'https://pkg.pr.new/voidzero-dev/vite-plus/@voidzero-dev/vite-plus-darwin-arm64@deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
-    )
+    expect(res.status).toBe(404)
   })
 
   it('serves an uploaded platform binary from R2 with a Content-Length', async () => {
@@ -1266,38 +1224,6 @@ describe('admin: per-package atomic publish', () => {
     const entry = refs.refs.find((r: any) => r.ref === `commit.${sha}`)
     expect(entry.prUrl).toBe('https://github.com/voidzero-dev/vite-plus/pull/1891')
     expect(entry.publishedAt).toBeTruthy()
-  })
-})
-
-describe('on-demand build consistency', () => {
-  it('an in-worker rebuild updates the meta-index along with the per-version meta', async () => {
-    // Simulate the gap state that caused meta flapping in production: the
-    // version is registered but its meta artifacts are gone. The packument
-    // request triggers the on-demand build, which must repopulate BOTH meta
-    // sources; a divergent index (stale or missing entry) makes the packument
-    // flip between integrities depending on which source a rebuild reads.
-    await env.STORAGE.delete(metaKey('vite-plus', FIXTURE_VERSION))
-    const idx = (await (await env.STORAGE.get(metaIndexKey('vite-plus')))?.json()) as
-      | Record<string, any>
-      | undefined
-    if (idx) {
-      delete idx[FIXTURE_VERSION]
-      await env.STORAGE.put(metaIndexKey('vite-plus'), JSON.stringify(idx))
-    }
-
-    // Triggers getPreviewMeta -> buildAndStore for the fixture version.
-    const pack = (await (
-      await SELF.fetch(`${BASE}/vite-plus`, { headers: { accept: 'application/json' } })
-    ).json()) as Record<string, any>
-    const built = pack.versions[FIXTURE_VERSION]?.dist?.integrity
-    expect(built).toBeTruthy()
-
-    // The rebuild must keep the two meta sources consistent.
-    const meta = (await (await env.STORAGE.get(metaKey('vite-plus', FIXTURE_VERSION)))!.json()) as Record<string, any>
-    const index = (await (await env.STORAGE.get(metaIndexKey('vite-plus')))!.json()) as Record<string, any>
-    expect(index[FIXTURE_VERSION]).toBeTruthy()
-    expect(index[FIXTURE_VERSION].integrity).toBe(meta.integrity)
-    expect(built).toBe(meta.integrity)
   })
 })
 

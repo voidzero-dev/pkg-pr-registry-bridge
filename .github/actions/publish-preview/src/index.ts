@@ -22,7 +22,6 @@
 import { relative } from 'node:path'
 import { buildPreviewTarball } from '../../../../src/tarball/buildPreviewTarball'
 import { parseConfiguredPreviewRefs } from '../../../../src/preview/parseConfiguredPreviewRefs'
-import type { RewriteEnv } from '../../../../src/tarball/rewritePackageJson'
 import {
   assertValidBatch,
   expandPackageDirs,
@@ -106,16 +105,14 @@ async function main(): Promise<void> {
   )
   const packages = dirs.map((dir) => ({ dir, manifest: readManifest(dir) }))
 
-  // Locally packed manifests never carry pkg.pr.new URL deps, so the
-  // pkg.pr.new fields of the shared config stay unset here.
-  const env: RewriteEnv = {
-    PUBLIC_BASE_URL: bridge,
-    WORKSPACE_PACKAGES: input('workspace-packages') || 'vite-plus,@voidzero-dev/vite-plus-*',
-  }
+  // The workspace allowlist gates which packed manifests may publish and which
+  // deps the batch must cover.
+  const workspacePackages =
+    input('workspace-packages') || 'vite-plus,@voidzero-dev/vite-plus-*'
 
   // The batch (every name publishing together) drives dependency rewriting;
   // validation fails up front, before anything is packed or uploaded.
-  const batch = assertValidBatch(packages, env)
+  const batch = assertValidBatch(packages, { WORKSPACE_PACKAGES: workspacePackages })
 
   console.log(`publishing ${version} (${packages.length} packages) to ${bridge}`)
 
@@ -152,7 +149,7 @@ async function main(): Promise<void> {
     const { dir, manifest } = packages[i]
     const packed = await nextPack
     if (i + 1 < packages.length) nextPack = startPack(i + 1)
-    const build = await buildPreviewTarball(packed, manifest.name, version, env, batch)
+    const build = await buildPreviewTarball(packed, manifest.name, version, batch)
     await uploadTarball(bridge, token, manifest.name, version, build.tarball, build.shasum)
     const pkg = {
       name: manifest.name,

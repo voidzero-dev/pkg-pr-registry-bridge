@@ -14,10 +14,8 @@
   "kv_namespaces": [{ "binding": "KV", "id": "test-npm-time-cache" }],
   "vars": {
     "NPM_REGISTRY": "https://registry.npmjs.org",
-    "PKG_PR_NEW_BASE": "https://pkg.pr.new",
     "PREVIEW_OWNER": "voidzero-dev",
     "PREVIEW_REPO": "vite-plus",
-    "WORKSPACE_PACKAGES": "vite-plus,@voidzero-dev/vite-plus-*",
-    "MAX_TARBALL_BYTES": "67108864"
+    "WORKSPACE_PACKAGES": "vite-plus,@voidzero-dev/vite-plus-*"
   }
 }

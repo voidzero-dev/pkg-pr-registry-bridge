@@ -35,6 +35,21 @@ See [`rfcs/0001-pkg-pr-new-registry-bridge-cloudflare-workers.md`](./rfcs/0001-p
 for the full design, and [`examples/bun-validation`](./examples/bun-validation)
 for a runnable example.
 
+To run preview builds for a different project, fork and reconfigure: the upstream
+repo, package allowlist, and origin are all configuration. See
+[`docs/self-hosting.md`](./docs/self-hosting.md).
+
+## Why a separate registry
+
+npm caps a package's packument (the metadata document listing every version) at
+100 MB uncompressed, and clients download it in full on every fresh install. A
+build per commit consumes that budget: Drizzle ORM hit the cap after roughly 763
+releases, and the registry then blocked new publishes for about a month ([vlt.io
+on packument size limits](https://www.vlt.io/blog/packument-size-limits)). The
+bridge keeps per-commit previews out of npm's packument. It serves them from a
+separate registry as synthetic versions over a bounded, TTL-pruned ref set, so
+the real packument stays small and previews install with normal npm semantics.
+
 ## How it works
 
 - **Packument** (`GET /vite-plus`, `GET /@voidzero-dev/vite-plus-core`): fetches
@@ -55,16 +70,13 @@ for a runnable example.
   too, so they resolve through the bridge like the other preview packages, and
   the package manager downloads only the binary for the current platform
   (reading os/cpu from the packument) instead of all of them. The publish
-  action pins any dep on a package of the same publish batch; the Worker's
-  on-demand fallback equivalently rewrites the pkg.pr.new dependency URLs
-  found in upstream tarballs. The binaries are large (tens of MB), so they are
-  packed + hashed in CI (where there is no per-request limit) and uploaded;
-  the binary's `package.json` version is rewritten to the synthetic version so
-  it matches what the resolver expects (pnpm's strict store check rejects a
-  mismatch). A platform binary not yet uploaded for a registered ref redirects
-  to pkg.pr.new as a best-effort fallback. The small preview packages can also
-  be built in-Worker on demand as a fallback (they are small enough to stay
-  within the limits).
+  action pins any dep on a package of the same publish batch. The binaries are
+  large (tens of MB), so they are packed + hashed in CI (where there is no
+  per-request limit) and uploaded; the binary's `package.json` version is
+  rewritten to the synthetic version so it matches what the resolver expects
+  (pnpm's strict store check rejects a mismatch). Everything is served from R2:
+  a version whose bytes are not there 404s, the Worker never builds a tarball or
+  redirects to pkg.pr.new on demand.
 - **Publishing** (`POST /-/publish`, `PUT /-/tarball/...`): the
   [publish action](#publishing-from-ci) packs each locally built package
   directory (in the same CI job that produced the artifacts, no pkg.pr.new
@@ -166,8 +178,8 @@ curl -I https://registry-bridge.viteplus.dev/voidzero-dev/vite-plus@1891
 # x-pkg-name-key: vite-plus
 ```
 
-Both `GET` and `HEAD` carry `x-commit-key`/`x-pkg-name-key`. Note the bridge
-rewrites a preview tarball's transitive deps to versions (not pkg.pr.new URLs),
+Both `GET` and `HEAD` carry `x-commit-key`/`x-pkg-name-key`. Note a published
+preview tarball's transitive deps are pinned to versions (not pkg.pr.new URLs),
 so for a full install of the meta-package with its platform binaries, use the
 registry + `pr-<n>` tag above rather than this URL as a bare dependency.
 
@@ -218,10 +230,8 @@ are uploaded with `void secret put`:
 | --- | --- |
 | `PUBLIC_BASE_URL` | Public origin of the bridge; used in `dist.tarball` URLs. Must match the deployed route. |
 | `NPM_REGISTRY` | npm fallback registry (`https://registry.npmjs.org`). |
-| `PKG_PR_NEW_BASE` | pkg.pr.new base (`https://pkg.pr.new`). |
 | `PREVIEW_OWNER` / `PREVIEW_REPO` | Fixed upstream repo (`voidzero-dev` / `vite-plus`). |
-| `WORKSPACE_PACKAGES` | Allowlist for the tarball endpoint and pkg.pr.new-URL dep routing. Exact names or `prefix*`, e.g. `vite-plus,@voidzero-dev/vite-plus-*`. |
-| `MAX_TARBALL_BYTES` | Max upstream tarball size (default 64 MiB). |
+| `WORKSPACE_PACKAGES` | Allowlist for the tarball endpoint. Exact names or `prefix*`, e.g. `vite-plus,@voidzero-dev/vite-plus-*`. |
 
 Bindings/secrets:
 
@@ -248,7 +258,8 @@ For local admin testing, put `ADMIN_TOKEN=…` in `.env.local` (gitignored).
 
 Deploys to the [Void](https://void.cloud) managed platform with `void deploy`;
 Void provisions the Worker and the `STORAGE` R2 bucket (no Cloudflare account
-needed).
+needed). To run an independent bridge for another project (fork, configure,
+deploy, wire CI), follow [`docs/self-hosting.md`](./docs/self-hosting.md).
 
 ```bash
 # One-time: authenticate and set the admin secret on the project.
@@ -298,3 +309,7 @@ repository secret (`void auth token` copies one to your clipboard): the
 platform refuses to mint deploy tokens for pull_request events, which run
 untrusted code. Run the smoke test locally with `pnpm smoke <url>`, and deploy
 staging by hand with `pnpm deploy:staging`.
+
+## License
+
+[MIT](./LICENSE)

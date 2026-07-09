@@ -116,8 +116,8 @@ function assertPreviewTarget(
 /**
  * Serve a preview tarball from R2, the single source of truth (never the
  * per-colo Cache API: an edge-cached tarball can outlive a content change and
- * then mismatch the integrity advertised in the packument). A platform binary
- * not yet uploaded by CI redirects to pkg.pr.new, which serves identical bytes.
+ * then mismatch the integrity advertised in the packument). A version whose
+ * bytes are not in R2 404s; the Worker never builds or fetches one on demand.
  */
 async function serveTarball(
   env: Env,
@@ -194,7 +194,7 @@ async function serveDownloadRedirect(
   })
 }
 
-/** Preview tarball endpoint: serve from R2, else (platform) redirect upstream. */
+/** Preview tarball endpoint: serve from R2, else 404. */
 app.get('/tarballs/*', async (c) => {
   const parsed = parseTarballPath(new URL(c.req.url).pathname)
   if (!parsed) throw new HttpError(404, 'Not found')

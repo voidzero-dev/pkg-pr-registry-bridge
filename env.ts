@@ -9,15 +9,11 @@ export default defineEnv({
   PUBLIC_BASE_URL: string(),
   // npm registry to fall back to for everything not synthesized.
   NPM_REGISTRY: string(),
-  // pkg.pr.new base URL.
-  PKG_PR_NEW_BASE: string(),
   // Fixed upstream owner/repo; never selected by request input.
   PREVIEW_OWNER: string(),
   PREVIEW_REPO: string(),
   // Allowlist of packages the bridge serves/routes (exact names or `prefix*`).
   WORKSPACE_PACKAGES: string(),
-  // Max upstream tarball size in bytes.
-  MAX_TARBALL_BYTES: string().default('67108864'),
   // Bearer token guarding the admin endpoints. Secret: `void secret put ADMIN_TOKEN`.
   ADMIN_TOKEN: string().secret().optional(),
 })

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Version-gated npm registry bridge for pkg.pr.new Vite+ preview builds, running on Cloudflare Workers",
+  "license": "MIT",
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
