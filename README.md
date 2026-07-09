@@ -35,9 +35,9 @@ See [`rfcs/0001-pkg-pr-new-registry-bridge-cloudflare-workers.md`](./rfcs/0001-p
 for the full design, and [`examples/bun-validation`](./examples/bun-validation)
 for a runnable example.
 
-Running preview builds for a different project? The upstream repo, package
-allowlist, and origin are all configuration, so any project can host its own
-bridge: see [`docs/self-hosting.md`](./docs/self-hosting.md).
+To run preview builds for a different project, fork and reconfigure: the upstream
+repo, package allowlist, and origin are all configuration. See
+[`docs/self-hosting.md`](./docs/self-hosting.md).
 
 ## How it works
 
@@ -252,7 +252,7 @@ For local admin testing, put `ADMIN_TOKEN=…` in `.env.local` (gitignored).
 
 Deploys to the [Void](https://void.cloud) managed platform with `void deploy`;
 Void provisions the Worker and the `STORAGE` R2 bucket (no Cloudflare account
-needed). To stand up an independent bridge for another project (fork, configure,
+needed). To run an independent bridge for another project (fork, configure,
 deploy, wire CI), follow [`docs/self-hosting.md`](./docs/self-hosting.md).
 
 ```bash

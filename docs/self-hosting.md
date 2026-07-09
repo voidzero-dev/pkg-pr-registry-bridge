@@ -1,15 +1,12 @@
 # Deploy your own registry bridge
 
 This repository is configured for [`voidzero-dev/vite-plus`](https://github.com/voidzero-dev/vite-plus),
-but the bridge itself is project-agnostic: the upstream repo, the package
-allowlist, and the public origin are all read from configuration, not baked into
-the code. Any open-source project that publishes [pkg.pr.new](https://pkg.pr.new)
-preview builds (or simply builds package directories in CI) can run its own
-independent bridge.
+but the bridge reads its upstream repo, package allowlist, and public origin from
+configuration. Any open-source project that publishes [pkg.pr.new](https://pkg.pr.new)
+preview builds (or builds package directories in CI) can run its own bridge.
 
-This guide walks you through it end to end. Each step shows the vite-plus value
-(the one committed here) alongside the equivalent for a hypothetical example
-project, so you can see exactly what to swap:
+Each step below shows the vite-plus value (the one committed here) next to the
+equivalent for a hypothetical example project, so you can see what to swap:
 
 | | vite-plus (this repo) | Example project |
 | --- | --- | --- |
@@ -38,8 +35,8 @@ background and focuses on the deployment.
 
 ## What is project-specific
 
-Everything you must change lives in configuration and CI wiring. No `src/` change
-is needed to point the bridge at a different project.
+You change configuration and CI wiring only; the `src/` code stays as-is when you
+point the bridge at a different project.
 
 | Knob | Where | vite-plus value | Change to |
 | --- | --- | --- | --- |
@@ -79,11 +76,11 @@ Leave `NPM_REGISTRY`, `PKG_PR_NEW_BASE`, and `MAX_TARBALL_BYTES` as they are
 unless you have a reason to change them. `PUBLIC_BASE_URL` in `.env` stays the
 local dev origin (`http://localhost:5173`); the production value comes next.
 
-**About `WORKSPACE_PACKAGES`.** This is the strict allowlist that gates the
-tarball endpoint and decides which transitive `pkg.pr.new` dependency URLs get
-rewritten to synthetic versions. Include your main package, the alias/meta
-package a consumer overrides `npm:...` to, and a `prefix*` for the per-platform
-binary packages. Anything not matched here is redirected to npm untouched.
+**About `WORKSPACE_PACKAGES`.** This strict allowlist gates the tarball endpoint
+and picks which transitive `pkg.pr.new` dependency URLs the bridge rewrites to
+synthetic versions. Include your main package, the alias/meta package a consumer
+overrides `npm:...` to, and a `prefix*` for the per-platform binary packages. The
+bridge redirects anything else to npm untouched.
 
 ## 3. Set the public origin (`.env.production`)
 
@@ -94,7 +91,7 @@ PUBLIC_BASE_URL=https://registry-bridge.acme.dev
 ```
 
 `PUBLIC_BASE_URL` is baked into every generated `dist.tarball` URL, so it **must**
-match the origin package managers actually reach the bridge on. If you deploy
+match the origin package managers reach the bridge on. If you deploy
 first and attach a custom domain later (step 6), set this to the Void platform
 URL initially (`https://<your-slug>.void.app`) and update it when the domain is
 live.
@@ -168,11 +165,11 @@ own packages:
   alias/override and the asserted package list to your packages, and point it at
   a `<sha>` your bridge already serves.
 
-The smoke test is the gate the CI workflows run against the real runtime, so
-keeping it meaningful for your packages is worthwhile. It catches platform-only
-failures the `pool-workers` unit tests cannot emulate (a real incident here:
-the Void runtime forbids `caches.default`, which 500'd every packument while
-every unit test stayed green).
+The CI workflows run the smoke test against the real runtime as their gate, so
+keep it meaningful for your packages. It catches platform-only failures the
+`pool-workers` unit tests cannot emulate (a real incident here: the Void runtime
+forbids `caches.default`, which 500'd every packument while every unit test
+stayed green).
 
 ## 8. Wire your upstream project's CI to publish
 
@@ -183,7 +180,7 @@ directory (resolving `workspace:`/`catalog:` specs), rewrite `package.json`
 (name/version, pin deps between packages of the same batch to the synthetic
 commit version), re-pack, hash, `PUT` the tarball, `POST` the metadata, and
 finally register the ref. The Worker then only serves bytes, with
-`dist.integrity` matching them exactly.
+`dist.integrity` computed over them.
 
 In your **upstream repo** (`acme-corp/acme-bundler`):
 
@@ -212,7 +209,7 @@ In your **upstream repo** (`acme-corp/acme-bundler`):
        pr-url: ${{ github.event.pull_request.html_url }}
    ```
 
-   Notes that matter:
+   Notes:
    - The runner needs pnpm on `PATH` and the workspace installed
      (`pnpm install`), or `pnpm pack` cannot resolve `workspace:` specs.
    - Use `github.event.pull_request.head.sha`, not `github.sha`: on
@@ -222,8 +219,8 @@ In your **upstream repo** (`acme-corp/acme-bundler`):
    - Deps between the published packages are pinned to the synthetic version, so
      a package whose dep is missing from the batch fails the run up front,
      before anything uploads, rather than publishing a dangling dep.
-   - `packages` and `workspace-packages` default to the vite-plus layout; always
-     set both explicitly for your project.
+   - `packages` and `workspace-packages` default to the vite-plus layout; set
+     both for your project.
 
 3. **Publish by hand** (same code path, for a one-off or backfill): build your
    repo's checkout at the commit the way CI does, then from the bridge repo run
@@ -260,7 +257,7 @@ renaming the slugs:
 - **`.github/workflows/void-deploy.yml`** (push to `main`): re-runs staging as a
   gate, then deploys production and smoke-tests it.
 
-Two authentication paths, by design:
+Two authentication paths:
 
 - **Push to main uses GitHub OIDC**, no long-lived token. Connect the repo once
   per project so the platform will exchange an OIDC token for a short-lived,
@@ -271,8 +268,8 @@ Two authentication paths, by design:
     --repo acme-corp/registry-bridge --branch main --executor github_actions
   ```
 
-  The platform only honors that exchange from a workflow named exactly
-  `void-deploy.yml` on a push to the connected branch, so keep that filename.
+  The platform only honors that exchange from a workflow named `void-deploy.yml`
+  on a push to the connected branch, so keep that filename.
 
 - **PR staging uses a `VOID_TOKEN` secret.** The OIDC exchange is refused for
   `pull_request` events (they run untrusted code), so the staging deploy needs a
