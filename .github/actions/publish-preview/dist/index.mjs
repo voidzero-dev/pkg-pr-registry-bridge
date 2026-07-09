@@ -690,7 +690,8 @@ async function main() {
     };
     await post("/-/publish", { ref, packages: [pkg] }, `publish ${manifest.name}`);
     console.log(
-      `  \u2713 ${manifest.name}@${version} (${build.tarball.byteLength} bytes, from ${relative(cwd, dir)})`
+      `  \u2713 ${manifest.name}@${version} (${build.tarball.byteLength} bytes, from ${relative(cwd, dir)})
+      ${bridge}/tarballs/${manifest.name}/${version}/${build.shasum}.tgz  (${build.integrity})`
     );
   }
   await post("/-/register", { ref, prUrl }, "register ref");
