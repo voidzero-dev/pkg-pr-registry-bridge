@@ -476,6 +476,17 @@ lowest-severity requirement here, but it is new attack surface.
   org namespace, and the sticky comment advertises a `curl | bash` install
   from a voidzero-branded URL. The comment must say the build came from a
   fork, so nobody reads an official-looking install line as vetted code.
+
+  This is newly possible rather than pre-existing. Today a fork PR cannot
+  push to GHCR at all: GitHub caps `GITHUB_TOKEN` at read-only for fork
+  `pull_request` runs, so `docker/login-action` fails whatever `permissions:`
+  declares, and the build would fail earlier anyway because `VP_PR_VERSION`
+  has nothing to resolve. Moving the job into the `workflow_run` workflow
+  gives it a full-permission token in base-repo context, which is the point
+  of moving it and also what makes the push succeed with fork code inside.
+  Keeping the Docker job on `pull_request` instead would preserve today's
+  behavior at the cost of leaving fork PRs without a preview image; see open
+  question 6.
 - A registered `commit.<sha>` for a fork commit is reachable from the base
   repo through `refs/pull/<n>/head`, but `x-commit-key` will name a SHA that
   is not on any branch of `voidzero-dev/vite-plus`.
@@ -488,11 +499,39 @@ lowest-severity requirement here, but it is new attack surface.
   tokens. Would still skip external contributors.
 - **`pull_request_target` with OIDC.** Untrusted code and a token-minting
   context in one job; one `postinstall` away from credential exfiltration.
-- **pkg.pr.new's model: a GitHub App, server pulls artifacts from the
-  GitHub API.** Also solves forks, but moves artifact download, zip
-  extraction, and hashing back into the Worker. RFC 0001's serving-model
-  revision exists because that CPU/memory profile did not fit; it also adds
-  an App private key, a real secret, on the bridge side.
+- **pkg.pr.new's model: a GitHub App plus a webhook-opened publish window.**
+  Their CLI sends no credential at all. It hashes public run metadata
+  (`owner`, `repo`, `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`,
+  `GITHUB_ACTOR_ID`) into an `sb-key` header; their App, installed on the
+  base repo, receives `workflow_run` webhooks, recomputes the same hash, and
+  stores a record keyed by it. The publish endpoint authorizes by checking
+  that the record exists, then burns it. The window opens on
+  `requested`/`in_progress` and closes on `completed`. The CLI uploads
+  tarballs directly, so the server never pulls artifacts from the GitHub
+  API.
+
+  Fork PRs work because nothing token-shaped is involved: a fork's
+  `pull_request` run belongs to the base repo, so `GITHUB_REPOSITORY` in the
+  runner and `payload.repository` in the webhook agree, and GitHub's fork
+  restrictions on secrets and `id-token` never come into play. Consumers get
+  a much simpler workflow than section 7's split: `permissions: {}` and one
+  CLI call, no second workflow.
+
+  Rejected for three reasons, none of them CPU: the App needs a private key
+  and a webhook secret, which reintroduces exactly the stored credential
+  this RFC removes; it needs an installation and webhook endpoint to
+  operate; and authorization rests on possession of a value derived from
+  public data plus a time window, rather than a signature. The OIDC design
+  keeps the bridge's publish path secret-free on both sides.
+
+  Worth noting their maintainers considered and declined the reverse move.
+  In [issue #535](https://github.com/stackblitz-labs/pkg.pr.new/issues/535)
+  they rejected OIDC trusted publishing specifically because it would lose
+  fork-PR support, which is independent confirmation of constraint 1.
+  Their README also recommends gating publishes on
+  `pull_request_review: [submitted]` with an approved state and a
+  write-permission check, the same consent-gate shape as our `preview-build`
+  label.
 - **Per-repo scoped bridge tokens.** Nicer blast radius than one admin
   token, but still a stored secret, still absent from fork runs. Solves
   nothing for external contributors.
@@ -554,3 +593,9 @@ fix stands alone and is worth landing regardless of whether the rest ships.
 5. Should the sticky comment render differently for fork-originated builds
    (8.4), and how loudly? Proposed: a one-line banner naming the source
    fork above the install instructions.
+6. Does the Docker preview job move into the trusted leg at all? Moving it
+   is what lets fork code reach `ghcr.io/voidzero-dev/vite-plus:pr-<n>`
+   (8.4); leaving it on `pull_request` keeps forks out of the org namespace
+   but also leaves them without a preview image, which is part of what this
+   RFC set out to fix. Proposed: move it, with the fork banner from question
+   5 carried into the Docker comment as well.
