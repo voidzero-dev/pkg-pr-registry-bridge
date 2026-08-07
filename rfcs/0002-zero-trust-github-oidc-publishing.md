@@ -244,15 +244,31 @@ therefore point `pr-<n>` at a commit belonging to a different PR, and since
 build-arg, the hijacked tag changes what a reviewer following another PR's
 comment installs.
 
-Two changes close it (see [SR-2](#sr-2-pr-number-binding)):
+Three changes close it (see [SR-2](#sr-2-pr-number-binding)):
 
 - The trusted leg resolves the PR number from `head_sha` via
   `GET /repos/{repo}/commits/{head_sha}/pulls` and constructs `prUrl` from
-  that. It is never read from the artifact.
+  that. It is never read from the artifact. This is the authoritative
+  binding; the two bridge-side checks below are containment.
 - `/-/register` rejects a `prUrl` outside
-  `https://github.com/<repository claim>/pull/`, and rejects one whose PR
-  number is already bound to a ref registered under a different commit,
-  unless the caller holds the admin token.
+  `https://github.com/<repository claim>/pull/`, so a CI identity cannot name
+  a pull request in another repository.
+- `/-/register` refuses to re-point an already-registered ref at a
+  *different* `prUrl`, unless the caller holds the admin token. A commit
+  belongs to one pull request, so a rewrite can only be an attempt to drag
+  another PR's tag onto this commit.
+
+An earlier draft of this section also proposed rejecting a `prUrl` whose PR
+number was already bound to a ref under a different commit. Implementing it
+showed that to be wrong: a PR accumulates one `commit.<sha>` ref per pushed
+commit, all sharing a `prUrl`, and that is exactly how `latestVersionByPr`
+advances `pr-<n>` to the PR's head build. The rule would have broken every
+multi-commit PR. The per-ref immutability above is the version that holds.
+
+The bridge cannot do better on its own: verifying that a commit really
+belongs to a PR needs a GitHub API call, which would put an API dependency
+and its rate limits on the publish path. That check belongs in the trusted
+leg, which is already talking to the API for SR-1.
 
 This gap predates the RFC: the admin-token path has it today, bounded by the
 fact that publishing currently requires repository write access. Handing the
@@ -447,10 +463,11 @@ supplement, never the control.
 
 <a id="sr-2-pr-number-binding"></a>
 **SR-2. The PR number is derived, never accepted.** The trusted leg builds
-`prUrl` from the API lookup in SR-1, and `/-/register` rejects a `prUrl`
-outside the token's `repository` claim or already bound to a different
-commit (5.4). Otherwise a single labeled fork PR can retarget `pr-<n>` for
-any other PR and change what `VP_PR_VERSION=<n>` installs.
+`prUrl` from the API lookup in SR-1. The bridge contains it: `/-/register`
+rejects a `prUrl` outside the token's `repository` claim, and refuses to
+re-point an existing ref at a different `prUrl` (5.4). Otherwise a single
+labeled fork PR can retarget `pr-<n>` for any other PR and change what
+`VP_PR_VERSION=<n>` installs.
 
 <a id="sr-3-verifier-hardening"></a>
 **SR-3. The JWT verifier pins RS256 in code, and bounds its own parsing.**
