@@ -6,9 +6,30 @@ description: >-
   pnpm/action-setup and `pnpm install` first. Runs the CPU-heavy work in CI so
   the Worker only serves. No pkg.pr.new involvement.
 inputs:
+  mode:
+    description: >-
+      publish (default): pack and upload in one job, authenticated by
+      admin-token. pack: write raw `pnpm pack` output to output-dir and stop, so
+      it holds no credentials and can run in a job that builds an untrusted fork
+      PR. upload: read input-dir, validate and rebuild every archive, then
+      publish; run this in a trusted workflow_run job. See RFC 0002.
+    required: false
+    default: 'publish'
   sha:
-    description: 'The commit sha to publish (a 7-40 hex sha, or commit.<sha>).'
+    description: >-
+      The commit sha to publish (a 7-40 hex sha, or commit.<sha>). In upload
+      mode wire this to github.event.workflow_run.head_sha: it is the trusted
+      source of the published version, which is what lets the artifact's own
+      manifest stay advisory.
     required: true
+  output-dir:
+    description: 'pack mode: directory to write the packed tarballs into.'
+    required: false
+    default: 'bridge-packages'
+  input-dir:
+    description: 'upload mode: directory holding the tarballs from a pack run.'
+    required: false
+    default: 'bridge-packages'
   packages:
     description: >-
       Package directories to publish, newline- or comma-separated, relative to
@@ -24,13 +45,22 @@ inputs:
     required: false
     default: 'https://registry-bridge.viteplus.dev'
   admin-token:
-    description: 'Bridge ADMIN_TOKEN (store as a secret).'
-    required: true
+    description: >-
+      Bridge ADMIN_TOKEN (store as a secret). Optional: when omitted, the action
+      mints a GitHub Actions OIDC token instead, which needs
+      `permissions: id-token: write` on the job and the bridge configured with
+      OIDC_AUDIENCE / OIDC_TRUSTED_WORKFLOWS / OIDC_TRUSTED_REPOSITORY_ID /
+      OIDC_TRUSTED_OWNER_ID. Fork pull_request runs are never granted id-token,
+      which is why upload mode belongs in a workflow_run job.
+    required: false
   pr-url:
     description: >-
       URL of the source pull request, surfaced by /-/refs. Optional: pass
       github.event.pull_request.html_url on pull_request runs; leave empty on
-      push/commit runs.
+      push/commit runs. In upload mode derive it from the GitHub API using the
+      triggering run's head_sha, NOT from the artifact: the bridge maps it to
+      the pr-<n> dist-tag, so an attacker-supplied value would change what
+      VP_PR_VERSION installs for a different PR.
     required: false
   workspace-packages:
     description: 'Allowlist (comma-separated exact names or prefix* patterns).'
