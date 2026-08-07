@@ -20,7 +20,7 @@ npm and PyPI ship the same model as "trusted publishing": the registry trusts
 a signed, claims-scoped identity token from the CI provider instead of a
 stored credential.
 
-Section 8 carries six numbered security requirements (SR-1 through SR-6).
+Section 8 carries seven numbered security requirements (SR-1 through SR-7).
 They are not optional hardening; two of them close paths that would let an
 unlabeled fork PR, or an attacker with no repository involvement at all,
 publish to production. Read that section before implementing any of this.
@@ -134,7 +134,9 @@ compare. Verification steps:
 4. Check `exp` / `nbf` / `iat` with a small clock skew (60s). GitHub issues
    these tokens with a lifetime of minutes.
 5. Check `aud` equals `OIDC_AUDIENCE`.
-6. Check `workflow_ref` is listed in `OIDC_TRUSTED_WORKFLOWS`.
+6. Check `repository_id` and `repository_owner_id` equal
+   `OIDC_TRUSTED_REPOSITORY_ID` / `OIDC_TRUSTED_OWNER_ID`.
+7. Check `workflow_ref` is listed in `OIDC_TRUSTED_WORKFLOWS`.
 
 Because this is a hand-rolled verifier rather than a library, four details
 are mandatory (see [SR-3](#sr-3-verifier-hardening)): the algorithm is
@@ -146,14 +148,34 @@ arrives as a single-element array; and the unknown-`kid` refetch is rate
 limited so a stream of bogus `kid` values cannot drive unbounded outbound
 fetches. Getting the first of these wrong lets anyone on the internet
 publish with a self-signed token, no workflow and no repository involved.
+SR-3 also bounds the parsing itself, since the token is entirely
+attacker-supplied.
 
-The `workflow_ref` claim is the load-bearing check on the bridge side. For a
-`workflow_run` workflow it names the trusted file at the default branch, e.g.
+Steps 6 and 7 together form the identity check. `workflow_ref` is the
+specific part: for a `workflow_run` workflow it names the trusted file at
+the default branch, e.g.
 `voidzero-dev/vite-plus/.github/workflows/publish-preview-register.yml@refs/heads/main`.
 GitHub signs it; no workflow can spoof it. Pinning it means the untrusted
 build workflow, a PR-modified copy of the publish workflow, or any other
 workflow in the repo cannot obtain a token the bridge accepts, even with
 `id-token: write` granted.
+
+`workflow_ref` alone is not sufficient, because it embeds a repository
+*name*, and names are mutable and reusable. If `voidzero-dev/vite-plus` were
+renamed, transferred, or deleted, a `workflow_ref` string match could later
+be satisfied by a repository the org does not control. `repository_id` is
+immutable and survives renames, so it anchors the check to the actual
+repository (see [SR-7](#sr-7-immutable-repository-identity)).
+
+`repository_owner_id` is checked as well, because `repository_id` alone does
+not cover a transfer *out* of the org: the id follows the repository to its
+new owner. Pinning both means a transferred repository fails closed rather
+than continuing to publish.
+
+The operational consequence is worth stating: a legitimate rename keeps the
+same `repository_id` but changes `workflow_ref`, so `OIDC_TRUSTED_WORKFLOWS`
+needs updating and publishes fail until it is. That is the correct
+direction to fail.
 
 If the publish step later moves into a reusable workflow, `workflow_ref`
 starts naming the calling workflow and `job_workflow_ref` names the reusable
@@ -179,6 +201,15 @@ OIDC_AUDIENCE?: string
  * Empty/unset disables the OIDC path (admin token only).
  */
 OIDC_TRUSTED_WORKFLOWS?: string
+/**
+ * Immutable GitHub numeric ids the token must carry, anchoring the trust to
+ * the actual repository rather than to a mutable name (see 8.2, SR-7).
+ * Read them once with:
+ *   gh api repos/voidzero-dev/vite-plus --jq '{repo: .id, owner: .owner.id}'
+ * Both required whenever OIDC_TRUSTED_WORKFLOWS is set.
+ */
+OIDC_TRUSTED_REPOSITORY_ID?: string
+OIDC_TRUSTED_OWNER_ID?: string
 ```
 
 Plain vars, not secrets: the allowlist holds public identifiers, and the
@@ -256,18 +287,31 @@ minted per attempt so retries never send an expired token.
 
 - It derives the expected version from its own `sha` input (wired to
   `github.event.workflow_run.head_sha`, a trusted payload field), never from
-  `manifest.json`.
-- For each tarball it extracts `package/package.json` with the Worker's own
-  tar codec, checks the name against the workspace allowlist and the version
-  against the expected version, and recomputes shasum and integrity from the
-  bytes. The `packageJson` sent to `/-/publish` is the one extracted here.
+  `manifest.json`, which is advisory only.
+- It validates each archive against the [SR-6](#sr-6-canonical-archive)
+  policy, then rebuilds it canonically and hashes its own output. The
+  `packageJson`, shasum, and integrity sent to `/-/publish` all describe
+  bytes this step constructed, not bytes the fork produced.
+- It checks the extracted name against the workspace allowlist and the
+  version against the expected version.
 - It executes nothing from the artifact: no install, no scripts, pure data
   handling.
 
-A tampered artifact can therefore only change the contents of the tarball
-itself, which lands under the attacking PR's own `0.0.0-commit.<sha>`
-version. A preview build of a PR already carries that PR's arbitrary code by
-definition; the blast radius is unchanged.
+A tampered artifact can therefore only change the *contents* of the files
+inside the tarball, which land under the attacking PR's own
+`0.0.0-commit.<sha>` version. A preview build of a PR already carries that
+PR's arbitrary code by definition; the blast radius is unchanged.
+
+Since the trusted leg now rebuilds anyway, `pack` mode arguably should not
+rewrite and re-pack at all: it could emit raw `pnpm pack` output (the one
+step that genuinely needs the workspace and its `node_modules`), leaving the
+version rewrite, dependency pinning, canonical re-pack, and hashing to the
+trusted leg, which can derive the batch from the tarball names it validated.
+That would put every step whose output the bridge trusts on the trusted side
+of the boundary, and shrink `pack` mode to a thin wrapper. It costs the
+trusted job more CPU, which is free here: the CPU constraint in RFC 0001 was
+the Worker's, never CI's. Left as a refinement for the action PR rather than
+settled now, since it changes the artifact contract between the two legs.
 
 ## 7. Consumer workflow changes (vite-plus)
 
@@ -409,10 +453,20 @@ commit (5.4). Otherwise a single labeled fork PR can retarget `pr-<n>` for
 any other PR and change what `VP_PR_VERSION=<n>` installs.
 
 <a id="sr-3-verifier-hardening"></a>
-**SR-3. The JWT verifier pins RS256 in code.** Never read `alg` from the
-token header; select the key by `kid` from the JWKS; compare `aud` exactly,
-array form included; rate limit the unknown-`kid` refetch (5.1). An `alg:
-none` acceptance is a full authentication bypass for anyone on the internet.
+**SR-3. The JWT verifier pins RS256 in code, and bounds its own parsing.**
+Never read `alg` from the token header; select the key by `kid` from the
+JWKS; compare `aud` exactly, array form included; rate limit the
+unknown-`kid` refetch (5.1). An `alg: none` acceptance is a full
+authentication bypass for anyone on the internet.
+
+Because the token is entirely attacker-supplied and the endpoint is
+internet-facing, the parse is bounded before any of that runs: a maximum
+whole-token size, maximum decoded header and payload sizes, a maximum `kid`
+length, exactly three segments (reject anything else rather than ignoring
+extras), strict Base64URL decoding that rejects non-alphabet characters and
+padding, and a type check on every claim read rather than coercion. These
+are DoS protections rather than authentication properties, and they cost a
+handful of lines each.
 
 <a id="sr-4-environment-isolation"></a>
 **SR-4. Each environment sets `OIDC_AUDIENCE` explicitly.** No fallback to
@@ -427,25 +481,70 @@ preview job installs the fork's package and therefore runs its
 default, but one added `build-arg` or `run:` step would reintroduce
 `ACTIONS_ID_TOKEN_REQUEST_TOKEN`.
 
-<a id="sr-6-untrusted-parsing"></a>
-**SR-6. Artifact parsing is bounded.** The tar codec now reads
-attacker-supplied tarballs, having only ever seen `pnpm pack` output before.
-Bound the decompressed size against a gzip bomb, and do not follow symlinks
-when enumerating `input-dir`. Worst case is a runner OOM, so this is the
-lowest-severity requirement here, but it is new attack surface.
+<a id="sr-6-canonical-archive"></a>
+**SR-6. The trusted leg validates archives against a canonical policy and
+republishes its own bytes.** The tar codec now reads attacker-supplied
+tarballs, having only ever seen `pnpm pack` output before. Two parts:
+
+*Reject*, before reading any content:
+
+| Rejected | Why |
+| --- | --- |
+| Duplicate normalized paths | Parser differential (below) |
+| More than one `package/package.json` | Same, and the highest-value target |
+| `../` traversal, absolute paths, drive letters | Escape on any extractor that writes to disk |
+| Entry types other than file and directory | Symlinks, hardlinks, devices, FIFOs have no place in an npm tarball |
+| Entry count above a fixed cap | Zip-bomb by inode count |
+| Any single file, or the decompressed total, above a cap | Gzip bomb, runner OOM |
+| Entries outside the `package/` prefix | npm's own layout invariant |
+
+Symlinks must also not be followed when enumerating `input-dir` itself.
+
+*Then canonicalize*: rather than forwarding the fork's bytes, the trusted
+leg rebuilds the tarball with the Worker's own codec, emitting exactly one
+entry per path with normalized metadata, and hashes what it emitted. The
+shasum and integrity published to the bridge describe bytes the trusted leg
+constructed.
+
+The canonical rebuild is what makes the reject list robust rather than
+best-effort. Tar permits duplicate entries and extractors disagree about
+which one wins, most taking the last. A validator reading the first
+`package/package.json` while pnpm extracts the last would validate metadata
+no consumer ever sees, which defeats the name and version checks in
+section 6 without tripping any of them. Emitting a fresh archive collapses
+the whole class: there is no second entry to disagree about. It also costs
+little, because `buildPreviewTarball` already rewrites, re-packs and hashes
+today.
+
+<a id="sr-7-immutable-repository-identity"></a>
+**SR-7. Trust is anchored on `repository_id` and `repository_owner_id`, not
+only `workflow_ref`.** `workflow_ref` embeds a repository name, and names
+are mutable and reusable: a rename, transfer, or deletion could later let a
+repository the org does not control satisfy a string match. The numeric ids
+are immutable, and pinning both means a repository transferred out of the
+org fails closed rather than continuing to publish (5.1). Set both whenever
+`OIDC_TRUSTED_WORKFLOWS` is set.
 
 ### 8.3 Threat model
 
 - **Fork PR modifies workflows to publish directly.** Fork `pull_request`
   runs get no secrets and no `id-token`; SR-1 rejects the forged trigger.
-- **Fork PR poisons the artifact.** The trusted leg re-hashes the bytes,
-  re-extracts each `package.json`, and forces name and version from trusted
-  inputs. Damage stays inside that PR's own preview version, which carries
-  the PR's code by design.
+- **Fork PR poisons the artifact.** The trusted leg validates, rebuilds and
+  re-hashes, and forces name and version from trusted inputs (SR-6). Damage
+  stays inside that PR's own preview version, which carries the PR's code by
+  design.
+- **Crafted archive splits the validator from the consumer.** Duplicate
+  `package/package.json` entries would let the validator approve metadata
+  pnpm never extracts; the canonical rebuild in SR-6 removes the ambiguity
+  rather than trying to match every extractor's precedence.
 - **Another repo workflow with `id-token: write` requests a bridge-audience
   token.** The signed `workflow_ref` claim names that workflow, not the
   allowlisted one, and the bridge rejects it.
-- **Self-signed or algorithm-confused token.** SR-3.
+- **Repository renamed, transferred, or deleted and its name reclaimed.**
+  SR-7 pins the immutable numeric ids, so a name match alone does not
+  authorize a publish.
+- **Self-signed or algorithm-confused token; oversized or malformed token.**
+  SR-3.
 - **Staging token replayed against production.** SR-4.
 - **`pr-<n>` dist-tag hijack redirecting `VP_PR_VERSION`.** SR-2.
 - **Preview `postinstall` steals the publish token.** SR-5.
@@ -550,17 +649,22 @@ lowest-severity requirement here, but it is new attack surface.
 1. **Bridge PR**: `oidc.ts`, `requirePublisher()` on the three publish
    endpoints, config vars, the SR-2 `prUrl` binding, pool-workers tests with
    a locally-signed JWKS fixture. Negative tests are the point here: `alg:
-   none`, an HMAC-signed token, a wrong `aud`, an unlisted `workflow_ref`, an
-   expired token, and a `prUrl` bound to another commit must each be
-   rejected. Extend the staging smoke: the bridge repo's staging workflow
+   none`, an HMAC-signed token, a wrong `aud`, an unlisted `workflow_ref`, a
+   correct `workflow_ref` with a mismatched `repository_id` or
+   `repository_owner_id` (SR-7), an oversized and a two-segment token
+   (SR-3), an expired token, and a `prUrl` bound to another commit must each
+   be rejected. Extend the staging smoke: the bridge repo's staging workflow
    gains `id-token: write` and exercises the OIDC publish path end to end
    against staging (its own `workflow_ref` allowlisted there, its own
    `OIDC_AUDIENCE` per SR-4), alongside the existing admin-token smoke.
    Requires `pnpm build:action` + committed dist per the bundle-staleness
    check.
-2. **Action PR**: `mode` input, artifact verification including the SR-6
-   bounds, OIDC minting; `action.yml` marks `admin-token` optional and adds
-   `pr-url` as a trusted-caller input.
+2. **Action PR**: `mode` input, the SR-6 validate-and-rebuild path, OIDC
+   minting; `action.yml` marks `admin-token` optional and adds `pr-url` as a
+   trusted-caller input. Fixture archives for each SR-6 rejection case,
+   the duplicate `package/package.json` one especially, since it is the case
+   a naive extract-first implementation passes. Decide the `pack`/`upload`
+   split question raised in section 6 here.
 3. **vite-plus PR**: split the workflow as in section 7, including the SR-1
    `authorize` job and SR-5 per-job permissions; add the new `workflow_ref`
    to prod's `OIDC_TRUSTED_WORKFLOWS`; verify a same-repo PR, then a fork PR,
@@ -584,9 +688,20 @@ fix stands alone and is worth landing regardless of whether the rest ships.
    X may publish packages matching Y)? Proposed: single list now;
    `WORKSPACE_PACKAGES` already bounds names globally, and the bridge serves
    one repo's packages today.
-3. Single-use `jti` replay protection in KV: worth the write per publish?
-   Proposed: skip; SR-5 keeps the token away from untrusted code, and the
-   publish surface is preview-only.
+3. Bind the token to the commit it may publish? Today the capability is
+   scoped by audience and workflow, so a stolen token can publish anything
+   that workflow could during its lifetime. The trusted leg already knows
+   `workflow_run.head_sha`, so it could request
+   `audience = <OIDC_AUDIENCE>#<sha>` and the bridge could require every
+   version in the request to equal `0.0.0-commit.<sha>`. Distinct from `jti`
+   replay protection: replay limits reuse, this limits authority. Proposed:
+   adopt. It is a few lines on each side and converts token theft from
+   "publish any preview" into "republish this one commit", which also caps
+   the damage from an SR-5 mistake.
+4. Single-use `jti` replay protection in KV: worth the write per publish?
+   Proposed: skip; SR-5 keeps the token away from untrusted code, the
+   publish surface is preview-only, and question 3 bounds authority more
+   cheaply.
 4. Per-`repository`-claim publish rate limit: needed at launch, or deferred
    until fork volume justifies it? Proposed: defer, since the label already
    bounds trigger frequency and refs expire after 90 days.
