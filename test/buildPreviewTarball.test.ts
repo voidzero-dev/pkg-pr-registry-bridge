@@ -178,3 +178,50 @@ describe('buildPreviewTarball: metadata normalization', () => {
     expect(attrs.group).toBe('')
   })
 })
+
+/**
+ * Determinism is what makes the content-addressed store behave: identical
+ * content must land on the same key rather than accumulating one object per
+ * republish. That needs both a fixed mtime and a gzip layer that does not
+ * stamp the current time into its header.
+ */
+describe('buildPreviewTarball: reproducibility', () => {
+  const pkg = { name: 'vite-plus', version: '1.0.0' }
+  const batch = new Set(['vite-plus'])
+  const version = '0.0.0-commit.abc1234'
+
+  const source = (mtime: number) =>
+    createTarGzip([
+      { name: 'package/package.json', data: JSON.stringify(pkg), attrs: { mtime } as never },
+      { name: 'package/index.js', data: 'export const x = 1\n', attrs: { mtime } as never },
+    ])
+
+  it('produces identical bytes for identical content', async () => {
+    const a = await buildPreviewTarball(await source(1e12), 'vite-plus', version, batch)
+    await new Promise((r) => setTimeout(r, 1100)) // cross a wall-clock second
+    const b = await buildPreviewTarball(await source(1e12), 'vite-plus', version, batch)
+    expect(b.shasum).toBe(a.shasum)
+    expect(b.integrity).toBe(a.integrity)
+  })
+
+  it('erases a source mtime, so hostile timestamps cannot vary the output', async () => {
+    // Two archives differing ONLY in mtime must rebuild to the same bytes,
+    // otherwise an untrusted archive could mint unlimited distinct CAS keys.
+    const a = await buildPreviewTarball(await source(1e12), 'vite-plus', version, batch)
+    const b = await buildPreviewTarball(await source(4e12), 'vite-plus', version, batch)
+    expect(b.shasum).toBe(a.shasum)
+  })
+
+  it('stamps the node-tar portable mtime that pnpm pack already uses', async () => {
+    const built = await buildPreviewTarball(await source(1e12), 'vite-plus', version, batch)
+    const files = await parseTarGzip(built.tarball)
+    for (const file of files) {
+      // nanotar's parser reports SECONDS while its writer takes MILLISECONDS.
+      // That asymmetry is why passing parsed attrs straight back to the writer
+      // divided by 1000 twice and wrote 1970-01-06; pin the round-tripped value
+      // so a regression there is caught here.
+      expect(file.attrs?.mtime).toBe(499_162_500)
+      expect(new Date(499_162_500 * 1000).toISOString()).toBe('1985-10-26T08:15:00.000Z')
+    }
+  })
+})

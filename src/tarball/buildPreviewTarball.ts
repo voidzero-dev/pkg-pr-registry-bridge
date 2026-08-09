@@ -49,6 +49,34 @@ export const PACKAGE_JSON_NAMES = new Set([
 ])
 
 /**
+ * Fixed mtime for every repacked entry, in epoch milliseconds
+ * (1985-10-26T08:15:00Z).
+ *
+ * Not an arbitrary choice: this is exactly what node-tar's `portable` mode
+ * stamps, so it is already the mtime on every entry `pnpm pack` produces, and
+ * repacking now preserves that date instead of inventing one.
+ *
+ * Setting it explicitly also fixes a latent bug. nanotar's parser returns
+ * mtime in SECONDS while its writer expects MILLISECONDS and divides by 1000,
+ * so passing a parsed `attrs` straight back to the writer divided by 1000 a
+ * second time: 1985-10-26 was written out as 1970-01-06. Every preview tarball
+ * published before this carries that mangled date. Anything else that
+ * round-trips nanotar attrs needs the same care.
+ *
+ * The payoff is that a rebuild is deterministic: identical content produces
+ * identical bytes, so republishing a commit lands on the SAME
+ * content-addressed key instead of accumulating one object per run. The gzip
+ * layer cooperates, because `CompressionStream` writes a zeroed MTIME into the
+ * gzip header rather than the current time.
+ *
+ * Because the mtime changes, republishing a commit that was published before
+ * this lands on a new CAS key. That is harmless (the packument advertises the
+ * new shasum, and the old object expires with its ref) but it is why an
+ * already-published version will not hash to its stored value.
+ */
+const CANONICAL_MTIME_MS = 499_162_500_000
+
+/**
  * Normalize an entry's metadata on repack (RFC 0002 SR-6).
  *
  * The mode comes from the tar header, which is attacker-controlled for any
@@ -60,13 +88,13 @@ export const PACKAGE_JSON_NAMES = new Set([
  *
  * Collapsing to 755/644 preserves the one bit that carries meaning in an npm
  * package (is this file executable, which `bin` entries need) and discards
- * everything else. Ownership is flattened for the same reason: uid/gid/user/
- * group describe the packing machine, never anything a consumer should honour.
+ * everything else. Ownership and mtime are flattened for the same reason: they
+ * describe the packing machine, never anything a consumer should honour.
  *
- * `mtime` is deliberately left alone. It is inert on extract, and normalizing
- * it would change the bytes of every package on the trusted `publish` path
- * too. Fixing it to a constant would make republishes byte-identical, which is
- * worth doing for reproducibility, but that is a separate change.
+ * Every field here is fixed or derived from one bit of the input, so the
+ * rebuild is deterministic. `pnpm pack` already emits these same values
+ * (node-tar's `portable` mode: 755/644, uid/gid 0, and CANONICAL_MTIME_MS), so
+ * for a well-behaved source this normalizes to what was already there.
  */
 function canonicalAttrs(file: ParsedTarFileItem): TarFileInput['attrs'] {
   const parsed = Number.parseInt(file.attrs?.mode ?? '', 8)
@@ -77,7 +105,7 @@ function canonicalAttrs(file: ParsedTarFileItem): TarFileInput['attrs'] {
     gid: 0,
     user: '',
     group: '',
-    mtime: file.attrs?.mtime,
+    mtime: CANONICAL_MTIME_MS,
   }
 }
 

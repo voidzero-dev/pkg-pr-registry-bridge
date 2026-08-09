@@ -406,6 +406,7 @@ var PACKAGE_JSON_NAMES = /* @__PURE__ */ new Set([
   "package/package.json",
   "./package/package.json"
 ]);
+var CANONICAL_MTIME_MS = 4991625e5;
 function canonicalAttrs(file) {
   const parsed = Number.parseInt(file.attrs?.mode ?? "", 8);
   const executable = Number.isFinite(parsed) && (parsed & 73) !== 0;
@@ -415,7 +416,7 @@ function canonicalAttrs(file) {
     gid: 0,
     user: "",
     group: "",
-    mtime: file.attrs?.mtime
+    mtime: CANONICAL_MTIME_MS
   };
 }
 var textEncoder = new TextEncoder();
