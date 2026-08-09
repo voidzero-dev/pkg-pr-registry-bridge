@@ -2,7 +2,7 @@
 
 // .github/actions/publish-preview/src/index.ts
 import { join as join3, relative } from "node:path";
-import { appendFileSync, mkdirSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { appendFileSync, writeFileSync as writeFileSync2 } from "node:fs";
 
 // node_modules/.pnpm/nanotar@0.3.0/node_modules/nanotar/dist/index.mjs
 var tarItemTypeMap = {
@@ -449,6 +449,45 @@ var DEFAULT_ARCHIVE_POLICY = {
   maxTotalBytes: 512 * 1024 * 1024
 };
 var ALLOWED_ENTRY_TYPES = /* @__PURE__ */ new Set(["file", "directory", "contiguousFile"]);
+var TAR_BLOCK = 512;
+var EXTENSION_TYPE_FLAGS = /* @__PURE__ */ new Set(["x", "g", "L", "K", "N"]);
+var MAX_EXTENSION_RECORD_BYTES = 64 * 1024;
+function readOctalField(tar, offset, length) {
+  if (tar[offset] & 128) reject("Tarball uses base-256 size fields");
+  let text = "";
+  for (let i = offset; i < offset + length; i++) {
+    const byte = tar[i];
+    if (byte === 0 || byte === 32) break;
+    text += String.fromCharCode(byte);
+  }
+  if (!/^[0-7]*$/.test(text)) reject("Tarball has a malformed size field");
+  return text === "" ? 0 : Number.parseInt(text, 8);
+}
+function assertBoundedTarRecords(tar, policy = DEFAULT_ARCHIVE_POLICY) {
+  let offset = 0;
+  let records = 0;
+  while (offset + TAR_BLOCK <= tar.length) {
+    if (tar[offset] === 0) break;
+    records++;
+    if (records > policy.maxEntries) {
+      reject(`Tarball has over ${policy.maxEntries} records`);
+    }
+    const size = readOctalField(tar, offset + 124, 12);
+    if (!Number.isSafeInteger(size) || size < 0) {
+      reject("Tarball has an unreadable record size");
+    }
+    const typeFlag = String.fromCharCode(tar[offset + 156] || 48);
+    const limit = EXTENSION_TYPE_FLAGS.has(typeFlag) ? MAX_EXTENSION_RECORD_BYTES : policy.maxFileBytes;
+    if (size > limit) {
+      reject(
+        EXTENSION_TYPE_FLAGS.has(typeFlag) ? `Tarball metadata record is ${size} bytes, over the ${limit} byte limit` : `Tarball record is ${size} bytes, over the per-file limit`
+      );
+    }
+    const next = offset + TAR_BLOCK + Math.ceil(size / TAR_BLOCK) * TAR_BLOCK;
+    if (next <= offset) reject("Tarball has a malformed record");
+    offset = next;
+  }
+}
 function reject(message) {
   throw new HttpError(422, message);
 }
@@ -523,6 +562,7 @@ function assertCanonicalEntries(files, policy = DEFAULT_ARCHIVE_POLICY) {
 }
 async function validateArchive(gzippedTarball, policy = DEFAULT_ARCHIVE_POLICY) {
   const inflated = await gunzipBounded(gzippedTarball, policy.maxTotalBytes);
+  assertBoundedTarRecords(inflated, policy);
   let files;
   try {
     files = parseTar(inflated);
@@ -678,11 +718,27 @@ async function packDirectory(dir) {
 }
 
 // .github/actions/publish-preview/src/artifact.ts
-import { lstatSync, readdirSync as readdirSync2, readFileSync as readFileSync2, writeFileSync } from "node:fs";
+import {
+  lstatSync,
+  mkdirSync,
+  readdirSync as readdirSync2,
+  readFileSync as readFileSync2,
+  rmSync as rmSync2,
+  writeFileSync
+} from "node:fs";
 import { join as join2 } from "node:path";
 var MANIFEST_NAME = "manifest.json";
 function tarballFileName(index) {
   return `pkg-${index}.tgz`;
+}
+function isActionOutput(entry) {
+  return entry === MANIFEST_NAME || /^pkg-\d+\.tgz$/.test(entry);
+}
+function prepareOutputDir(dir) {
+  mkdirSync(dir, { recursive: true });
+  for (const entry of readdirSync2(dir)) {
+    if (isActionOutput(entry)) rmSync2(join2(dir, entry), { force: true });
+  }
 }
 function writeManifest(dir, manifest) {
   writeFileSync(
@@ -907,9 +963,14 @@ async function publishAll(opts) {
   await post(bridge, auth, "/-/register", { ref, prUrl }, "register ref");
   console.log(`published ${sources.length} packages, registered ${ref}`);
 }
-function resolveAuth(bridge) {
+function resolveAuth(bridge, mode) {
   const adminToken = input("admin-token");
   if (adminToken) return staticToken(adminToken);
+  if (mode !== "upload") {
+    throw new Error(
+      `mode: ${mode} requires admin-token. OIDC is only available in mode: upload, which runs in a trusted workflow_run job that never executes packaged code. Split the workflow (see RFC 0002) or pass admin-token.`
+    );
+  }
   return oidcMinter(bridge);
 }
 async function main() {
@@ -929,7 +990,7 @@ async function main() {
     const dirs2 = expandPackageDirs(parsePackagesInput(input("packages") || DEFAULT_PACKAGES), cwd);
     const packages2 = dirs2.map((dir) => ({ dir, manifest: readManifest(dir) }));
     assertValidBatch(packages2, env);
-    mkdirSync(outputDir, { recursive: true });
+    prepareOutputDir(outputDir);
     const files = [];
     const listed = [];
     for (const [i, { dir, manifest }] of packages2.entries()) {
@@ -945,7 +1006,7 @@ async function main() {
     return;
   }
   const bridge = (input("bridge-url") || "https://registry-bridge.viteplus.dev").replace(/\/+$/, "");
-  const auth = resolveAuth(bridge);
+  const auth = resolveAuth(bridge, mode);
   const prUrl = input("pr-url") || void 0;
   if (mode === "upload") {
     const inputDir = input("input-dir") || "bridge-packages";

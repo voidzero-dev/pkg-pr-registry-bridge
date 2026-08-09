@@ -55,6 +55,90 @@ export const DEFAULT_ARCHIVE_POLICY: ArchivePolicy = {
 /** Tar entry types an npm package tarball may contain. Everything else is out. */
 const ALLOWED_ENTRY_TYPES = new Set(['file', 'directory', 'contiguousFile'])
 
+const TAR_BLOCK = 512
+
+/**
+ * Type flags for metadata records that `parseTar` consumes and never returns:
+ * PAX extended headers (`x`, `g`) and the GNU long-name records (`L`, `K`,
+ * `N`). Real npm tarballs do carry these, because a path over 100 bytes cannot
+ * fit the ustar name field, so they cannot simply be rejected.
+ */
+const EXTENSION_TYPE_FLAGS = new Set(['x', 'g', 'L', 'K', 'N'])
+
+/**
+ * Cap on one metadata record. These hold a path or a few key/value pairs, so
+ * kilobytes is already generous; the point is that a record claiming hundreds
+ * of megabytes is not a path.
+ */
+const MAX_EXTENSION_RECORD_BYTES = 64 * 1024
+
+/** Read a tar octal numeric field, rejecting the GNU base-256 form. */
+function readOctalField(tar: Uint8Array, offset: number, length: number): number {
+  // High bit set means base-256, used only for sizes past 8GB. Nothing
+  // legitimate here needs it, and parsing it would just widen the surface.
+  if (tar[offset] & 0x80) reject('Tarball uses base-256 size fields')
+  let text = ''
+  for (let i = offset; i < offset + length; i++) {
+    const byte = tar[i]
+    if (byte === 0 || byte === 0x20) break
+    text += String.fromCharCode(byte)
+  }
+  if (!/^[0-7]*$/.test(text)) reject('Tarball has a malformed size field')
+  return text === '' ? 0 : Number.parseInt(text, 8)
+}
+
+/**
+ * Walk the raw 512-byte records and bound every one, including the metadata
+ * records `parseTar` swallows.
+ *
+ * This runs BEFORE `parseTar` because that function handles `extendedHeader`,
+ * `globalExtendedHeader` and the GNU long-name types with `continue`: it
+ * decodes their payload into strings and drops them from its returned `files`.
+ * So the entry-count, per-file and entry-type checks below never observe them,
+ * and an archive could carry unlimited metadata records, or one claiming
+ * hundreds of megabytes, and slip straight past the entry-level policy into
+ * large string allocations inside the parser.
+ */
+export function assertBoundedTarRecords(
+  tar: Uint8Array,
+  policy: ArchivePolicy = DEFAULT_ARCHIVE_POLICY,
+): void {
+  let offset = 0
+  let records = 0
+
+  while (offset + TAR_BLOCK <= tar.length) {
+    // An all-zero name field marks the end-of-archive marker.
+    if (tar[offset] === 0) break
+
+    records++
+    if (records > policy.maxEntries) {
+      reject(`Tarball has over ${policy.maxEntries} records`)
+    }
+
+    const size = readOctalField(tar, offset + 124, 12)
+    if (!Number.isSafeInteger(size) || size < 0) {
+      reject('Tarball has an unreadable record size')
+    }
+
+    const typeFlag = String.fromCharCode(tar[offset + 156] || 0x30)
+    const limit = EXTENSION_TYPE_FLAGS.has(typeFlag)
+      ? MAX_EXTENSION_RECORD_BYTES
+      : policy.maxFileBytes
+    if (size > limit) {
+      reject(
+        EXTENSION_TYPE_FLAGS.has(typeFlag)
+          ? `Tarball metadata record is ${size} bytes, over the ${limit} byte limit`
+          : `Tarball record is ${size} bytes, over the per-file limit`,
+      )
+    }
+
+    const next = offset + TAR_BLOCK + Math.ceil(size / TAR_BLOCK) * TAR_BLOCK
+    // A size that wraps or fails to advance would loop forever.
+    if (next <= offset) reject('Tarball has a malformed record')
+    offset = next
+  }
+}
+
 function reject(message: string): never {
   throw new HttpError(422, message)
 }
@@ -183,6 +267,9 @@ export async function validateArchive(
   policy: ArchivePolicy = DEFAULT_ARCHIVE_POLICY,
 ): Promise<ParsedTarFileItem[]> {
   const inflated = await gunzipBounded(gzippedTarball, policy.maxTotalBytes)
+  // Bound the raw records first: parseTar consumes metadata records without
+  // returning them, so anything checked after it runs cannot see them.
+  assertBoundedTarRecords(inflated, policy)
   let files: ParsedTarFileItem[]
   try {
     files = parseTar(inflated)

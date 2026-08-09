@@ -69,6 +69,15 @@ export async function requirePublisher({
     throw new HttpError(401, 'Unauthorized')
   }
 
+  // Try the operator token FIRST, in constant time. Shape must not decide which
+  // credential a value is: an ADMIN_TOKEN that happens to contain three
+  // dot-separated segments would otherwise be routed into OIDC verification and
+  // rejected, breaking every publish and `pnpm warm` while still working on
+  // /-/purge, which compares it directly.
+  if (env.ADMIN_TOKEN && timingSafeEqual(provided, env.ADMIN_TOKEN)) {
+    return { kind: 'admin' }
+  }
+
   if (looksLikeJwt(provided)) {
     if (!oidc) throw new HttpError(401, 'OIDC publishing is not configured')
     return { kind: 'oidc', claims: await verifyOidcToken(env, provided, oidc) }
@@ -77,10 +86,7 @@ export async function requirePublisher({
   if (!env.ADMIN_TOKEN) {
     throw new HttpError(503, 'Admin endpoints are not configured')
   }
-  if (!timingSafeEqual(provided, env.ADMIN_TOKEN)) {
-    throw new HttpError(401, 'Unauthorized')
-  }
-  return { kind: 'admin' }
+  throw new HttpError(401, 'Unauthorized')
 }
 
 /**

@@ -458,6 +458,27 @@ describe('OIDC publishing: config states', () => {
     }
   })
 
+  it('accepts an admin token that happens to be JWT-shaped', async () => {
+    // Token shape must not decide which credential a value is. A three-segment
+    // ADMIN_TOKEN routed into OIDC verification would fail every publish and
+    // `pnpm warm` while still working on /-/purge, which compares it directly.
+    const jwtShaped = 'aaaa.bbbb.cccc'
+    const previous = mutable.ADMIN_TOKEN
+    mutable.ADMIN_TOKEN = jwtShaped
+    try {
+      expect((await post('/-/publish', publishBody(), jwtShaped)).status).toBe(201)
+      // And /-/purge, which never had the routing, still agrees.
+      const purge = await post(
+        '/-/purge',
+        { package: 'vite-plus', version: VERSION },
+        jwtShaped,
+      )
+      expect(purge.status).toBe(200)
+    } finally {
+      mutable.ADMIN_TOKEN = previous
+    }
+  })
+
   it('fails every publish loudly when OIDC is only half configured', async () => {
     // Deployment hazard: setting the audience but forgetting the repository id
     // takes the ADMIN path down too, because the config is resolved before the

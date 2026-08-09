@@ -46,6 +46,7 @@ import {
   readManifest,
 } from './localPack'
 import {
+  prepareOutputDir,
   readArtifactTarballs,
   readTarball,
   tarballFileName,
@@ -278,10 +279,26 @@ async function publishAll(opts: {
   console.log(`published ${sources.length} packages, registered ${ref}`)
 }
 
-/** Resolve how to authenticate: explicit admin token, else OIDC. */
-function resolveAuth(bridge: string): TokenMinter {
+/**
+ * Resolve how to authenticate: explicit admin token, else OIDC.
+ *
+ * OIDC is confined to `upload` mode. `publish` mode packs and uploads in one
+ * job, and `pnpm pack` runs the packed package's own `prepack`/`prepare`
+ * scripts, so allowing OIDC there would put token minting in a job that
+ * executes preview code, which is exactly the separation RFC 0002 SR-5 exists
+ * to keep. Requiring an admin token makes that configuration fail loudly
+ * instead of silently working.
+ */
+function resolveAuth(bridge: string, mode: string): TokenMinter {
   const adminToken = input('admin-token')
   if (adminToken) return staticToken(adminToken)
+  if (mode !== 'upload') {
+    throw new Error(
+      `mode: ${mode} requires admin-token. OIDC is only available in mode: upload, ` +
+        'which runs in a trusted workflow_run job that never executes packaged ' +
+        'code. Split the workflow (see RFC 0002) or pass admin-token.',
+    )
+  }
   // Audience is the bridge origin, matching OIDC_AUDIENCE on the Worker.
   return oidcMinter(bridge)
 }
@@ -313,7 +330,7 @@ async function main(): Promise<void> {
     // stops the build leg rather than producing a partial artifact.
     assertValidBatch(packages, env)
 
-    mkdirSync(outputDir, { recursive: true })
+    prepareOutputDir(outputDir)
     const files: string[] = []
     const listed: Array<{ file: string; name: string; dir: string }> = []
     for (const [i, { dir, manifest }] of packages.entries()) {
@@ -330,7 +347,7 @@ async function main(): Promise<void> {
   }
 
   const bridge = (input('bridge-url') || 'https://registry-bridge.viteplus.dev').replace(/\/+$/, '')
-  const auth = resolveAuth(bridge)
+  const auth = resolveAuth(bridge, mode)
   // Optional: the action runs on push commits too, where there is no PR. In
   // `upload` mode the caller derives this from the GitHub API, never from the
   // artifact, so it cannot be used to retarget another PR's dist-tag.

@@ -14,7 +14,14 @@
  *  - the reader refuses symlinks, so the artifact cannot point at files outside
  *    itself.
  */
-import { lstatSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 
 /** Advisory description of a packed batch. Never trusted by the reader. */
@@ -34,6 +41,32 @@ export const MANIFEST_NAME = 'manifest.json'
 /** The generated name for the nth packed tarball. */
 export function tarballFileName(index: number): string {
   return `pkg-${index}.tgz`
+}
+
+/** Does this file name belong to a pack run (as opposed to a user's file)? */
+function isActionOutput(entry: string): boolean {
+  return entry === MANIFEST_NAME || /^pkg-\d+\.tgz$/.test(entry)
+}
+
+/**
+ * Create `dir` and remove this action's own outputs from any previous run.
+ *
+ * Packing writes `pkg-0..N`, so a rerun that produces FEWER packages than the
+ * last one would otherwise leave the higher indices behind. The upload leg
+ * enumerates every `pkg-<n>.tgz` it finds and ignores `manifest.json`, so those
+ * leftovers would be republished under the new commit version, or collide as a
+ * duplicate package name and fail the run. CI gets a clean runner, but local
+ * runs and `pnpm warm` reuse a workspace.
+ *
+ * Only action-owned names are removed. Anything else in the directory is left
+ * alone and will make the upload leg refuse the artifact, which is better than
+ * this quietly deleting a file it did not create.
+ */
+export function prepareOutputDir(dir: string): void {
+  mkdirSync(dir, { recursive: true })
+  for (const entry of readdirSync(dir)) {
+    if (isActionOutput(entry)) rmSync(join(dir, entry), { force: true })
+  }
 }
 
 export function writeManifest(dir: string, manifest: PackManifest): void {

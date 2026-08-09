@@ -5,15 +5,24 @@
  * look like success.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   MANIFEST_NAME,
+  prepareOutputDir,
   readArtifactTarballs,
   tarballFileName,
   writeManifest,
 } from '../../.github/actions/publish-preview/src/artifact'
+import { existsSync } from 'node:fs'
 
 let dir: string
 
@@ -88,5 +97,44 @@ describe('readArtifactTarballs', () => {
     // The reader returns tarball paths only; nothing from the manifest selects
     // what gets published.
     expect(readArtifactTarballs(dir).every((p) => !p.endsWith(MANIFEST_NAME))).toBe(true)
+  })
+})
+
+/**
+ * Packing writes pkg-0..N. A rerun producing FEWER packages would otherwise
+ * leave the higher indices behind, and the upload leg enumerates every
+ * pkg-<n>.tgz it finds, so a stale one would be republished under the new
+ * commit version or collide as a duplicate package name.
+ */
+describe('prepareOutputDir', () => {
+  it('removes stale tarballs from a previous, larger run', () => {
+    for (const i of [0, 1, 2, 3, 4]) packed(i)
+    writeManifest(dir, { ref: 'commit.old', version: 'old', files: [], packages: [] })
+
+    prepareOutputDir(dir)
+
+    expect(readdirSync(dir)).toEqual([])
+  })
+
+  it('creates the directory when it does not exist', () => {
+    const nested = join(dir, 'deep', 'nested')
+    prepareOutputDir(nested)
+    expect(existsSync(nested)).toBe(true)
+  })
+
+  it('leaves files it did not create alone', () => {
+    // Better to let the upload leg refuse an unexpected file than to have pack
+    // silently delete something a user put there.
+    packed(0)
+    writeFileSync(join(dir, 'notes.txt'), 'keep me')
+    prepareOutputDir(dir)
+    expect(readdirSync(dir)).toEqual(['notes.txt'])
+  })
+
+  it('makes a shrinking rerun publish only the new set', () => {
+    for (const i of [0, 1, 2]) packed(i, 'old')
+    prepareOutputDir(dir)
+    packed(0, 'new')
+    expect(readArtifactTarballs(dir).map((p) => p.split('/').pop())).toEqual(['pkg-0.tgz'])
   })
 })
