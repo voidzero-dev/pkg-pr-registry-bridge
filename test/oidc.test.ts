@@ -411,6 +411,72 @@ describe('OIDC publishing: prUrl scoping (SR-2)', () => {
   })
 })
 
+/**
+ * The state right after this ships but before anyone sets the OIDC vars.
+ * Consumers still publish with the admin token then, so it has to keep working;
+ * it is also the configuration the staging smoke runs under.
+ */
+describe('OIDC publishing: config states', () => {
+  const KEYS = [
+    'OIDC_AUDIENCE',
+    'OIDC_TRUSTED_WORKFLOWS',
+    'OIDC_TRUSTED_REPOSITORY_ID',
+    'OIDC_TRUSTED_OWNER_ID',
+  ] as const
+  const saved: Record<string, unknown> = {}
+  const mutable = env as unknown as Record<string, unknown>
+
+  const clearAll = (): void => {
+    for (const key of KEYS) {
+      saved[key] = mutable[key]
+      delete mutable[key]
+    }
+  }
+  const restore = (): void => {
+    for (const key of KEYS) mutable[key] = saved[key]
+  }
+
+  it('keeps accepting the admin token when OIDC is entirely unconfigured', async () => {
+    clearAll()
+    try {
+      expect((await post('/-/publish', publishBody(), 'test-admin-token')).status).toBe(201)
+      expect(
+        (await post('/-/register', { ref: `commit.${SHA}` }, 'test-admin-token')).status,
+      ).toBe(201)
+    } finally {
+      restore()
+    }
+  })
+
+  it('rejects a JWT as unauthorized, not 503, when OIDC is unconfigured', async () => {
+    const token = await mint()
+    clearAll()
+    try {
+      expect((await post('/-/publish', publishBody(), token)).status).toBe(401)
+    } finally {
+      restore()
+    }
+  })
+
+  it('fails every publish loudly when OIDC is only half configured', async () => {
+    // Deployment hazard: setting the audience but forgetting the repository id
+    // takes the ADMIN path down too, because the config is resolved before the
+    // credential is routed. A 503 naming the missing var beats rejecting every
+    // token as 401 with no clue why.
+    saved.OIDC_TRUSTED_REPOSITORY_ID = mutable.OIDC_TRUSTED_REPOSITORY_ID
+    delete mutable.OIDC_TRUSTED_REPOSITORY_ID
+    try {
+      const res = await post('/-/publish', publishBody(), 'test-admin-token')
+      expect(res.status).toBe(503)
+      expect(((await res.json()) as { error: string }).error).toMatch(
+        /OIDC_TRUSTED_REPOSITORY_ID/,
+      )
+    } finally {
+      mutable.OIDC_TRUSTED_REPOSITORY_ID = saved.OIDC_TRUSTED_REPOSITORY_ID
+    }
+  })
+})
+
 describe('OIDC publishing: endpoint scoping', () => {
   it('does not accept an OIDC token for purge', async () => {
     const res = await post(

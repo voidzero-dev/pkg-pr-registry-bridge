@@ -168,9 +168,12 @@ admin-token-only publishing.
 
 An OIDC identity may upload tarballs, publish metadata, and register refs. It
 may **not** purge, which stays on `ADMIN_TOKEN` along with `pnpm warm` and
-manual operations. See RFC 0002 for the workflow split this expects on the
-consumer side; pointing CI at these endpoints without that split does not give
-you fork-PR publishing on its own.
+manual operations.
+
+This alone does not give you fork-PR publishing: that also needs the
+two-workflow split on the consumer side, because fork `pull_request` runs cannot
+mint an OIDC token either. [`ci-setup.md`](./ci-setup.md) has the full wiring
+(build leg, `authorize` job, trusted leg) and RFC 0002 has the reasoning.
 
 ## 6. Attach a custom domain (optional)
 

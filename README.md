@@ -189,6 +189,12 @@ Writes are guarded by `Authorization: Bearer <ADMIN_TOKEN>` (set `ADMIN_TOKEN`
 with `void secret put ADMIN_TOKEN`); without it configured the write endpoints
 return 503. `GET /-/refs` is a public read.
 
+The three publish endpoints (tarball upload, `/-/publish`, `/-/register`) also
+accept a GitHub Actions OIDC token, so CI can publish without holding a bridge
+secret and fork pull requests can publish at all. `/-/purge` stays admin-token
+only: an OIDC identity can add preview builds and nothing else. See
+[`docs/ci-setup.md`](./docs/ci-setup.md) for the vars and the workflow split.
+
 ```bash
 # List registered refs - no auth required.
 # Each entry: { ref, version, publishedAt, prUrl, expiresAt }. publishedAt is the
@@ -202,8 +208,8 @@ curl -X POST -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: applicati
 ```
 
 Refs are created by publishing: tarball upload (`PUT /-/tarball/<pkg>/<version>.tgz`)
-then `POST /-/publish` (stores metadata + registers the ref), both admin-guarded
-and driven by the [publish action](#publishing-from-ci), not by hand.
+then `POST /-/publish` (stores metadata + registers the ref), both guarded and
+driven by the [publish action](#publishing-from-ci), not by hand.
 
 A published ref is reflected immediately and built into the packument on the next
 request. This is the no-redeploy path for exposing new preview builds.
