@@ -406,6 +406,18 @@ var PACKAGE_JSON_NAMES = /* @__PURE__ */ new Set([
   "package/package.json",
   "./package/package.json"
 ]);
+function canonicalAttrs(file) {
+  const parsed = Number.parseInt(file.attrs?.mode ?? "", 8);
+  const executable = Number.isFinite(parsed) && (parsed & 73) !== 0;
+  return {
+    mode: file.type === "directory" || executable ? "755" : "644",
+    uid: 0,
+    gid: 0,
+    user: "",
+    group: "",
+    mtime: file.attrs?.mtime
+  };
+}
 var textEncoder = new TextEncoder();
 function encodePackageJson(pkg) {
   return textEncoder.encode(`${JSON.stringify(pkg, null, 2)}
@@ -434,7 +446,7 @@ async function buildPreviewTarball(gzippedTarball, packageName, version, batch) 
     out.push({
       name: file.name,
       data: file === pkgEntry ? rewrittenBytes : file.data,
-      attrs: file.attrs
+      attrs: canonicalAttrs(file)
     });
   }
   const tarball = await gzip(withEndOfArchiveMarker(createTar(out)));

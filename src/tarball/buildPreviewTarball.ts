@@ -48,6 +48,39 @@ export const PACKAGE_JSON_NAMES = new Set([
   './package/package.json',
 ])
 
+/**
+ * Normalize an entry's metadata on repack (RFC 0002 SR-6).
+ *
+ * The mode comes from the tar header, which is attacker-controlled for any
+ * archive the bridge did not produce, and it was previously passed straight
+ * through. Setuid, setgid and sticky bits therefore survived into the
+ * published tarball. npm and pnpm apply their own modes on extract, so this is
+ * a small exposure, but "the bytes we publish are ones we constructed" is only
+ * true if the metadata is ours too.
+ *
+ * Collapsing to 755/644 preserves the one bit that carries meaning in an npm
+ * package (is this file executable, which `bin` entries need) and discards
+ * everything else. Ownership is flattened for the same reason: uid/gid/user/
+ * group describe the packing machine, never anything a consumer should honour.
+ *
+ * `mtime` is deliberately left alone. It is inert on extract, and normalizing
+ * it would change the bytes of every package on the trusted `publish` path
+ * too. Fixing it to a constant would make republishes byte-identical, which is
+ * worth doing for reproducibility, but that is a separate change.
+ */
+function canonicalAttrs(file: ParsedTarFileItem): TarFileInput['attrs'] {
+  const parsed = Number.parseInt(file.attrs?.mode ?? '', 8)
+  const executable = Number.isFinite(parsed) && (parsed & 0o111) !== 0
+  return {
+    mode: file.type === 'directory' || executable ? '755' : '644',
+    uid: 0,
+    gid: 0,
+    user: '',
+    group: '',
+    mtime: file.attrs?.mtime,
+  }
+}
+
 const textEncoder = new TextEncoder()
 
 /** Serialize a rewritten package.json to the bytes written into the tarball. */
@@ -101,11 +134,14 @@ async function parsePackageJson(gzippedTarball: Uint8Array): Promise<{
  * Rewrite a packed package tarball into a preview release:
  *   1. parse gzip + tar,
  *   2. find and rewrite `package/package.json`,
- *   3. repack only entries under the `package/` root, preserving file modes,
+ *   3. repack only entries under the `package/` root, normalizing metadata,
  *   4. re-gzip.
  *
- * Only `package/package.json` changes; all other entries pass through byte for
- * byte (with their original attrs/mode), which keeps executables executable.
+ * Only `package/package.json` changes; every other entry's CONTENT passes
+ * through byte for byte. Its metadata does not: modes collapse to 755/644 and
+ * ownership is flattened (see canonicalAttrs), which keeps executables
+ * executable while discarding attacker-controlled bits from an untrusted
+ * archive.
  */
 export async function buildPreviewTarball(
   gzippedTarball: Uint8Array,
@@ -125,7 +161,7 @@ export async function buildPreviewTarball(
     out.push({
       name: file.name,
       data: file === pkgEntry ? rewrittenBytes : file.data,
-      attrs: file.attrs,
+      attrs: canonicalAttrs(file),
     })
   }
 

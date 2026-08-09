@@ -119,3 +119,62 @@ describe('buildPreviewTarball', () => {
     expect(offenders).toEqual([])
   })
 })
+
+/**
+ * The mode comes from the tar header, which is attacker-controlled for any
+ * archive the bridge did not build. It used to pass straight through, so a
+ * crafted tarball's setuid bit survived into the published one. "The bytes we
+ * publish are ones we constructed" only holds if the metadata is ours too.
+ */
+describe('buildPreviewTarball: metadata normalization', () => {
+  const pkg = { name: 'vite-plus', version: '1.0.0' }
+  const batch = new Set(['vite-plus'])
+
+  async function rebuiltAttrs(
+    attrs: Record<string, unknown>,
+  ): Promise<Record<string, any>> {
+    const source = await createTarGzip([
+      { name: 'package/package.json', data: JSON.stringify(pkg) },
+      { name: 'package/bin/vp', data: '#!/bin/sh\n', attrs: attrs as never },
+    ])
+    const built = await buildPreviewTarball(source, 'vite-plus', '0.0.0-commit.abc1234', batch)
+    const files = await parseTarGzip(built.tarball)
+    return files.find((f) => f.name === 'package/bin/vp')!.attrs as Record<string, any>
+  }
+
+  /** The tar writer left-pads mode to 7 chars, so compare the octal value. */
+  const modeOf = (attrs: Record<string, any>): number =>
+    Number.parseInt(attrs.mode, 8)
+
+  it('strips the setuid bit', async () => {
+    const attrs = await rebuiltAttrs({ mode: '4755' })
+    expect(modeOf(attrs)).toBe(0o755)
+  })
+
+  it('strips setgid and sticky bits', async () => {
+    expect(modeOf(await rebuiltAttrs({ mode: '2755' }))).toBe(0o755)
+    expect(modeOf(await rebuiltAttrs({ mode: '1777' }))).toBe(0o755)
+  })
+
+  it('keeps executables executable', async () => {
+    expect(modeOf(await rebuiltAttrs({ mode: '755' }))).toBe(0o755)
+    expect(modeOf(await rebuiltAttrs({ mode: '700' }))).toBe(0o755)
+  })
+
+  it('normalizes non-executables to 644', async () => {
+    expect(modeOf(await rebuiltAttrs({ mode: '666' }))).toBe(0o644)
+    expect(modeOf(await rebuiltAttrs({ mode: '000' }))).toBe(0o644)
+  })
+
+  it('falls back to 644 for an unparseable mode', async () => {
+    expect(modeOf(await rebuiltAttrs({ mode: 'zzz' }))).toBe(0o644)
+  })
+
+  it('flattens ownership, which describes the packing machine only', async () => {
+    const attrs = await rebuiltAttrs({ mode: '755', uid: 501, gid: 20, user: 'attacker', group: 'wheel' })
+    expect(attrs.uid).toBe(0)
+    expect(attrs.gid).toBe(0)
+    expect(attrs.user).toBe('')
+    expect(attrs.group).toBe('')
+  })
+})
