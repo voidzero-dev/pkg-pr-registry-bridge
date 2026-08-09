@@ -29,15 +29,11 @@
  *    published are ones this step constructed.
  */
 import { join, relative } from 'node:path'
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { appendFileSync, writeFileSync } from 'node:fs'
 import { buildPreviewTarball } from '../../../../src/tarball/buildPreviewTarball'
-import {
-  normalizeEntryName,
-  validateArchive,
-} from '../../../../src/tarball/validateArchive'
+import { validateArchive } from '../../../../src/tarball/validateArchive'
+import { isPackageManifest } from '../../../../src/security/validateTarballPath'
 import { parseConfiguredPreviewRefs } from '../../../../src/preview/parseConfiguredPreviewRefs'
-import { isWorkspacePackage } from '../../../../src/preview/packages'
-import { DEPENDENCY_FIELDS } from '../../../../src/tarball/rewritePackageJson'
 import {
   assertValidBatch,
   expandPackageDirs,
@@ -95,11 +91,53 @@ const PUBLISH_TIMEOUT_MS = 30_000
 
 /** One package ready to publish: how to get its bytes, and what to call it. */
 interface PackageSource {
+  /** Package name, resolved before publishing starts. */
+  name: string
+  /** Human-readable origin, for logs and errors. */
   label: string
   read: () => Promise<Uint8Array>
+  /**
+   * Whether reading is worth starting one package early. True only when `read`
+   * is genuinely expensive and asynchronous (`pnpm pack` spawns a process); a
+   * synchronous `readFileSync` returns an already-settled promise, so
+   * prefetching it just holds an extra archive resident for no overlap.
+   */
+  prefetch?: boolean
 }
 
-async function uploadTarball(
+/**
+ * One request to the bridge, with the retry, auth and error policy that every
+ * call shares. A 401 is worth one fresh mint: an OIDC token can expire mid-run
+ * on a slow upload.
+ */
+function send(
+  bridge: string,
+  auth: TokenMinter,
+  path: string,
+  label: string,
+  init: {
+    method: string
+    body: Uint8Array | string
+    contentType: string
+    timeoutMs: number
+  },
+): Promise<void> {
+  return withRetry(label, async () => {
+    const res = await fetch(`${bridge}${path}`, {
+      method: init.method,
+      headers: {
+        authorization: await auth.header(),
+        'content-type': init.contentType,
+      },
+      body: init.body,
+      signal: AbortSignal.timeout(init.timeoutMs),
+    })
+    if (res.status === 401) auth.invalidate()
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => '')}`)
+  })
+}
+
+function uploadTarball(
   bridge: string,
   auth: TokenMinter,
   name: string,
@@ -107,23 +145,14 @@ async function uploadTarball(
   bytes: Uint8Array,
   shasum: string,
 ): Promise<void> {
-  await withRetry(`upload ${name}`, async () => {
-    // Content-addressed path: the shasum (sha1 of these exact bytes) is in the
-    // key, so a republish with different bytes lands at a different URL and the
-    // packument's shasum always selects the matching bytes.
-    const res = await fetch(`${bridge}/-/tarball/${name}/${version}/${shasum}.tgz`, {
-      method: 'PUT',
-      headers: {
-        authorization: await auth.header(),
-        'content-type': 'application/gzip',
-      },
-      body: bytes,
-      signal: AbortSignal.timeout(TRANSFER_TIMEOUT_MS),
-    })
-    // A rejected credential is worth one fresh mint: an OIDC token can expire
-    // mid-run on a slow upload.
-    if (res.status === 401) auth.invalidate()
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => '')}`)
+  // Content-addressed path: the shasum (sha1 of these exact bytes) is in the
+  // key, so a republish with different bytes lands at a different URL and the
+  // packument's shasum always selects the matching bytes.
+  return send(bridge, auth, `/-/tarball/${name}/${version}/${shasum}.tgz`, `upload ${name}`, {
+    method: 'PUT',
+    body: bytes,
+    contentType: 'application/gzip',
+    timeoutMs: TRANSFER_TIMEOUT_MS,
   })
 }
 
@@ -134,18 +163,11 @@ function post(
   body: Record<string, unknown>,
   label: string,
 ): Promise<void> {
-  return withRetry(label, async () => {
-    const res = await fetch(`${bridge}${path}`, {
-      method: 'POST',
-      headers: {
-        authorization: await auth.header(),
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(PUBLISH_TIMEOUT_MS),
-    })
-    if (res.status === 401) auth.invalidate()
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => '')}`)
+  return send(bridge, auth, path, label, {
+    method: 'POST',
+    body: JSON.stringify(body),
+    contentType: 'application/json',
+    timeoutMs: PUBLISH_TIMEOUT_MS,
   })
 }
 
@@ -156,9 +178,7 @@ function manifestFromEntries(
 ): Record<string, any> {
   // validateArchive guarantees exactly one manifest entry, so `find` cannot
   // disagree with what an extractor would pick.
-  const entry = files.find(
-    (f) => normalizeEntryName(f.name) === 'package/package.json' && f.data,
-  )
+  const entry = files.find((f) => isPackageManifest(f.name) && f.data)
   if (!entry?.data) throw new Error(`${label}: tarball has no package/package.json`)
   try {
     return JSON.parse(new TextDecoder().decode(entry.data))
@@ -168,46 +188,28 @@ function manifestFromEntries(
 }
 
 /**
- * Derive the publish batch from untrusted tarballs: validate each archive,
- * read back its name, and check the same invariants `assertValidBatch` applies
- * to on-disk manifests. Bytes are released after each package, so peak memory
+ * Resolve each untrusted archive to its package name, validating it on the way.
+ *
+ * The batch invariants (allowed workspace package, no duplicate name, every
+ * workspace dep present) are the SAME rules the on-disk path applies, so this
+ * collects manifests and hands them to `assertValidBatch` rather than keeping a
+ * second copy of them. Bytes are released after each package, so peak memory
  * stays at one archive rather than the whole batch.
  */
-async function batchFromArchives(
+async function resolveArchiveBatch(
   sources: PackageSource[],
   env: { WORKSPACE_PACKAGES?: string },
-): Promise<{ batch: Set<string>; names: string[] }> {
-  const batch = new Set<string>()
-  const names: string[] = []
-  const manifests: Record<string, any>[] = []
-
+): Promise<Set<string>> {
+  const packages = []
   for (const source of sources) {
     const files = await validateArchive(await source.read())
     const manifest = manifestFromEntries(files, source.label)
-    const name = manifest.name as string | undefined
-    if (!name || !isWorkspacePackage(name, env)) {
-      throw new Error(`${source.label}: not an allowed workspace package: ${name}`)
-    }
-    if (batch.has(name)) {
-      throw new Error(`${source.label}: duplicate package in batch: ${name}`)
-    }
-    batch.add(name)
-    names.push(name)
-    manifests.push(manifest)
+    // Name each source now, so publishing never has to re-derive it or keep a
+    // parallel array in step with `sources`.
+    source.name = manifest.name
+    packages.push({ label: source.label, manifest })
   }
-
-  for (const manifest of manifests) {
-    for (const field of DEPENDENCY_FIELDS) {
-      for (const dep of Object.keys(manifest[field] ?? {})) {
-        if (isWorkspacePackage(dep, env) && !batch.has(dep)) {
-          throw new Error(
-            `${manifest.name} ${field} needs ${dep}, which is not in this publish batch`,
-          )
-        }
-      }
-    }
-  }
-  return { batch, names }
+  return assertValidBatch(packages, env)
 }
 
 /**
@@ -218,34 +220,35 @@ async function batchFromArchives(
  */
 async function publishAll(opts: {
   sources: PackageSource[]
-  names: string[]
   batch: Set<string>
   bridge: string
   auth: TokenMinter
   ref: string
   version: string
   prUrl?: string
-  cwd: string
 }): Promise<void> {
-  const { sources, names, batch, bridge, auth, ref, version, prUrl, cwd } = opts
+  const { sources, batch, bridge, auth, ref, version, prUrl } = opts
   console.log(`publishing ${version} (${sources.length} packages) to ${bridge}`)
 
-  // Read the next package's bytes while the current one uploads (one ahead, so
-  // peak memory stays at two archives). In `publish` mode that overlaps the
-  // next `pnpm pack` with the current upload, which is where it earns its keep.
-  // The swallowed rejection resurfaces at the `await`; it only avoids an
-  // unhandled-rejection crash when an earlier upload fails first.
+  // Read the next package's bytes while the current one uploads, but ONLY where
+  // reading is genuinely async: `pnpm pack` spawns a process, so the overlap is
+  // real, whereas `readFileSync` returns an already-settled promise and
+  // prefetching it just holds a second archive resident through the heaviest
+  // allocation phase for no gain. The swallowed rejection resurfaces at the
+  // `await`; it only avoids an unhandled-rejection crash when an earlier upload
+  // fails first.
   const startRead = (i: number): Promise<Uint8Array> => {
     const pending = sources[i].read()
     pending.catch(() => {})
     return pending
   }
-  let nextBytes = startRead(0)
+  let nextBytes: Promise<Uint8Array> | null = null
 
   for (const [i, source] of sources.entries()) {
-    const name = names[i]
-    const bytes = await nextBytes
-    if (i + 1 < sources.length) nextBytes = startRead(i + 1)
+    const { name } = source
+    const bytes = await (nextBytes ?? startRead(i))
+    nextBytes =
+      source.prefetch && i + 1 < sources.length ? startRead(i + 1) : null
     const build = await buildPreviewTarball(bytes, name, version, batch)
     await uploadTarball(bridge, auth, name, version, build.tarball, build.shasum)
     await post(
@@ -270,7 +273,7 @@ async function publishAll(opts: {
     // the integrity, so an install mismatch is debuggable straight from the CI
     // log: fetch the URL, hash it, and compare against the integrity here.
     console.log(
-      `  ✓ ${name}@${version} (${build.tarball.byteLength} bytes, from ${relative(cwd, source.label)})\n` +
+      `  ✓ ${name}@${version} (${build.tarball.byteLength} bytes, from ${source.label})\n` +
         `      ${bridge}/tarballs/${name}/${version}/${build.shasum}.tgz  (${build.integrity})`,
     )
   }
@@ -325,22 +328,20 @@ async function main(): Promise<void> {
   if (mode === 'pack') {
     const outputDir = input('output-dir') || 'bridge-packages'
     const dirs = expandPackageDirs(parsePackagesInput(input('packages') || DEFAULT_PACKAGES), cwd)
-    const packages = dirs.map((dir) => ({ dir, manifest: readManifest(dir) }))
+    const packages = dirs.map((dir) => ({ label: dir, manifest: readManifest(dir) }))
     // Fail on the batch before packing anything, so a missing platform dir
     // stops the build leg rather than producing a partial artifact.
     assertValidBatch(packages, env)
 
     prepareOutputDir(outputDir)
-    const files: string[] = []
     const listed: Array<{ file: string; name: string; dir: string }> = []
-    for (const [i, { dir, manifest }] of packages.entries()) {
+    for (const [i, { label, manifest }] of packages.entries()) {
       const file = tarballFileName(i)
-      writeFileSync(join(outputDir, file), await packDirectory(dir))
-      files.push(file)
-      listed.push({ file, name: manifest.name, dir: relative(cwd, dir) })
+      writeFileSync(join(outputDir, file), await packDirectory(label))
+      listed.push({ file, name: manifest.name, dir: relative(cwd, label) })
       console.log(`  packed ${manifest.name} -> ${file}`)
     }
-    writeManifest(outputDir, { ref, version, files, packages: listed })
+    writeManifest(outputDir, { ref, version, packages: listed })
     console.log(`packed ${packages.length} packages into ${outputDir}`)
     writeOutput('version', version)
     return
@@ -356,13 +357,16 @@ async function main(): Promise<void> {
   if (mode === 'upload') {
     const inputDir = input('input-dir') || 'bridge-packages'
     const paths = readArtifactTarballs(inputDir)
+    // `name` is filled in by resolveArchiveBatch, which reads it out of each
+    // validated archive. No prefetch: readFileSync is synchronous.
     const sources: PackageSource[] = paths.map((path) => ({
-      label: path,
+      name: '',
+      label: relative(cwd, path),
       read: async () => readTarball(path),
     }))
     // Validate every archive and derive the batch BEFORE uploading anything.
-    const { batch, names } = await batchFromArchives(sources, env)
-    await publishAll({ sources, names, batch, bridge, auth, ref, version, prUrl, cwd })
+    const batch = await resolveArchiveBatch(sources, env)
+    await publishAll({ sources, batch, bridge, auth, ref, version, prUrl })
     writeOutput('version', version)
     return
   }
@@ -370,25 +374,18 @@ async function main(): Promise<void> {
   // mode === 'publish': the checkout is trusted here, so the batch comes from
   // on-disk manifests as it always has, and packing stays a single pass.
   const dirs = expandPackageDirs(parsePackagesInput(input('packages') || DEFAULT_PACKAGES), cwd)
-  const packages = dirs.map((dir) => ({ dir, manifest: readManifest(dir) }))
+  const packages = dirs.map((dir) => ({ label: dir, manifest: readManifest(dir) }))
   const batch = assertValidBatch(packages, env)
   // `read` runs exactly once per source here (the batch came from disk), so
-  // packing stays a single pass, overlapped one ahead by publishAll.
-  const sources: PackageSource[] = packages.map(({ dir }) => ({
-    label: dir,
-    read: () => packDirectory(dir),
+  // packing stays a single pass. Prefetch earns its keep: packDirectory spawns
+  // `pnpm pack`, so the next pack overlaps the current upload.
+  const sources: PackageSource[] = packages.map(({ label, manifest }) => ({
+    name: manifest.name,
+    label: relative(cwd, label),
+    read: () => packDirectory(label),
+    prefetch: true,
   }))
-  await publishAll({
-    sources,
-    names: packages.map((p) => p.manifest.name),
-    batch,
-    bridge,
-    auth,
-    ref,
-    version,
-    prUrl,
-    cwd,
-  })
+  await publishAll({ sources, batch, bridge, auth, ref, version, prUrl })
   writeOutput('version', version)
 }
 

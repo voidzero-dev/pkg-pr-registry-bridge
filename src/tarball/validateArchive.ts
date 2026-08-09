@@ -27,8 +27,14 @@
  */
 import { parseTar, type ParsedTarFileItem } from 'nanotar'
 import { HttpError } from '../httpError'
-import { assertSafeTarballPath, isUnderPackageRoot } from '../security/validateTarballPath'
-import { PACKAGE_JSON_NAMES } from './buildPreviewTarball'
+import {
+  assertSafeTarballPath,
+  isPackageManifest,
+  isUnderPackageRoot,
+  normalizeEntryName,
+} from '../security/validateTarballPath'
+
+export { normalizeEntryName }
 
 /** Limits applied to one package tarball. */
 export interface ArchivePolicy {
@@ -121,14 +127,12 @@ export function assertBoundedTarRecords(
     }
 
     const typeFlag = String.fromCharCode(tar[offset + 156] || 0x30)
-    const limit = EXTENSION_TYPE_FLAGS.has(typeFlag)
-      ? MAX_EXTENSION_RECORD_BYTES
-      : policy.maxFileBytes
+    const isMetadata = EXTENSION_TYPE_FLAGS.has(typeFlag)
+    const limit = isMetadata ? MAX_EXTENSION_RECORD_BYTES : policy.maxFileBytes
     if (size > limit) {
       reject(
-        EXTENSION_TYPE_FLAGS.has(typeFlag)
-          ? `Tarball metadata record is ${size} bytes, over the ${limit} byte limit`
-          : `Tarball record is ${size} bytes, over the per-file limit`,
+        `Tarball ${isMetadata ? 'metadata ' : ''}record is ${size} bytes, ` +
+          `over the ${limit} byte limit`,
       )
     }
 
@@ -141,20 +145,6 @@ export function assertBoundedTarRecords(
 
 function reject(message: string): never {
   throw new HttpError(422, message)
-}
-
-/**
- * Normalize an entry path for duplicate detection: strip a leading `./`,
- * convert backslashes, collapse repeated slashes, and drop a trailing slash.
- * `package/a.js`, `./package/a.js` and `package//a.js` are the same file to an
- * extractor, so they must be the same key here.
- */
-export function normalizeEntryName(name: string): string {
-  return name
-    .replace(/\\/g, '/')
-    .replace(/^\.\//, '')
-    .replace(/\/{2,}/g, '/')
-    .replace(/\/$/, '')
 }
 
 /**
@@ -215,9 +205,11 @@ export function assertCanonicalEntries(
   let manifests = 0
 
   for (const file of files) {
-    // Traversal and absolute paths. Shared with the repack path so both agree.
-    assertSafeTarballPath(file.name)
+    // Normalize ONCE, then every check below reads the same spelling. Comparing
+    // different spellings of one path is the disagreement this module exists to
+    // remove, so it must not reintroduce it internally.
     const normalized = normalizeEntryName(file.name)
+    assertSafeTarballPath(normalized)
     if (/^[a-zA-Z]:/.test(normalized)) {
       reject(`Unsafe drive-letter path in tarball: ${file.name}`)
     }
@@ -237,11 +229,9 @@ export function assertCanonicalEntries(
     }
     seen.add(normalized)
 
-    if (PACKAGE_JSON_NAMES.has(file.name) || normalized === 'package/package.json') {
-      manifests++
-    }
+    if (isPackageManifest(normalized)) manifests++
 
-    if (!isUnderPackageRoot(file.name)) {
+    if (!isUnderPackageRoot(normalized)) {
       reject(`Entry outside the package/ root: ${file.name}`)
     }
 

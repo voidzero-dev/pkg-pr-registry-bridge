@@ -50,7 +50,7 @@ describe('readArtifactTarballs', () => {
 
   it('ignores the manifest', () => {
     packed(0)
-    writeManifest(dir, { ref: 'commit.abc1234', version: '0.0.0-commit.abc1234', files: [], packages: [] })
+    writeManifest(dir, { ref: 'commit.abc1234', version: '0.0.0-commit.abc1234', packages: [] })
     expect(readArtifactTarballs(dir)).toHaveLength(1)
   })
 
@@ -91,7 +91,7 @@ describe('readArtifactTarballs', () => {
     writeManifest(dir, {
       ref: 'commit.abc1234',
       version: '0.0.0-commit.abc1234',
-      files: [tarballFileName(0)],
+
       packages: [{ file: tarballFileName(0), name: 'vite-plus', dir: 'packages/cli' }],
     })
     // The reader returns tarball paths only; nothing from the manifest selects
@@ -109,7 +109,7 @@ describe('readArtifactTarballs', () => {
 describe('prepareOutputDir', () => {
   it('removes stale tarballs from a previous, larger run', () => {
     for (const i of [0, 1, 2, 3, 4]) packed(i)
-    writeManifest(dir, { ref: 'commit.old', version: 'old', files: [], packages: [] })
+    writeManifest(dir, { ref: 'commit.old', version: 'old', packages: [] })
 
     prepareOutputDir(dir)
 

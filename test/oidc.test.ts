@@ -207,10 +207,16 @@ describe('OIDC publishing: accepted', () => {
     expect(res.status).toBe(201)
   })
 
-  it('caches the JWKS across requests', async () => {
+  it('does not refetch the JWKS per request', async () => {
+    // A publish run is ~23 authenticated requests sharing one key. Warm the
+    // isolate first, then assert the steady state is ZERO outbound fetches:
+    // the JWKS and the imported key are memoized per isolate, so clearing the
+    // KV copy in beforeEach no longer forces a refetch.
+    await post('/-/publish', publishBody(), await mint())
+    jwksFetches = 0
     await post('/-/publish', publishBody(), await mint())
     await post('/-/publish', publishBody(), await mint())
-    expect(jwksFetches).toBe(1)
+    expect(jwksFetches).toBe(0)
   })
 })
 

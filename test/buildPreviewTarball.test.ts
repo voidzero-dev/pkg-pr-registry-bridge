@@ -198,10 +198,17 @@ describe('buildPreviewTarball: reproducibility', () => {
 
   it('produces identical bytes for identical content', async () => {
     const a = await buildPreviewTarball(await source(1e12), 'vite-plus', version, batch)
-    await new Promise((r) => setTimeout(r, 1100)) // cross a wall-clock second
     const b = await buildPreviewTarball(await source(1e12), 'vite-plus', version, batch)
     expect(b.shasum).toBe(a.shasum)
     expect(b.integrity).toBe(a.integrity)
+  })
+
+  it('leaves no wall-clock timestamp in the gzip header', async () => {
+    // The gzip header carries its own MTIME field. Asserting it is zeroed
+    // covers second-granularity nondeterminism directly, instead of sleeping
+    // through a wall-clock second on every test run to try to observe it.
+    const built = await buildPreviewTarball(await source(1e12), 'vite-plus', version, batch)
+    expect([...built.tarball.slice(4, 8)]).toEqual([0, 0, 0, 0])
   })
 
   it('erases a source mtime, so hostile timestamps cannot vary the output', async () => {

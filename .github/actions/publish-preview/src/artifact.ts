@@ -30,9 +30,7 @@ export interface PackManifest {
   ref: string
   /** `0.0.0-commit.<sha>`. Re-derived by the trusted leg. */
   version: string
-  /** Generated tarball file names, in pack order. */
-  files: string[]
-  /** Package name per file, for human inspection of a failed run. */
+  /** One entry per packed tarball, for human inspection of a failed run. */
   packages: Array<{ file: string; name: string; dir: string }>
 }
 

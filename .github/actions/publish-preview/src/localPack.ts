@@ -75,9 +75,16 @@ export function readManifest(dir: string): Record<string, any> {
   return JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
 }
 
-/** A package directory queued for publishing, with its on-disk manifest. */
+/**
+ * A package queued for publishing, with its manifest.
+ *
+ * `label` identifies it in error messages only. It is a directory on the
+ * `publish` path and a tarball path on the `upload` path, which is the ONLY
+ * difference between the two: the batch invariants below are identical, so
+ * both modes call this one assertion rather than keeping a copy each.
+ */
 export interface PackageDir {
-  dir: string
+  label: string
   manifest: Record<string, any>
 }
 
@@ -98,10 +105,10 @@ export function assertValidBatch(
     throw new Error('packages matched no package directories')
   }
   const batch = new Set<string>()
-  for (const { dir, manifest } of packages) {
+  for (const { label, manifest } of packages) {
     const name = manifest.name as string | undefined
     if (!name || !isWorkspacePackage(name, env)) {
-      throw new Error(`not an allowed workspace package: ${name} (${dir})`)
+      throw new Error(`not an allowed workspace package: ${name} (${label})`)
     }
     if (batch.has(name)) throw new Error(`duplicate package in batch: ${name}`)
     batch.add(name)

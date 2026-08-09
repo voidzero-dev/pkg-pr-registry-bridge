@@ -55,7 +55,7 @@ export function oidcMinter(audience: string): TokenMinter {
 }
 
 /** Request one OIDC token for `audience` from the runner. */
-export async function mintOidcToken(audience: string): Promise<string> {
+async function mintOidcToken(audience: string): Promise<string> {
   const url = process.env.ACTIONS_ID_TOKEN_REQUEST_URL
   const runtimeToken = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN
   if (!url || !runtimeToken) {

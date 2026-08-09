@@ -371,20 +371,26 @@ async function computeDigests(data) {
 }
 
 // src/security/validateTarballPath.ts
-function assertSafeTarballPath(name) {
-  const normalized = name.replace(/\\/g, "/");
-  if (normalized.startsWith("/")) {
+function normalizeEntryName(name) {
+  return name.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/{2,}/g, "/").replace(/\/$/, "");
+}
+function assertSafeTarballPath(rawName) {
+  const name = normalizeEntryName(rawName);
+  if (name.startsWith("/")) {
     throw new HttpError(422, `Unsafe absolute path in tarball: ${name}`);
   }
-  for (const segment of normalized.split("/")) {
+  for (const segment of name.split("/")) {
     if (segment === "..") {
       throw new HttpError(422, `Unsafe path traversal in tarball: ${name}`);
     }
   }
 }
-function isUnderPackageRoot(name) {
-  const normalized = name.replace(/^\.\//, "").replace(/\\/g, "/");
-  return normalized === "package" || normalized.startsWith("package/");
+function isUnderPackageRoot(rawName) {
+  const name = normalizeEntryName(rawName);
+  return name === "package" || name.startsWith("package/");
+}
+function isPackageManifest(rawName) {
+  return normalizeEntryName(rawName) === "package/package.json";
 }
 
 // src/tarball/buildPreviewTarball.ts
@@ -402,10 +408,6 @@ async function gzip(data) {
   );
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
-var PACKAGE_JSON_NAMES = /* @__PURE__ */ new Set([
-  "package/package.json",
-  "./package/package.json"
-]);
 var CANONICAL_MTIME_MS = 4991625e5;
 function canonicalAttrs(file) {
   const parsed = Number.parseInt(file.attrs?.mode ?? "", 8);
@@ -426,7 +428,9 @@ function encodePackageJson(pkg) {
 }
 async function parsePackageJson(gzippedTarball) {
   const files = await parseTarGzip(gzippedTarball);
-  const pkgEntry = files.find((f) => PACKAGE_JSON_NAMES.has(f.name) && f.data);
+  const pkgEntry = files.find(
+    (f) => isPackageManifest(normalizeEntryName(f.name)) && f.data
+  );
   if (!pkgEntry || !pkgEntry.data) {
     throw new HttpError(422, "Upstream tarball is missing package/package.json");
   }
@@ -442,8 +446,9 @@ async function buildPreviewTarball(gzippedTarball, packageName, version, batch) 
   const rewrittenBytes = encodePackageJson(rewritten);
   const out = [];
   for (const file of files) {
-    assertSafeTarballPath(file.name);
-    if (!isUnderPackageRoot(file.name)) continue;
+    const normalized = normalizeEntryName(file.name);
+    assertSafeTarballPath(normalized);
+    if (!isUnderPackageRoot(normalized)) continue;
     out.push({
       name: file.name,
       data: file === pkgEntry ? rewrittenBytes : file.data,
@@ -490,10 +495,11 @@ function assertBoundedTarRecords(tar, policy = DEFAULT_ARCHIVE_POLICY) {
       reject("Tarball has an unreadable record size");
     }
     const typeFlag = String.fromCharCode(tar[offset + 156] || 48);
-    const limit = EXTENSION_TYPE_FLAGS.has(typeFlag) ? MAX_EXTENSION_RECORD_BYTES : policy.maxFileBytes;
+    const isMetadata = EXTENSION_TYPE_FLAGS.has(typeFlag);
+    const limit = isMetadata ? MAX_EXTENSION_RECORD_BYTES : policy.maxFileBytes;
     if (size > limit) {
       reject(
-        EXTENSION_TYPE_FLAGS.has(typeFlag) ? `Tarball metadata record is ${size} bytes, over the ${limit} byte limit` : `Tarball record is ${size} bytes, over the per-file limit`
+        `Tarball ${isMetadata ? "metadata " : ""}record is ${size} bytes, over the ${limit} byte limit`
       );
     }
     const next = offset + TAR_BLOCK + Math.ceil(size / TAR_BLOCK) * TAR_BLOCK;
@@ -503,9 +509,6 @@ function assertBoundedTarRecords(tar, policy = DEFAULT_ARCHIVE_POLICY) {
 }
 function reject(message) {
   throw new HttpError(422, message);
-}
-function normalizeEntryName(name) {
-  return name.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/{2,}/g, "/").replace(/\/$/, "");
 }
 async function gunzipBounded(gzipped, maxTotalBytes) {
   const stream = new Response(gzipped).body;
@@ -545,8 +548,8 @@ function assertCanonicalEntries(files, policy = DEFAULT_ARCHIVE_POLICY) {
   const seen = /* @__PURE__ */ new Set();
   let manifests = 0;
   for (const file of files) {
-    assertSafeTarballPath(file.name);
     const normalized = normalizeEntryName(file.name);
+    assertSafeTarballPath(normalized);
     if (/^[a-zA-Z]:/.test(normalized)) {
       reject(`Unsafe drive-letter path in tarball: ${file.name}`);
     }
@@ -560,10 +563,8 @@ function assertCanonicalEntries(files, policy = DEFAULT_ARCHIVE_POLICY) {
       reject(`Duplicate entry in tarball: ${normalized}`);
     }
     seen.add(normalized);
-    if (PACKAGE_JSON_NAMES.has(file.name) || normalized === "package/package.json") {
-      manifests++;
-    }
-    if (!isUnderPackageRoot(file.name)) {
+    if (isPackageManifest(normalized)) manifests++;
+    if (!isUnderPackageRoot(normalized)) {
       reject(`Entry outside the package/ root: ${file.name}`);
     }
     if ((file.size ?? 0) > policy.maxFileBytes) {
@@ -617,6 +618,19 @@ function parseConfiguredPreviewRefs(input2) {
   });
 }
 
+// .github/actions/publish-preview/src/localPack.ts
+import { execFile } from "node:child_process";
+import {
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { promisify } from "node:util";
+
 // src/preview/packages.ts
 var PREVIEW_PACKAGES = /* @__PURE__ */ new Set([
   "@voidzero-dev/vite-plus-core",
@@ -636,17 +650,6 @@ function isWorkspacePackage(name, env) {
 }
 
 // .github/actions/publish-preview/src/localPack.ts
-import { execFile } from "node:child_process";
-import {
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  statSync
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { promisify } from "node:util";
 var execFileAsync = promisify(execFile);
 function parsePackagesInput(raw) {
   return raw.split(/[\n,]/).map((s) => s.trim()).filter(Boolean);
@@ -691,10 +694,10 @@ function assertValidBatch(packages, env) {
     throw new Error("packages matched no package directories");
   }
   const batch = /* @__PURE__ */ new Set();
-  for (const { dir, manifest } of packages) {
+  for (const { label, manifest } of packages) {
     const name = manifest.name;
     if (!name || !isWorkspacePackage(name, env)) {
-      throw new Error(`not an allowed workspace package: ${name} (${dir})`);
+      throw new Error(`not an allowed workspace package: ${name} (${label})`);
     }
     if (batch.has(name)) throw new Error(`duplicate package in batch: ${name}`);
     batch.add(name);
@@ -862,40 +865,39 @@ async function withRetry(label, fn, attempts = 4) {
 }
 var TRANSFER_TIMEOUT_MS = 12e4;
 var PUBLISH_TIMEOUT_MS = 3e4;
-async function uploadTarball(bridge, auth, name, version, bytes, shasum) {
-  await withRetry(`upload ${name}`, async () => {
-    const res = await fetch(`${bridge}/-/tarball/${name}/${version}/${shasum}.tgz`, {
-      method: "PUT",
+function send(bridge, auth, path, label, init) {
+  return withRetry(label, async () => {
+    const res = await fetch(`${bridge}${path}`, {
+      method: init.method,
       headers: {
         authorization: await auth.header(),
-        "content-type": "application/gzip"
+        "content-type": init.contentType
       },
-      body: bytes,
-      signal: AbortSignal.timeout(TRANSFER_TIMEOUT_MS)
+      body: init.body,
+      signal: AbortSignal.timeout(init.timeoutMs)
     });
     if (res.status === 401) auth.invalidate();
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => "")}`);
+  });
+}
+function uploadTarball(bridge, auth, name, version, bytes, shasum) {
+  return send(bridge, auth, `/-/tarball/${name}/${version}/${shasum}.tgz`, `upload ${name}`, {
+    method: "PUT",
+    body: bytes,
+    contentType: "application/gzip",
+    timeoutMs: TRANSFER_TIMEOUT_MS
   });
 }
 function post(bridge, auth, path, body, label) {
-  return withRetry(label, async () => {
-    const res = await fetch(`${bridge}${path}`, {
-      method: "POST",
-      headers: {
-        authorization: await auth.header(),
-        "content-type": "application/json"
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(PUBLISH_TIMEOUT_MS)
-    });
-    if (res.status === 401) auth.invalidate();
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => "")}`);
+  return send(bridge, auth, path, label, {
+    method: "POST",
+    body: JSON.stringify(body),
+    contentType: "application/json",
+    timeoutMs: PUBLISH_TIMEOUT_MS
   });
 }
 function manifestFromEntries(files, label) {
-  const entry = files.find(
-    (f) => normalizeEntryName(f.name) === "package/package.json" && f.data
-  );
+  const entry = files.find((f) => isPackageManifest(f.name) && f.data);
   if (!entry?.data) throw new Error(`${label}: tarball has no package/package.json`);
   try {
     return JSON.parse(new TextDecoder().decode(entry.data));
@@ -903,39 +905,18 @@ function manifestFromEntries(files, label) {
     throw new Error(`${label}: invalid package/package.json (${err})`);
   }
 }
-async function batchFromArchives(sources, env) {
-  const batch = /* @__PURE__ */ new Set();
-  const names = [];
-  const manifests = [];
+async function resolveArchiveBatch(sources, env) {
+  const packages = [];
   for (const source of sources) {
     const files = await validateArchive(await source.read());
     const manifest = manifestFromEntries(files, source.label);
-    const name = manifest.name;
-    if (!name || !isWorkspacePackage(name, env)) {
-      throw new Error(`${source.label}: not an allowed workspace package: ${name}`);
-    }
-    if (batch.has(name)) {
-      throw new Error(`${source.label}: duplicate package in batch: ${name}`);
-    }
-    batch.add(name);
-    names.push(name);
-    manifests.push(manifest);
+    source.name = manifest.name;
+    packages.push({ label: source.label, manifest });
   }
-  for (const manifest of manifests) {
-    for (const field of DEPENDENCY_FIELDS) {
-      for (const dep of Object.keys(manifest[field] ?? {})) {
-        if (isWorkspacePackage(dep, env) && !batch.has(dep)) {
-          throw new Error(
-            `${manifest.name} ${field} needs ${dep}, which is not in this publish batch`
-          );
-        }
-      }
-    }
-  }
-  return { batch, names };
+  return assertValidBatch(packages, env);
 }
 async function publishAll(opts) {
-  const { sources, names, batch, bridge, auth, ref, version, prUrl, cwd } = opts;
+  const { sources, batch, bridge, auth, ref, version, prUrl } = opts;
   console.log(`publishing ${version} (${sources.length} packages) to ${bridge}`);
   const startRead = (i) => {
     const pending = sources[i].read();
@@ -943,11 +924,11 @@ async function publishAll(opts) {
     });
     return pending;
   };
-  let nextBytes = startRead(0);
+  let nextBytes = null;
   for (const [i, source] of sources.entries()) {
-    const name = names[i];
-    const bytes = await nextBytes;
-    if (i + 1 < sources.length) nextBytes = startRead(i + 1);
+    const { name } = source;
+    const bytes = await (nextBytes ?? startRead(i));
+    nextBytes = source.prefetch && i + 1 < sources.length ? startRead(i + 1) : null;
     const build = await buildPreviewTarball(bytes, name, version, batch);
     await uploadTarball(bridge, auth, name, version, build.tarball, build.shasum);
     await post(
@@ -969,7 +950,7 @@ async function publishAll(opts) {
       `publish ${name}`
     );
     console.log(
-      `  \u2713 ${name}@${version} (${build.tarball.byteLength} bytes, from ${relative(cwd, source.label)})
+      `  \u2713 ${name}@${version} (${build.tarball.byteLength} bytes, from ${source.label})
       ${bridge}/tarballs/${name}/${version}/${build.shasum}.tgz  (${build.integrity})`
     );
   }
@@ -1001,19 +982,17 @@ async function main() {
   if (mode === "pack") {
     const outputDir = input("output-dir") || "bridge-packages";
     const dirs2 = expandPackageDirs(parsePackagesInput(input("packages") || DEFAULT_PACKAGES), cwd);
-    const packages2 = dirs2.map((dir) => ({ dir, manifest: readManifest(dir) }));
+    const packages2 = dirs2.map((dir) => ({ label: dir, manifest: readManifest(dir) }));
     assertValidBatch(packages2, env);
     prepareOutputDir(outputDir);
-    const files = [];
     const listed = [];
-    for (const [i, { dir, manifest }] of packages2.entries()) {
+    for (const [i, { label, manifest }] of packages2.entries()) {
       const file = tarballFileName(i);
-      writeFileSync2(join3(outputDir, file), await packDirectory(dir));
-      files.push(file);
-      listed.push({ file, name: manifest.name, dir: relative(cwd, dir) });
+      writeFileSync2(join3(outputDir, file), await packDirectory(label));
+      listed.push({ file, name: manifest.name, dir: relative(cwd, label) });
       console.log(`  packed ${manifest.name} -> ${file}`);
     }
-    writeManifest(outputDir, { ref, version, files, packages: listed });
+    writeManifest(outputDir, { ref, version, packages: listed });
     console.log(`packed ${packages2.length} packages into ${outputDir}`);
     writeOutput("version", version);
     return;
@@ -1025,32 +1004,25 @@ async function main() {
     const inputDir = input("input-dir") || "bridge-packages";
     const paths = readArtifactTarballs(inputDir);
     const sources2 = paths.map((path) => ({
-      label: path,
+      name: "",
+      label: relative(cwd, path),
       read: async () => readTarball(path)
     }));
-    const { batch: batch2, names } = await batchFromArchives(sources2, env);
-    await publishAll({ sources: sources2, names, batch: batch2, bridge, auth, ref, version, prUrl, cwd });
+    const batch2 = await resolveArchiveBatch(sources2, env);
+    await publishAll({ sources: sources2, batch: batch2, bridge, auth, ref, version, prUrl });
     writeOutput("version", version);
     return;
   }
   const dirs = expandPackageDirs(parsePackagesInput(input("packages") || DEFAULT_PACKAGES), cwd);
-  const packages = dirs.map((dir) => ({ dir, manifest: readManifest(dir) }));
+  const packages = dirs.map((dir) => ({ label: dir, manifest: readManifest(dir) }));
   const batch = assertValidBatch(packages, env);
-  const sources = packages.map(({ dir }) => ({
-    label: dir,
-    read: () => packDirectory(dir)
+  const sources = packages.map(({ label, manifest }) => ({
+    name: manifest.name,
+    label: relative(cwd, label),
+    read: () => packDirectory(label),
+    prefetch: true
   }));
-  await publishAll({
-    sources,
-    names: packages.map((p) => p.manifest.name),
-    batch,
-    bridge,
-    auth,
-    ref,
-    version,
-    prUrl,
-    cwd
-  });
+  await publishAll({ sources, batch, bridge, auth, ref, version, prUrl });
   writeOutput("version", version);
 }
 function writeOutput(key, value) {

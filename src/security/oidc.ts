@@ -48,18 +48,18 @@ const JWKS_TTL_S = 6 * 60 * 60
 const JWKS_REFETCH_COOLDOWN_KEY = 'oidc:jwks:cooldown'
 const JWKS_REFETCH_COOLDOWN_S = 60
 
-/** The subset of GitHub's OIDC claims this bridge reads. */
+/**
+ * What a verified token tells the caller.
+ *
+ * Only the claims that carry information survive verification. `iss`, `aud`,
+ * `repository_id` and `repository_owner_id` are checked against fixed values,
+ * so echoing them back would hand callers a constant dressed as data.
+ */
 export interface OidcClaims {
-  iss: string
-  aud: string
-  exp: number
   /** `<owner>/<repo>` at mint time. Mutable; used only for prUrl scoping. */
   repository: string
-  repository_id: string
-  repository_owner_id: string
-  /** e.g. `owner/repo/.github/workflows/x.yml@refs/heads/main`. */
+  /** The allowlisted workflow that minted this, for logs and error messages. */
   workflow_ref: string
-  sub?: string
 }
 
 /** Resolved OIDC config, or null when the OIDC path is switched off. */
@@ -71,6 +71,20 @@ interface OidcConfig {
 }
 
 type Jwk = { kid?: string; kty?: string; n?: string; e?: string }
+
+/**
+ * Per-isolate memo for the JWKS and the imported keys.
+ *
+ * A publish run is ~23 authenticated requests (one per tarball upload, one per
+ * /-/publish, one /-/register), all verified with the same unchanging key. KV
+ * is already a cache, but reading and re-parsing it per request, then calling
+ * `importKey` again on the same modulus, is work the isolate can skip entirely.
+ * Workers reuse an isolate across requests, so this collapses to roughly one KV
+ * read per isolate. Both values are a few KB and capture nothing large.
+ */
+let jwksMemo: { keys: Jwk[]; at: number } | null = null
+const keyMemo = new Map<string, CryptoKey>()
+const JWKS_MEMO_TTL_MS = 5 * 60 * 1000
 
 /**
  * Resolve the OIDC config, or null when it is entirely unset (admin-token-only
@@ -198,10 +212,15 @@ async function fetchJwks(): Promise<Jwk[]> {
  */
 async function findKey(env: Env, kid: string): Promise<Jwk> {
   let keys: Jwk[] | null = null
-  try {
-    keys = await env.KV.get<Jwk[]>(JWKS_KV_KEY, 'json')
-  } catch (err) {
-    console.warn('JWKS cache read failed:', err)
+  if (jwksMemo && Date.now() - jwksMemo.at < JWKS_MEMO_TTL_MS) {
+    keys = jwksMemo.keys
+  } else {
+    try {
+      keys = await env.KV.get<Jwk[]>(JWKS_KV_KEY, 'json')
+      if (keys) jwksMemo = { keys, at: Date.now() }
+    } catch (err) {
+      console.warn('JWKS cache read failed:', err)
+    }
   }
 
   const hit = keys?.find((k) => k.kid === kid)
@@ -221,13 +240,16 @@ async function findKey(env: Env, kid: string): Promise<Jwk> {
   })
   if (!fresh) throw new HttpError(503, 'Cannot reach the OIDC signing keys')
 
+  jwksMemo = { keys: fresh, at: Date.now() }
+  keyMemo.clear()
   try {
-    await env.KV.put(JWKS_KV_KEY, JSON.stringify(fresh), {
-      expirationTtl: JWKS_TTL_S,
-    })
-    await env.KV.put(JWKS_REFETCH_COOLDOWN_KEY, '1', {
-      expirationTtl: JWKS_REFETCH_COOLDOWN_S,
-    })
+    // Independent writes; no reason to serialize them.
+    await Promise.all([
+      env.KV.put(JWKS_KV_KEY, JSON.stringify(fresh), { expirationTtl: JWKS_TTL_S }),
+      env.KV.put(JWKS_REFETCH_COOLDOWN_KEY, '1', {
+        expirationTtl: JWKS_REFETCH_COOLDOWN_S,
+      }),
+    ])
   } catch (err) {
     console.warn('JWKS cache write failed:', err)
   }
@@ -246,14 +268,19 @@ async function verifySignature(
     throw new HttpError(401, 'Unusable token signing key')
   }
   // RS256 is hardcoded on both the import and the verify. The token header is
-  // never consulted for either.
-  const key = await crypto.subtle.importKey(
-    'jwk',
-    { kty: 'RSA', n: jwk.n, e: jwk.e, alg: 'RS256', ext: true },
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-    false,
-    ['verify'],
-  )
+  // never consulted for either. Keyed by the modulus rather than `kid`, so a
+  // rotated key reusing a `kid` cannot hit a stale entry.
+  let key = keyMemo.get(jwk.n)
+  if (!key) {
+    key = await crypto.subtle.importKey(
+      'jwk',
+      { kty: 'RSA', n: jwk.n, e: jwk.e, alg: 'RS256', ext: true },
+      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+      false,
+      ['verify'],
+    )
+    keyMemo.set(jwk.n, key)
+  }
   return crypto.subtle.verify(
     'RSASSA-PKCS1-v1_5',
     key,
@@ -339,14 +366,5 @@ export async function verifyOidcToken(
     throw new HttpError(403, 'Token is not from a trusted workflow')
   }
 
-  return {
-    iss: GITHUB_OIDC_ISSUER,
-    aud: config.audience,
-    exp: numberClaim(claims, 'exp'),
-    repository: stringClaim(claims, 'repository'),
-    repository_id: config.repositoryId,
-    repository_owner_id: config.ownerId,
-    workflow_ref: workflowRef,
-    sub: typeof claims.sub === 'string' ? claims.sub : undefined,
-  }
+  return { repository: stringClaim(claims, 'repository'), workflow_ref: workflowRef }
 }

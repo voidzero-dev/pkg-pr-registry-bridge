@@ -115,7 +115,7 @@ describe('expandPackageDirs', () => {
 
 describe('assertValidBatch', () => {
   const pkg = (name: string, deps?: Record<string, string>) => ({
-    dir: `/fixture/${name}`,
+    label: `/fixture/${name}`,
     manifest: { name, version: '0.2.2', ...(deps ? { dependencies: deps } : {}) },
   })
 

@@ -27,10 +27,6 @@ function goodEntries(): TarFileInput[] {
   ]
 }
 
-async function gz(entries: TarFileInput[]): Promise<Uint8Array> {
-  return createTarGzip(entries)
-}
-
 /** Gzip arbitrary bytes, for the bomb case. */
 async function gzipBytes(data: Uint8Array): Promise<Uint8Array> {
   const stream = new Response(data).body!.pipeThrough(new CompressionStream('gzip'))
@@ -96,14 +92,14 @@ async function gzWithRawName(
 
 describe('validateArchive: accepts real package tarballs', () => {
   it('accepts a normal npm layout', async () => {
-    const files = await validateArchive(await gz(goodEntries()))
+    const files = await validateArchive(await createTarGzip(goodEntries()))
     expect(files.some((f) => f.name === 'package/package.json')).toBe(true)
   })
 
   it('accepts a ./-prefixed layout', async () => {
     await expect(
       validateArchive(
-        await gz([
+        await createTarGzip([
           { name: './package/package.json', data: manifest() },
           { name: './package/index.js', data: 'x\n' },
         ]),
@@ -114,7 +110,7 @@ describe('validateArchive: accepts real package tarballs', () => {
   it('accepts directory entries', async () => {
     await expect(
       validateArchive(
-        await gz([
+        await createTarGzip([
           { name: 'package', data: '', attrs: { mode: '755' } },
           ...goodEntries(),
         ]),
@@ -127,7 +123,7 @@ describe('validateArchive: parser differentials', () => {
   it('rejects two package/package.json entries', async () => {
     // A validator using find() would read the FIRST and approve `vite-plus`,
     // while an extractor taking the last writes the second manifest to disk.
-    const archive = await gz([
+    const archive = await createTarGzip([
       { name: 'package/package.json', data: manifest() },
       { name: 'package/index.js', data: 'x\n' },
       { name: 'package/package.json', data: manifest({ name: 'evil', version: '9.9.9' }) },
@@ -138,7 +134,7 @@ describe('validateArchive: parser differentials', () => {
   })
 
   it('rejects a duplicate manifest disguised by a ./ prefix', async () => {
-    const archive = await gz([
+    const archive = await createTarGzip([
       { name: 'package/package.json', data: manifest() },
       { name: './package/package.json', data: manifest({ name: 'evil' }) },
     ])
@@ -148,7 +144,7 @@ describe('validateArchive: parser differentials', () => {
   })
 
   it('rejects a duplicate manifest disguised by a doubled slash', async () => {
-    const archive = await gz([
+    const archive = await createTarGzip([
       { name: 'package/package.json', data: manifest() },
       { name: 'package//package.json', data: manifest({ name: 'evil' }) },
     ])
@@ -156,7 +152,7 @@ describe('validateArchive: parser differentials', () => {
   })
 
   it('rejects duplicate ordinary paths', async () => {
-    const archive = await gz([
+    const archive = await createTarGzip([
       ...goodEntries(),
       { name: 'package/index.js', data: 'export const x = 2\n' },
     ])
@@ -227,17 +223,17 @@ describe('validateArchive: unsafe paths and entry types', () => {
   })
 
   it('rejects entries outside the package root', async () => {
-    const archive = await gz([...goodEntries(), { name: 'other/thing.js', data: 'x' }])
+    const archive = await createTarGzip([...goodEntries(), { name: 'other/thing.js', data: 'x' }])
     await expect(validateArchive(archive)).rejects.toThrow(/outside the package\/ root/)
   })
 
   it('rejects a missing manifest', async () => {
-    const archive = await gz([{ name: 'package/index.js', data: 'x' }])
+    const archive = await createTarGzip([{ name: 'package/index.js', data: 'x' }])
     await expect(validateArchive(archive)).rejects.toThrow(/missing package\/package\.json/)
   })
 
   it('rejects an empty archive', async () => {
-    await expect(validateArchive(await gz([]))).rejects.toThrow(/no entries/)
+    await expect(validateArchive(await createTarGzip([]))).rejects.toThrow(/no entries/)
   })
 
   // nanotar writes the type byte from the header; build the entry list directly
@@ -288,7 +284,7 @@ describe('validateArchive: size and count bounds', () => {
     // The raw record scan runs first and owns this rejection for a real
     // archive, because it also counts the metadata records parseTar hides.
     await expect(
-      validateArchive(await gz(entries), { ...DEFAULT_ARCHIVE_POLICY, maxEntries: 10 }),
+      validateArchive(await createTarGzip(entries), { ...DEFAULT_ARCHIVE_POLICY, maxEntries: 10 }),
     ).rejects.toThrow(/over 10 records/)
   })
 
@@ -307,13 +303,13 @@ describe('validateArchive: size and count bounds', () => {
   })
 
   it('rejects an oversized single file', async () => {
-    const archive = await gz([
+    const archive = await createTarGzip([
       { name: 'package/package.json', data: manifest() },
       { name: 'package/big.bin', data: 'x'.repeat(5000) },
     ])
     await expect(
       validateArchive(archive, { ...DEFAULT_ARCHIVE_POLICY, maxFileBytes: 1000 }),
-    ).rejects.toThrow(/over the per-file limit/)
+    ).rejects.toThrow(/record is \d+ bytes, over the 1000 byte limit/)
   })
 
   it('refuses a gzip bomb while inflating, not after', async () => {

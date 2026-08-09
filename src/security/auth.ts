@@ -62,12 +62,10 @@ export async function requirePublisher({
   // the repository id fails loudly instead of rejecting every token as 401.
   const oidc = getOidcConfig(env)
 
-  if (!provided) {
-    if (!env.ADMIN_TOKEN && !oidc) {
-      throw new HttpError(503, 'Publishing is not configured')
-    }
-    throw new HttpError(401, 'Unauthorized')
+  if (!env.ADMIN_TOKEN && !oidc) {
+    throw new HttpError(503, 'Publishing is not configured')
   }
+  if (!provided) throw new HttpError(401, 'Unauthorized')
 
   // Try the operator token FIRST, in constant time. Shape must not decide which
   // credential a value is: an ADMIN_TOKEN that happens to contain three
@@ -77,14 +75,8 @@ export async function requirePublisher({
   if (env.ADMIN_TOKEN && timingSafeEqual(provided, env.ADMIN_TOKEN)) {
     return { kind: 'admin' }
   }
-
-  if (looksLikeJwt(provided)) {
-    if (!oidc) throw new HttpError(401, 'OIDC publishing is not configured')
+  if (oidc && looksLikeJwt(provided)) {
     return { kind: 'oidc', claims: await verifyOidcToken(env, provided, oidc) }
-  }
-
-  if (!env.ADMIN_TOKEN) {
-    throw new HttpError(503, 'Admin endpoints are not configured')
   }
   throw new HttpError(401, 'Unauthorized')
 }
