@@ -33,6 +33,7 @@ import { appendFileSync, writeFileSync } from 'node:fs'
 import { buildPreviewTarball } from '../../../../src/tarball/buildPreviewTarball'
 import { validateArchive } from '../../../../src/tarball/validateArchive'
 import { isPackageManifest } from '../../../../src/security/validateTarballPath'
+import { DEPENDENCY_FIELDS } from '../../../../src/tarball/rewritePackageJson'
 import { parseConfiguredPreviewRefs } from '../../../../src/preview/parseConfiguredPreviewRefs'
 import {
   assertValidBatch,
@@ -171,7 +172,23 @@ function post(
   })
 }
 
-/** Read `package/package.json` out of an already-validated entry list. */
+/**
+ * Cap on a package.json. The archive policy's per-file limit is sized for
+ * binaries, so without a manifest-specific bound a hostile artifact could ship
+ * several highly compressible 256MB manifests and have every one parsed and
+ * retained across the batch scan.
+ */
+const MAX_MANIFEST_BYTES = 4 * 1024 * 1024
+
+/**
+ * Read `package/package.json` out of an already-validated entry list, keeping
+ * only the fields the batch check needs.
+ *
+ * Projecting rather than retaining the parsed object matters because the scan
+ * holds one of these per package until the whole batch is validated, and
+ * nothing downstream reads the rest: `buildPreviewTarball` re-reads the
+ * manifest from the archive itself.
+ */
 function manifestFromEntries(
   files: Awaited<ReturnType<typeof validateArchive>>,
   label: string,
@@ -180,11 +197,24 @@ function manifestFromEntries(
   // disagree with what an extractor would pick.
   const entry = files.find((f) => isPackageManifest(f.name) && f.data)
   if (!entry?.data) throw new Error(`${label}: tarball has no package/package.json`)
+  if (entry.data.byteLength > MAX_MANIFEST_BYTES) {
+    throw new Error(
+      `${label}: package.json is ${entry.data.byteLength} bytes, over the ${MAX_MANIFEST_BYTES} byte limit`,
+    )
+  }
+  let parsed: Record<string, any>
   try {
-    return JSON.parse(new TextDecoder().decode(entry.data))
+    parsed = JSON.parse(new TextDecoder().decode(entry.data))
   } catch (err) {
     throw new Error(`${label}: invalid package/package.json (${err})`)
   }
+  const projected: Record<string, any> = { name: parsed.name }
+  for (const field of DEPENDENCY_FIELDS) {
+    if (parsed[field]) projected[field] = Object.fromEntries(
+      Object.keys(parsed[field]).map((dep) => [dep, true]),
+    )
+  }
+  return projected
 }
 
 /**

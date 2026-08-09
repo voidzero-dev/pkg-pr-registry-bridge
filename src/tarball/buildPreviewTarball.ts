@@ -108,6 +108,21 @@ function canonicalAttrs(file: ParsedTarFileItem): TarFileInput['attrs'] {
 
 const textEncoder = new TextEncoder()
 
+/**
+ * The ustar name field. nanotar's writer encodes the name into exactly these
+ * 100 bytes and emits neither a ustar `prefix` nor a PAX/GNU long-name record,
+ * so a longer path is silently truncated: `package/<100 a's>/index.js` comes
+ * back as a 96-byte name, and a sibling sharing that prefix comes back as the
+ * SAME name. Refusing is the only honest option while the writer cannot
+ * represent them; a truncated path means a broken published package, and a
+ * collision means two files became one.
+ *
+ * Enforced here rather than only in the archive policy so it covers `publish`
+ * mode too, where the input is trusted `pnpm pack` output that never went
+ * through validation.
+ */
+const MAX_ENTRY_NAME_BYTES = 100
+
 /** Serialize a rewritten package.json to the bytes written into the tarball. */
 export function encodePackageJson(pkg: Record<string, any>): Uint8Array {
   return textEncoder.encode(`${JSON.stringify(pkg, null, 2)}\n`)
@@ -186,6 +201,12 @@ export async function buildPreviewTarball(
     const normalized = normalizeEntryName(file.name)
     assertSafeTarballPath(normalized)
     if (!isUnderPackageRoot(normalized)) continue
+    if (textEncoder.encode(file.name).length > MAX_ENTRY_NAME_BYTES) {
+      throw new HttpError(
+        422,
+        `Entry name exceeds the ${MAX_ENTRY_NAME_BYTES}-byte tar name field: ${file.name}`,
+      )
+    }
     out.push({
       name: file.name,
       data: file === pkgEntry ? rewrittenBytes : file.data,

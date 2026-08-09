@@ -11,12 +11,14 @@ import {
   readdirSync,
   rmSync,
   symlinkSync,
+  truncateSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   MANIFEST_NAME,
+  MAX_COMPRESSED_BYTES,
   prepareOutputDir,
   readArtifactTarballs,
   tarballFileName,
@@ -136,5 +138,23 @@ describe('prepareOutputDir', () => {
     prepareOutputDir(dir)
     packed(0, 'new')
     expect(readArtifactTarballs(dir).map((p) => p.split('/').pop())).toEqual(['pkg-0.tgz'])
+  })
+})
+
+describe('readArtifactTarballs: hostile-artifact bounds', () => {
+  it('refuses more packages than a real batch could have', () => {
+    for (let i = 0; i < 130; i++) packed(i)
+    expect(() => readArtifactTarballs(dir)).toThrow(/over the 128 limit/)
+  })
+
+  it('refuses an oversized compressed tarball before reading it', () => {
+    // The inflate bound cannot help here: readFileSync would already have
+    // materialized the whole compressed file. Checked from the directory entry.
+    packed(0)
+    writeFileSync(join(dir, tarballFileName(1)), Buffer.alloc(1024))
+    const huge = join(dir, tarballFileName(2))
+    writeFileSync(huge, Buffer.alloc(0))
+    truncateSync(huge, MAX_COMPRESSED_BYTES + 1)
+    expect(() => readArtifactTarballs(dir)).toThrow(/bytes compressed, over the/)
   })
 })

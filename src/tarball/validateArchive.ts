@@ -78,19 +78,43 @@ const EXTENSION_TYPE_FLAGS = new Set(['x', 'g', 'L', 'K', 'N'])
  */
 const MAX_EXTENSION_RECORD_BYTES = 64 * 1024
 
-/** Read a tar octal numeric field, rejecting the GNU base-256 form. */
+/**
+ * The ustar name field. Longer paths need a PAX or GNU long-name record, which
+ * nanotar can READ but not WRITE, so they cannot survive the canonical rebuild.
+ */
+export const MAX_ENTRY_NAME_BYTES = 100
+
+/**
+ * Read a tar octal numeric field the SAME way nanotar's `_readNumber` does.
+ *
+ * This must not merely be correct, it must agree with the parser, or the two
+ * disagree about where a record ends and the scan below stops bounding things
+ * the parser still processes. An earlier version stopped at the first space,
+ * which made ` 2000000000\0` read as 0 here (padding-terminated) and as 256MiB
+ * in nanotar (`parseInt` skips leading whitespace). The scanner then advanced
+ * one block into an attacker-controlled payload, hit a zero byte, and treated
+ * it as end-of-archive, leaving the rest of the archive unbounded.
+ *
+ * So: build the whole field and `parseInt` it, exactly as nanotar does, and
+ * separately reject any field that is not octal digits with space/NUL padding
+ * (which `parseInt` would silently accept a prefix of).
+ */
 function readOctalField(tar: Uint8Array, offset: number, length: number): number {
   // High bit set means base-256, used only for sizes past 8GB. Nothing
   // legitimate here needs it, and parsing it would just widen the surface.
   if (tar[offset] & 0x80) reject('Tarball uses base-256 size fields')
   let text = ''
   for (let i = offset; i < offset + length; i++) {
-    const byte = tar[i]
-    if (byte === 0 || byte === 0x20) break
-    text += String.fromCharCode(byte)
+    text += String.fromCharCode(tar[i])
   }
-  if (!/^[0-7]*$/.test(text)) reject('Tarball has a malformed size field')
-  return text === '' ? 0 : Number.parseInt(text, 8)
+  if (!/^[\s\0]*[0-7]*[\s\0]*$/.test(text)) {
+    reject('Tarball has a malformed size field')
+  }
+  const value = Number.parseInt(text, 8)
+  if (!Number.isSafeInteger(value) || value < 0) {
+    reject('Tarball has an unreadable record size')
+  }
+  return value
 }
 
 /**
@@ -122,9 +146,6 @@ export function assertBoundedTarRecords(
     }
 
     const size = readOctalField(tar, offset + 124, 12)
-    if (!Number.isSafeInteger(size) || size < 0) {
-      reject('Tarball has an unreadable record size')
-    }
 
     const typeFlag = String.fromCharCode(tar[offset + 156] || 0x30)
     const isMetadata = EXTENSION_TYPE_FLAGS.has(typeFlag)
@@ -228,6 +249,15 @@ export function assertCanonicalEntries(
       reject(`Duplicate entry in tarball: ${normalized}`)
     }
     seen.add(normalized)
+
+    // nanotar's writer puts the name in the 100-byte ustar field and emits
+    // neither a prefix nor a long-name record, so a longer path is silently
+    // TRUNCATED on rebuild, and two paths sharing their first 100 bytes collapse
+    // into one entry, defeating the duplicate rule above. Refuse what the
+    // canonical writer cannot represent rather than publish a mangled archive.
+    if (new TextEncoder().encode(normalized).length > MAX_ENTRY_NAME_BYTES) {
+      reject(`Entry name exceeds ${MAX_ENTRY_NAME_BYTES} bytes: ${normalized}`)
+    }
 
     if (isPackageManifest(normalized)) manifests++
 

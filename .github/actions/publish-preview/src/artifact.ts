@@ -36,6 +36,22 @@ export interface PackManifest {
 
 export const MANIFEST_NAME = 'manifest.json'
 
+/**
+ * Ceiling on how many packages one artifact may carry. The vite-plus batch is
+ * ~11; this leaves room to grow while stopping a modified build workflow from
+ * handing the trusted leg tens of thousands of small archives to validate.
+ */
+export const MAX_ARTIFACT_PACKAGES = 128
+
+/**
+ * Ceiling on one COMPRESSED tarball, enforced from the directory entry before
+ * the file is read. `gunzipBounded` bounds the inflated size, but only after
+ * `readFileSync` has already materialized the compressed input, so a
+ * multi-gigabyte `pkg-0.tgz` would exhaust the runner before that check runs.
+ * The largest real package is ~23MB.
+ */
+export const MAX_COMPRESSED_BYTES = 128 * 1024 * 1024
+
 /** The generated name for the nth packed tarball. */
 export function tarballFileName(index: number): string {
   return `pkg-${index}.tgz`
@@ -106,11 +122,23 @@ export function readArtifactTarballs(dir: string): string[] {
     if (!match) {
       throw new Error(`unexpected file in input-dir: ${entry}`)
     }
+    // Bound the compressed size HERE, from the directory entry, because the
+    // inflate bound cannot help once readFileSync has loaded the whole file.
+    if (stat.size > MAX_COMPRESSED_BYTES) {
+      throw new Error(
+        `${entry} is ${stat.size} bytes compressed, over the ${MAX_COMPRESSED_BYTES} byte limit`,
+      )
+    }
     tarballs.push({ index: Number(match[1]), path: full })
   }
 
   if (tarballs.length === 0) {
     throw new Error(`input-dir contains no packed tarballs: ${dir}`)
+  }
+  if (tarballs.length > MAX_ARTIFACT_PACKAGES) {
+    throw new Error(
+      `input-dir has ${tarballs.length} packages, over the ${MAX_ARTIFACT_PACKAGES} limit`,
+    )
   }
   return tarballs.sort((a, b) => a.index - b.index).map((t) => t.path)
 }

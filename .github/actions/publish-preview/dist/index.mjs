@@ -422,6 +422,7 @@ function canonicalAttrs(file) {
   };
 }
 var textEncoder = new TextEncoder();
+var MAX_ENTRY_NAME_BYTES = 100;
 function encodePackageJson(pkg) {
   return textEncoder.encode(`${JSON.stringify(pkg, null, 2)}
 `);
@@ -449,6 +450,12 @@ async function buildPreviewTarball(gzippedTarball, packageName, version, batch) 
     const normalized = normalizeEntryName(file.name);
     assertSafeTarballPath(normalized);
     if (!isUnderPackageRoot(normalized)) continue;
+    if (textEncoder.encode(file.name).length > MAX_ENTRY_NAME_BYTES) {
+      throw new HttpError(
+        422,
+        `Entry name exceeds the ${MAX_ENTRY_NAME_BYTES}-byte tar name field: ${file.name}`
+      );
+    }
     out.push({
       name: file.name,
       data: file === pkgEntry ? rewrittenBytes : file.data,
@@ -470,16 +477,21 @@ var ALLOWED_ENTRY_TYPES = /* @__PURE__ */ new Set(["file", "directory", "contigu
 var TAR_BLOCK = 512;
 var EXTENSION_TYPE_FLAGS = /* @__PURE__ */ new Set(["x", "g", "L", "K", "N"]);
 var MAX_EXTENSION_RECORD_BYTES = 64 * 1024;
+var MAX_ENTRY_NAME_BYTES2 = 100;
 function readOctalField(tar, offset, length) {
   if (tar[offset] & 128) reject("Tarball uses base-256 size fields");
   let text = "";
   for (let i = offset; i < offset + length; i++) {
-    const byte = tar[i];
-    if (byte === 0 || byte === 32) break;
-    text += String.fromCharCode(byte);
+    text += String.fromCharCode(tar[i]);
   }
-  if (!/^[0-7]*$/.test(text)) reject("Tarball has a malformed size field");
-  return text === "" ? 0 : Number.parseInt(text, 8);
+  if (!/^[\s\0]*[0-7]*[\s\0]*$/.test(text)) {
+    reject("Tarball has a malformed size field");
+  }
+  const value = Number.parseInt(text, 8);
+  if (!Number.isSafeInteger(value) || value < 0) {
+    reject("Tarball has an unreadable record size");
+  }
+  return value;
 }
 function assertBoundedTarRecords(tar, policy = DEFAULT_ARCHIVE_POLICY) {
   let offset = 0;
@@ -491,9 +503,6 @@ function assertBoundedTarRecords(tar, policy = DEFAULT_ARCHIVE_POLICY) {
       reject(`Tarball has over ${policy.maxEntries} records`);
     }
     const size = readOctalField(tar, offset + 124, 12);
-    if (!Number.isSafeInteger(size) || size < 0) {
-      reject("Tarball has an unreadable record size");
-    }
     const typeFlag = String.fromCharCode(tar[offset + 156] || 48);
     const isMetadata = EXTENSION_TYPE_FLAGS.has(typeFlag);
     const limit = isMetadata ? MAX_EXTENSION_RECORD_BYTES : policy.maxFileBytes;
@@ -563,6 +572,9 @@ function assertCanonicalEntries(files, policy = DEFAULT_ARCHIVE_POLICY) {
       reject(`Duplicate entry in tarball: ${normalized}`);
     }
     seen.add(normalized);
+    if (new TextEncoder().encode(normalized).length > MAX_ENTRY_NAME_BYTES2) {
+      reject(`Entry name exceeds ${MAX_ENTRY_NAME_BYTES2} bytes: ${normalized}`);
+    }
     if (isPackageManifest(normalized)) manifests++;
     if (!isUnderPackageRoot(normalized)) {
       reject(`Entry outside the package/ root: ${file.name}`);
@@ -744,6 +756,8 @@ import {
 } from "node:fs";
 import { join as join2 } from "node:path";
 var MANIFEST_NAME = "manifest.json";
+var MAX_ARTIFACT_PACKAGES = 128;
+var MAX_COMPRESSED_BYTES = 128 * 1024 * 1024;
 function tarballFileName(index) {
   return `pkg-${index}.tgz`;
 }
@@ -785,10 +799,20 @@ function readArtifactTarballs(dir) {
     if (!match) {
       throw new Error(`unexpected file in input-dir: ${entry}`);
     }
+    if (stat.size > MAX_COMPRESSED_BYTES) {
+      throw new Error(
+        `${entry} is ${stat.size} bytes compressed, over the ${MAX_COMPRESSED_BYTES} byte limit`
+      );
+    }
     tarballs.push({ index: Number(match[1]), path: full });
   }
   if (tarballs.length === 0) {
     throw new Error(`input-dir contains no packed tarballs: ${dir}`);
+  }
+  if (tarballs.length > MAX_ARTIFACT_PACKAGES) {
+    throw new Error(
+      `input-dir has ${tarballs.length} packages, over the ${MAX_ARTIFACT_PACKAGES} limit`
+    );
   }
   return tarballs.sort((a, b) => a.index - b.index).map((t) => t.path);
 }
@@ -896,14 +920,28 @@ function post(bridge, auth, path, body, label) {
     timeoutMs: PUBLISH_TIMEOUT_MS
   });
 }
+var MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
 function manifestFromEntries(files, label) {
   const entry = files.find((f) => isPackageManifest(f.name) && f.data);
   if (!entry?.data) throw new Error(`${label}: tarball has no package/package.json`);
+  if (entry.data.byteLength > MAX_MANIFEST_BYTES) {
+    throw new Error(
+      `${label}: package.json is ${entry.data.byteLength} bytes, over the ${MAX_MANIFEST_BYTES} byte limit`
+    );
+  }
+  let parsed;
   try {
-    return JSON.parse(new TextDecoder().decode(entry.data));
+    parsed = JSON.parse(new TextDecoder().decode(entry.data));
   } catch (err) {
     throw new Error(`${label}: invalid package/package.json (${err})`);
   }
+  const projected = { name: parsed.name };
+  for (const field of DEPENDENCY_FIELDS) {
+    if (parsed[field]) projected[field] = Object.fromEntries(
+      Object.keys(parsed[field]).map((dep) => [dep, true])
+    );
+  }
+  return projected;
 }
 async function resolveArchiveBatch(sources, env) {
   const packages = [];

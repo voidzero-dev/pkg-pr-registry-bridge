@@ -90,6 +90,56 @@ async function gzWithRawName(
   return gzipBytes(renameTarEntry(createTar(entries), from, to))
 }
 
+/** Build one raw tar record header with a given type flag and payload size. */
+function record(name: string, typeFlag: string, payload: Uint8Array): Uint8Array {
+  const header = new Uint8Array(512)
+  const enc = new TextEncoder()
+  header.set(enc.encode(name).slice(0, 100), 0)
+  header.set(enc.encode('0000644\0'), 100)
+  header.set(enc.encode(payload.length.toString(8).padStart(11, '0') + '\0'), 124)
+  header.set(enc.encode('00000000000\0'), 136)
+  header[156] = typeFlag.charCodeAt(0)
+  header.set(enc.encode('ustar\0'), 257)
+  header.fill(0x20, 148, 156)
+  let sum = 0
+  for (const b of header) sum += b
+  header.set(enc.encode(sum.toString(8).padStart(6, '0')), 148)
+  header[154] = 0
+  header[155] = 0x20
+  const padded = new Uint8Array(Math.ceil(payload.length / 512) * 512)
+  padded.set(payload)
+  const out = new Uint8Array(header.length + padded.length)
+  out.set(header)
+  out.set(padded, header.length)
+  return out
+}
+
+function concat(...parts: Uint8Array[]): Uint8Array {
+  const total = parts.reduce((n, p) => n + p.byteLength, 0)
+  const out = new Uint8Array(total + 1024) // end-of-archive marker
+  let at = 0
+  for (const p of parts) {
+    out.set(p, at)
+    at += p.byteLength
+  }
+  return out
+}
+
+/**
+ * A PAX record is `<total-length> key=value\n`, where the length counts its
+ * own digits. It renames the record that FOLLOWS it, so these fixtures set
+ * the path the next entry already has, keeping the archive otherwise normal.
+ */
+function paxRecord(key: string, value: string): Uint8Array {
+  const suffix = ` ${key}=${value}\n`
+  let digits = 1
+  while (String(digits + suffix.length).length + suffix.length !== digits + suffix.length) {
+    digits++
+  }
+  return new TextEncoder().encode(`${digits + suffix.length}${suffix}`)
+}
+
+
 describe('validateArchive: accepts real package tarballs', () => {
   it('accepts a normal npm layout', async () => {
     const files = await validateArchive(await createTarGzip(goodEntries()))
@@ -342,55 +392,6 @@ describe('validateArchive: size and count bounds', () => {
  * (a path over 100 bytes needs one), so they are bounded rather than rejected.
  */
 describe('validateArchive: metadata records parseTar hides', () => {
-  /** Build one raw tar record header with a given type flag and payload size. */
-  function record(name: string, typeFlag: string, payload: Uint8Array): Uint8Array {
-    const header = new Uint8Array(512)
-    const enc = new TextEncoder()
-    header.set(enc.encode(name).slice(0, 100), 0)
-    header.set(enc.encode('0000644\0'), 100)
-    header.set(enc.encode(payload.length.toString(8).padStart(11, '0') + '\0'), 124)
-    header.set(enc.encode('00000000000\0'), 136)
-    header[156] = typeFlag.charCodeAt(0)
-    header.set(enc.encode('ustar\0'), 257)
-    header.fill(0x20, 148, 156)
-    let sum = 0
-    for (const b of header) sum += b
-    header.set(enc.encode(sum.toString(8).padStart(6, '0')), 148)
-    header[154] = 0
-    header[155] = 0x20
-    const padded = new Uint8Array(Math.ceil(payload.length / 512) * 512)
-    padded.set(payload)
-    const out = new Uint8Array(header.length + padded.length)
-    out.set(header)
-    out.set(padded, header.length)
-    return out
-  }
-
-  function concat(...parts: Uint8Array[]): Uint8Array {
-    const total = parts.reduce((n, p) => n + p.byteLength, 0)
-    const out = new Uint8Array(total + 1024) // end-of-archive marker
-    let at = 0
-    for (const p of parts) {
-      out.set(p, at)
-      at += p.byteLength
-    }
-    return out
-  }
-
-  /**
-   * A PAX record is `<total-length> key=value\n`, where the length counts its
-   * own digits. It renames the record that FOLLOWS it, so these fixtures set
-   * the path the next entry already has, keeping the archive otherwise normal.
-   */
-  function paxRecord(key: string, value: string): Uint8Array {
-    const suffix = ` ${key}=${value}\n`
-    let digits = 1
-    while (String(digits + suffix.length).length + suffix.length !== digits + suffix.length) {
-      digits++
-    }
-    return new TextEncoder().encode(`${digits + suffix.length}${suffix}`)
-  }
-
   it('accepts a bounded PAX record, as real long-path tarballs carry', async () => {
     const raw = concat(
       record('PaxHeader', 'x', paxRecord('path', 'package/package.json')),
@@ -428,6 +429,25 @@ describe('validateArchive: metadata records parseTar hides', () => {
     ).rejects.toThrow(/over 5 records/)
   })
 
+  it('reads a space-padded size the same way nanotar does', () => {
+    // The scanner and the parser must agree on where a record ends. An earlier
+    // version stopped at the first space, so ` 2000000000\0` read as 0 here and
+    // as 256MiB in nanotar; the scan then stepped into the payload, saw a zero
+    // byte, and called it end-of-archive, leaving the rest unbounded.
+    const raw = record('PaxHeader', 'x', new Uint8Array(0))
+    raw.fill(0, 124, 136)
+    new TextEncoder().encodeInto(' 2000000000 ', raw.subarray(124, 136))
+    expect(() => assertBoundedTarRecords(raw)).toThrow(/metadata record is 268435456 bytes/)
+  })
+
+  it('accepts the zero-padded size form real tar writers emit', () => {
+    const raw = concat(
+      record('PaxHeader', 'x', paxRecord('path', 'package/package.json')),
+      createTar(goodEntries()),
+    )
+    expect(() => assertBoundedTarRecords(raw)).not.toThrow()
+  })
+
   it('rejects base-256 size fields outright', () => {
     const raw = record('package/big', '0', new Uint8Array(0))
     raw[124] = 0x80 // high bit marks the base-256 form
@@ -438,6 +458,46 @@ describe('validateArchive: metadata records parseTar hides', () => {
     const raw = record('package/x', '0', new Uint8Array(0))
     raw.set(new TextEncoder().encode('99zz'), 124)
     expect(() => assertBoundedTarRecords(raw)).toThrow(/malformed size field/)
+  })
+})
+
+describe('validateArchive: names the canonical writer cannot represent', () => {
+  // nanotar writes the name into the 100-byte ustar field and emits no prefix
+  // or long-name record, so a longer path is silently TRUNCATED on rebuild and
+  // two paths sharing their first 100 bytes collapse into one entry, defeating
+  // the duplicate rule. Refuse rather than publish a mangled archive.
+  it('rejects an entry name over the ustar name field', async () => {
+    // A >100-byte name cannot be written into the ustar field, so it only ever
+    // reaches the parser through a PAX record. That is also exactly how a real
+    // long-path npm tarball carries one.
+    const long = `package/${'a'.repeat(100)}/index.js`
+    expect(long.length).toBeGreaterThan(100)
+    // The PAX record renames the entry that FOLLOWS it, and createTar appends
+    // an end-of-archive marker, so there is exactly one createTar call and the
+    // renamed entry is its first.
+    const archive = await gzipBytes(
+      concat(
+        record('PaxHeader', 'x', paxRecord('path', long)),
+        createTar([
+          { name: 'package/placeholder.js', data: 'x' },
+          { name: 'package/package.json', data: manifest() },
+        ]),
+      ),
+    )
+    await expect(validateArchive(archive)).rejects.toThrow(/exceeds 100 bytes/)
+  })
+
+  it('accepts a name exactly at the limit', async () => {
+    const exact = `package/${'a'.repeat(92)}`
+    expect(exact.length).toBe(100)
+    await expect(
+      validateArchive(
+        await createTarGzip([
+          { name: 'package/package.json', data: manifest() },
+          { name: exact, data: 'x' },
+        ]),
+      ),
+    ).resolves.toBeDefined()
   })
 })
 
