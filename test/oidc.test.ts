@@ -329,6 +329,15 @@ describe('OIDC token parsing bounds (SR-3)', () => {
     expect(jwksFetches).toBe(0)
   })
 
+  it('rejects a segment whose bytes are not valid UTF-8', async () => {
+    // Found in production: `aaa.bbb.ccc` returned 500, not 401. "aaa" is a
+    // legal base64url segment, but it decodes to 0x69 0xa6, which is invalid
+    // UTF-8, and TextDecoder({fatal}) throws a plain TypeError. The base64url
+    // alphabet says nothing about UTF-8 validity, so this is reachable from
+    // any well-formed-looking token.
+    await reject('aaa.bbb.ccc', /not valid UTF-8/)
+  })
+
   it('rejects a header that decodes to a non-object', async () => {
     await reject(`${b64url('"a string"')}.bb.cc`, /not an object/)
   })

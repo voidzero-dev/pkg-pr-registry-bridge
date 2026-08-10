@@ -133,7 +133,16 @@ function base64UrlToBytes(segment: string, label: string): Uint8Array {
   // atob wants canonical padding; segment length %4 === 1 is never valid.
   const pad = b64.length % 4
   if (pad === 1) throw new HttpError(401, `Malformed token (${label} length)`)
-  const binary = atob(pad ? b64 + '='.repeat(4 - pad) : b64)
+  let binary: string
+  try {
+    binary = atob(pad ? b64 + '='.repeat(4 - pad) : b64)
+  } catch {
+    // Defensive: the charset test and the length check above should already
+    // exclude everything atob rejects, so this is not reachable today. It is
+    // here so a future change to either check cannot turn a bad token into a
+    // 500, which is exactly how the UTF-8 case below reached production.
+    throw new HttpError(401, `Malformed token (${label} is not base64url)`)
+  }
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
   return bytes
@@ -147,11 +156,18 @@ function decodeJsonSegment(
   if (segment.length > maxChars) {
     throw new HttpError(401, `Malformed token (${label} too large)`)
   }
-  // `fatal` so invalid UTF-8 throws here instead of silently becoming U+FFFD
-  // inside a claim value.
-  const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(
-    base64UrlToBytes(segment, label),
-  )
+  // `fatal` so invalid UTF-8 throws instead of silently becoming U+FFFD inside
+  // a claim value. It throws a plain TypeError, so it has to be converted here:
+  // letting it escape turns a garbage token into a 500 rather than a 401.
+  // Base64url's alphabet says nothing about whether the bytes are valid UTF-8,
+  // so this is reachable from any well-formed-looking segment.
+  const bytes = base64UrlToBytes(segment, label)
+  let text: string
+  try {
+    text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes)
+  } catch {
+    throw new HttpError(401, `Malformed token (${label} is not valid UTF-8)`)
+  }
   let parsed: unknown
   try {
     parsed = JSON.parse(text)
