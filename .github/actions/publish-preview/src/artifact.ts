@@ -26,9 +26,9 @@ import { join } from 'node:path'
 
 /** Advisory description of a packed batch. Never trusted by the reader. */
 export interface PackManifest {
-  /** `commit.<sha>` the pack ran for. Re-derived by the trusted leg. */
+  /** `commit.<sha>` the pack ran for. Re-derived by the publishing workflow. */
   ref: string
-  /** `0.0.0-commit.<sha>`. Re-derived by the trusted leg. */
+  /** `0.0.0-commit.<sha>`. Re-derived by the publishing workflow. */
   version: string
   /** One entry per packed tarball, for human inspection of a failed run. */
   packages: Array<{ file: string; name: string; dir: string }>
@@ -39,7 +39,7 @@ export const MANIFEST_NAME = 'manifest.json'
 /**
  * Ceiling on how many packages one artifact may carry. The vite-plus batch is
  * ~11; this leaves room to grow while stopping a modified build workflow from
- * handing the trusted leg tens of thousands of small archives to validate.
+ * handing the publishing workflow tens of thousands of small archives.
  */
 export const MAX_ARTIFACT_PACKAGES = 128
 
@@ -66,15 +66,15 @@ function isActionOutput(entry: string): boolean {
  * Create `dir` and remove this action's own outputs from any previous run.
  *
  * Packing writes `pkg-0..N`, so a rerun that produces FEWER packages than the
- * last one would otherwise leave the higher indices behind. The upload leg
- * enumerates every `pkg-<n>.tgz` it finds and ignores `manifest.json`, so those
- * leftovers would be republished under the new commit version, or collide as a
- * duplicate package name and fail the run. CI gets a clean runner, but local
- * runs and `pnpm warm` reuse a workspace.
+ * last one would otherwise leave the higher indices behind. The publishing
+ * workflow enumerates every `pkg-<n>.tgz` it finds and ignores `manifest.json`,
+ * so those leftovers would be republished under the new commit version, or
+ * collide as a duplicate package name and fail the run. CI gets a clean runner,
+ * but local runs and `pnpm warm` reuse a workspace.
  *
  * Only action-owned names are removed. Anything else in the directory is left
- * alone and will make the upload leg refuse the artifact, which is better than
- * this quietly deleting a file it did not create.
+ * alone and will make the publishing workflow refuse the artifact, which is
+ * better than this quietly deleting a file it did not create.
  */
 export function prepareOutputDir(dir: string): void {
   mkdirSync(dir, { recursive: true })

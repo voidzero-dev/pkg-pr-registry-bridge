@@ -86,10 +86,11 @@ export async function requirePublisher({
  * cannot register a ref pointing at a pull request in some other repository.
  *
  * This is a containment check, not the real binding. The authoritative one is
- * in the trusted workflow leg, which resolves the PR from `workflow_run.head_sha`
- * via the GitHub API and constructs the URL itself, so the value never comes
- * from the (untrusted) build artifact. The bridge cannot repeat that lookup
- * without a GitHub API dependency, so it enforces the containment it can.
+ * in the publishing workflow, which resolves the PR from the triggering run's
+ * head branch via the GitHub API and constructs the URL itself, so the value
+ * never comes from the (untrusted) build artifact. The bridge cannot repeat
+ * that lookup without a GitHub API dependency, so it enforces the containment
+ * it can.
  */
 export function assertPrUrlInRepository(
   prUrl: string,

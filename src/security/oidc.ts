@@ -3,9 +3,9 @@
  *
  * The bridge accepts a short-lived, GitHub-signed identity token instead of a
  * shared secret, so a consumer repo stores no bridge credential and fork PRs
- * can publish through a trusted `workflow_run` leg. Nothing here is secret:
- * the signing key is GitHub's public JWKS and the allowlists hold public
- * identifiers.
+ * can publish through a separate `workflow_run` workflow. Nothing here is
+ * secret: the signing key is GitHub's public JWKS and the allowlists hold
+ * public identifiers.
  *
  * Verification is hand-rolled on WebCrypto rather than pulled from a JWT
  * library (the Worker avoids heavy deps), which means owning the standard

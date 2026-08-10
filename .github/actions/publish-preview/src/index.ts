@@ -23,7 +23,7 @@
  *    `output-dir`. No network and no credentials, so it can run in a job that
  *    builds an untrusted fork pull request.
  *  - `upload`: the remote half only, reading `input-dir`. Runs in the trusted
- *    `workflow_run` leg and treats the artifact as hostile: every archive is
+ *    `workflow_run` workflow and treats the artifact as hostile: every archive
  *    validated against the SR-6 canonical policy, the version comes from the
  *    trusted `sha` input, and each package is REBUILT here so the bytes
  *    published are ones this step constructed.
@@ -360,7 +360,7 @@ async function main(): Promise<void> {
     const dirs = expandPackageDirs(parsePackagesInput(input('packages') || DEFAULT_PACKAGES), cwd)
     const packages = dirs.map((dir) => ({ label: dir, manifest: readManifest(dir) }))
     // Fail on the batch before packing anything, so a missing platform dir
-    // stops the build leg rather than producing a partial artifact.
+    // stops the build workflow rather than producing a partial artifact.
     assertValidBatch(packages, env)
 
     prepareOutputDir(outputDir)

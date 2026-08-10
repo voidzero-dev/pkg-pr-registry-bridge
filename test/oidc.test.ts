@@ -246,7 +246,7 @@ describe('OIDC publishing: rejected tokens', () => {
     ],
     ['unlisted workflow_ref', () => mint({ workflow_ref: `${REPOSITORY}/.github/workflows/evil.yml@refs/heads/main` }), 403],
     [
-      'build-leg workflow_ref',
+      'build-workflow workflow_ref',
       () => mint({ workflow_ref: `${REPOSITORY}/.github/workflows/publish-preview.yml@refs/heads/main` }),
       403,
     ],

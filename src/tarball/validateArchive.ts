@@ -2,7 +2,7 @@
  * Canonical archive policy for tarballs the bridge did not produce
  * (RFC 0002 SR-6).
  *
- * The trusted publish leg reads tarballs out of an artifact built by an
+ * The trusted publishing workflow reads tarballs out of an artifact built by an
  * untrusted job, so this validates them against a strict shape before anything
  * downstream reads their contents. The output of validation feeds
  * `buildPreviewTarball`, which emits a fresh archive: the bytes published are
