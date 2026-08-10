@@ -1,5 +1,5 @@
 /**
- * The artifact directory is attacker-controlled whenever the build leg ran for
+ * The artifact directory is attacker-controlled whenever the build workflow ran for
  * a fork PR, so the reader refuses anything it did not expect rather than
  * skipping it: a silently ignored entry would publish a subset of the batch and
  * look like success.
@@ -104,7 +104,7 @@ describe('readArtifactTarballs', () => {
 
 /**
  * Packing writes pkg-0..N. A rerun producing FEWER packages would otherwise
- * leave the higher indices behind, and the upload leg enumerates every
+ * leave the higher indices behind, and the publishing workflow enumerates every
  * pkg-<n>.tgz it finds, so a stale one would be republished under the new
  * commit version or collide as a duplicate package name.
  */
@@ -125,7 +125,7 @@ describe('prepareOutputDir', () => {
   })
 
   it('leaves files it did not create alone', () => {
-    // Better to let the upload leg refuse an unexpected file than to have pack
+    // Better to let the publishing workflow refuse an unexpected file than to have pack
     // silently delete something a user put there.
     packed(0)
     writeFileSync(join(dir, 'notes.txt'), 'keep me')

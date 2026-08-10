@@ -173,7 +173,7 @@ manual operations.
 This alone does not give you fork-PR publishing: that also needs the
 two-workflow split on the consumer side, because fork `pull_request` runs cannot
 mint an OIDC token either. [`ci-setup.md`](./ci-setup.md) has the full wiring
-(build leg, `authorize` job, trusted leg) and RFC 0002 has the reasoning.
+(build workflow, `authorize` job, publishing workflow) and RFC 0002 has the reasoning.
 
 ## 6. Attach a custom domain (optional)
 

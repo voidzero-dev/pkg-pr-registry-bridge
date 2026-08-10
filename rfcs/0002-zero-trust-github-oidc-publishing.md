@@ -9,8 +9,8 @@
 
 Replace the shared `PKG_PR_BRIDGE_ADMIN_TOKEN` secret on the publish path with
 GitHub Actions OIDC tokens that the Worker verifies against GitHub's public
-keys. Split the consumer workflow into an untrusted build leg (`pull_request`,
-runs for fork PRs, holds no credentials) and a trusted publish leg
+keys. Split the consumer workflow into an build workflow (`pull_request`,
+runs for fork PRs, holds no credentials) and a trusted publishing workflow
 (`workflow_run`, runs in base-repo context, mints a short-lived OIDC token).
 After this change a fork PR labeled `preview-build` publishes a preview build
 through the same path as a same-repo PR, and the consumer repo stores no
@@ -65,7 +65,7 @@ Two GitHub platform rules shape the design:
    GitHub runs the file from the merge ref, so a fork PR can edit the build
    workflow (including its label gate) or add another file with a matching
    `name:`. The listening workflow is trusted; what caused it to fire is
-   not. Everything the trusted leg needs about authorization it must read
+   not. Everything the publishing workflow needs about authorization it must read
    from the API, not from the triggering run (SR-1).
 
 `pull_request_target` also gets credentials but is rejected: it would build
@@ -246,10 +246,10 @@ comment installs.
 
 Three changes close it (see [SR-2](#sr-2-pr-number-binding)):
 
-- The trusted leg resolves the PR number from `head_sha` via
-  `GET /repos/{repo}/commits/{head_sha}/pulls` and constructs `prUrl` from
-  that. It is never read from the artifact. This is the authoritative
-  binding; the two bridge-side checks below are containment.
+- The publishing workflow resolves the PR from the triggering run's head
+  repository and branch, then constructs `prUrl` from it. It is never read
+  from the artifact. This is the authoritative binding; the two bridge-side
+  checks below are containment.
 - `/-/register` rejects a `prUrl` outside
   `https://github.com/<repository claim>/pull/`, so a CI identity cannot name
   a pull request in another repository.
@@ -268,7 +268,7 @@ multi-commit PR. The per-ref immutability above is the version that holds.
 The bridge cannot do better on its own: verifying that a commit really
 belongs to a PR needs a GitHub API call, which would put an API dependency
 and its rate limits on the publish path. That check belongs in the trusted
-leg, which is already talking to the API for SR-1.
+workflow, which is already talking to the API for SR-1.
 
 This gap predates the RFC: the admin-token path has it today, bounded by the
 fact that publishing currently requires repository write access. Handing the
@@ -289,9 +289,9 @@ The action gains a `mode` input with three values:
 - **`pack`**: run the local half only. `pnpm pack` each directory, rewrite
   to the synthetic version, re-pack, hash, and write the tarballs plus a
   `manifest.json` (ref, version, file list) to `output-dir`. No network, no
-  credentials. Runs in the untrusted leg.
+  credentials. Runs in the build workflow.
 - **`upload`**: run the remote half only, from `input-dir`. Runs in the
-  trusted leg.
+  publishing workflow.
 
 `admin-token` becomes optional. In `upload` mode without it, the action
 mints an OIDC token itself via the runner's
@@ -318,16 +318,16 @@ inside the tarball, which land under the attacking PR's own
 `0.0.0-commit.<sha>` version. A preview build of a PR already carries that
 PR's arbitrary code by definition; the blast radius is unchanged.
 
-Since the trusted leg now rebuilds anyway, `pack` mode arguably should not
+Since the publishing workflow now rebuilds anyway, `pack` mode arguably should not
 rewrite and re-pack at all: it could emit raw `pnpm pack` output (the one
 step that genuinely needs the workspace and its `node_modules`), leaving the
 version rewrite, dependency pinning, canonical re-pack, and hashing to the
-trusted leg, which can derive the batch from the tarball names it validated.
+publishing workflow, which can derive the batch from the tarball names it validated.
 That would put every step whose output the bridge trusts on the trusted side
 of the boundary, and shrink `pack` mode to a thin wrapper. It costs the
 trusted job more CPU, which is free here: the CPU constraint in RFC 0001 was
 the Worker's, never CI's. Left as a refinement for the action PR rather than
-settled now, since it changes the artifact contract between the two legs.
+settled now, since it changes the artifact contract between the two workflows.
 
 ## 7. Consumer workflow changes (vite-plus)
 
@@ -336,7 +336,7 @@ label `preview-build`) and its build jobs, drops the same-repo gate, and
 replaces the bridge step with `mode: pack` plus an `actions/upload-artifact`
 step (short retention, one day). Its `permissions` stay `contents: read`.
 
-A new `publish-preview-register.yml` handles the trusted leg:
+A new `publish-preview-register.yml` handles the publishing workflow:
 
 ```yaml
 on:
@@ -348,7 +348,7 @@ permissions: {}
 
 jobs:
   # Gate: re-establish authorization from repository state, because the
-  # build leg's own label check ran in a file the PR author can edit.
+  # build workflow's own label check ran in a file the PR author can edit.
   authorize:
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
@@ -399,7 +399,7 @@ jobs:
 Details that matter:
 
 - **The `authorize` job is a security control, not a payload workaround.**
-  See [SR-1](#sr-1-trusted-leg-authorization); it is the only thing that
+  See [SR-1](#sr-1-publishing-workflow-authorization); it is the only thing that
   makes the label a boundary. It also supplies the PR number and URL, which
   `github.event.workflow_run.pull_requests` leaves empty for fork PRs.
 - `download-artifact` pins `run-id` to the triggering run. Downloading "the
@@ -427,12 +427,12 @@ resource-exhaustion cases below. It does not bound as much as it looks like
 it does, for two reasons.
 
 First, on `pull_request` events GitHub runs the workflow file from the merge
-ref, so the PR's own edits to that file take effect. The build leg's
+ref, so the PR's own edits to that file take effect. The build workflow's
 `if: contains(github.event.pull_request.labels.*.name, 'preview-build')`
 therefore runs inside a file the PR author controls, and a fork PR can
 delete it, or add a second workflow file carrying the same `name:`, and
 produce a successful run that `workflow_run` matches by name. Authorization
-is real; enforcement in the build leg is not. That is why SR-1 exists.
+is real; enforcement in the build workflow is not. That is why SR-1 exists.
 
 Second, the label authorizes "build a preview of this contributor's PR." It
 is applied precisely so reviewers can test code nobody has audited yet, so
@@ -450,19 +450,33 @@ add much against a patient attacker.
 These are implementation requirements, not defense-in-depth. The design is
 not safe to ship without them.
 
-<a id="sr-1-trusted-leg-authorization"></a>
-**SR-1. The trusted leg re-establishes authorization from repository
-state.** Before publishing, resolve the PR from
-`github.event.workflow_run.head_sha` via the API, and fail unless it is open
-against this repository and currently carries `preview-build`. Fail closed
-on a missing PR, a missing label, or an API error. Without this, any fork PR
-publishes to production without a label, because the build leg's own check
-is attacker-editable (8.1). Gating on `workflow_run.path` as well blocks the
-extra-workflow-file variant but not an edit to the original, so it is a
-supplement, never the control.
+<a id="sr-1-publishing-workflow-authorization"></a>
+**SR-1. The publishing workflow re-establishes authorization from repository
+state.** Before publishing, resolve the PR through the API and fail unless it
+is open against this repository, currently carries `preview-build`, and still
+points at the commit that was built. Fail closed on a missing PR, a missing
+label, or an API error. Without this, any fork PR publishes to production
+without a label, because the build workflow's own check is attacker-editable
+(8.1). Gating on `workflow_run.path` as well blocks the extra-workflow-file
+variant but not an edit to the original, so it is a supplement, never the
+control.
+
+Resolve it by **head repository and branch**
+(`GET /pulls?state=open&head=<head_owner>:<head_branch>`, both from
+GitHub-signed `workflow_run` payload fields), then check the head sha
+separately so the failure distinguishes "no such PR" from "the PR moved on".
+
+An earlier draft said to resolve from `head_sha` via
+`GET /repos/{repo}/commits/{head_sha}/pulls`. That endpoint returns EMPTY for
+a fork PR's head commit while working correctly for a same-repo one, so it
+passes every test reachable before the workflow is on the default branch and
+fails for the only case this design exists for. `workflow_run.pull_requests`
+is fork-blind in the same way, which is what makes the commit endpoint look
+like the alternative. Anything keyed on a fork's commit is suspect; the PR
+number, the run id, and the head branch are all base-repo facts and are not.
 
 <a id="sr-2-pr-number-binding"></a>
-**SR-2. The PR number is derived, never accepted.** The trusted leg builds
+**SR-2. The PR number is derived, never accepted.** The publishing workflow builds
 `prUrl` from the API lookup in SR-1. The bridge contains it: `/-/register`
 rejects a `prUrl` outside the token's `repository` claim, and refuses to
 re-point an existing ref at a different `prUrl` (5.4). Otherwise a single
@@ -499,7 +513,7 @@ default, but one added `build-arg` or `run:` step would reintroduce
 `ACTIONS_ID_TOKEN_REQUEST_TOKEN`.
 
 <a id="sr-6-canonical-archive"></a>
-**SR-6. The trusted leg validates archives against a canonical policy and
+**SR-6. The publishing workflow validates archives against a canonical policy and
 republishes its own bytes.** The tar codec now reads attacker-supplied
 tarballs, having only ever seen `pnpm pack` output before. Two parts:
 
@@ -518,9 +532,9 @@ tarballs, having only ever seen `pnpm pack` output before. Two parts:
 Symlinks must also not be followed when enumerating `input-dir` itself.
 
 *Then canonicalize*: rather than forwarding the fork's bytes, the trusted
-leg rebuilds the tarball with the Worker's own codec, emitting exactly one
+workflow rebuilds the tarball with the Worker's own codec, emitting exactly one
 entry per path with normalized metadata, and hashes what it emitted. The
-shasum and integrity published to the bridge describe bytes the trusted leg
+shasum and integrity published to the bridge describe bytes the publishing workflow
 constructed.
 
 The canonical rebuild is what makes the reject list robust rather than
@@ -546,7 +560,7 @@ org fails closed rather than continuing to publish (5.1). Set both whenever
 
 - **Fork PR modifies workflows to publish directly.** Fork `pull_request`
   runs get no secrets and no `id-token`; SR-1 rejects the forged trigger.
-- **Fork PR poisons the artifact.** The trusted leg validates, rebuilds and
+- **Fork PR poisons the artifact.** The publishing workflow validates, rebuilds and
   re-hashes, and forces name and version from trusted inputs (SR-6). Damage
   stays inside that PR's own preview version, which carries the PR's code by
   design.
@@ -707,7 +721,7 @@ fix stands alone and is worth landing regardless of whether the rest ships.
    one repo's packages today.
 3. Bind the token to the commit it may publish? Today the capability is
    scoped by audience and workflow, so a stolen token can publish anything
-   that workflow could during its lifetime. The trusted leg already knows
+   that workflow could during its lifetime. The publishing workflow already knows
    `workflow_run.head_sha`, so it could request
    `audience = <OIDC_AUDIENCE>#<sha>` and the bridge could require every
    version in the request to equal `0.0.0-commit.<sha>`. Distinct from `jti`
@@ -725,7 +739,7 @@ fix stands alone and is worth landing regardless of whether the rest ships.
 5. Should the sticky comment render differently for fork-originated builds
    (8.4), and how loudly? Proposed: a one-line banner naming the source
    fork above the install instructions.
-6. Does the Docker preview job move into the trusted leg at all? Moving it
+6. Does the Docker preview job move into the publishing workflow at all? Moving it
    is what lets fork code reach `ghcr.io/voidzero-dev/vite-plus:pr-<n>`
    (8.4); leaving it on `pull_request` keeps forks out of the org namespace
    but also leaves them without a preview image, which is part of what this

@@ -14,13 +14,13 @@ Publishing is split across two workflows, because GitHub denies fork
 authenticate to the bridge from the job that builds it, no matter how the
 credential is delivered.
 
-**Build leg** (`publish-preview.yml`, on `pull_request`, label `preview-build`).
+**Build workflow** (`publish-preview.yml`, on `pull_request`, label `preview-build`).
 Builds the PR and runs the bridge action in `mode: pack`, which packs each
 locally built package directory with `pnpm pack` and stops. No network, no
 credentials. The packed tarballs upload as the `bridge-packages` artifact. This
 runs for forks.
 
-**Trusted leg** (`publish-preview-register.yml`, on `workflow_run`). Runs the
+**Publishing workflow** (`publish-preview-register.yml`, on `workflow_run`). Runs the
 workflow file from the default branch in base-repo context, so it can mint an
 OIDC token whatever repository the PR came from. It downloads the artifact and
 runs the action in `mode: upload`, which validates every archive, rewrites and
@@ -30,10 +30,10 @@ metadata never diverge for longer than one upload. A final `POST /-/register`
 flips the whole version visible atomically, so a run cancelled mid-way leaves
 only invisible artifacts.
 
-The trusted leg treats the artifact as hostile, because it was produced by a job
+The publishing workflow treats the artifact as hostile, because it was produced by a job
 that ran the PR's code. The published version comes from
 `workflow_run.head_sha`, every package name is read back out of a validated
-archive, and the bytes published are ones the trusted leg rebuilt. Nothing in
+archive, and the bytes published are ones the publishing workflow rebuilt. Nothing in
 the artifact selects what gets published.
 
 The Worker then only serves bytes from R2, with `dist.integrity` matching the
@@ -43,15 +43,20 @@ exact bytes served. pkg.pr.new is not involved anywhere.
 
 `preview-build` is the consent step, and only maintainers can apply it. But on
 `pull_request` events GitHub runs the workflow file from the merge ref, so a PR
-author can edit the build leg and delete its own label check, or add a workflow
-with a matching `name:` to trigger the trusted leg (`workflow_run` matches on
+author can edit the build workflow and delete its own label check, or add a workflow
+with a matching `name:` to trigger the publishing workflow (`workflow_run` matches on
 workflow name).
 
 The `authorize` job is what makes the label mean anything. It re-resolves the PR
-from `workflow_run.head_sha` through the API, requires it open against this
-repository and currently labeled, and fails closed on a missing PR, a missing
-label, or an API error. Do not remove it, and do not let the publish job run
-without `needs: authorize`.
+through the API, requires it open against this repository, currently labeled,
+and still pointing at the commit that was built, and fails closed on a missing
+PR, a missing label, or an API error. Do not remove it, and do not let the
+publish job run without `needs: authorize`.
+
+Resolve by head repository and branch, not by commit:
+`listPullRequestsAssociatedWithCommit` returns nothing for a fork PR's head
+commit, and `workflow_run.pull_requests` is empty for forks too, so both are
+blind to exactly the case this setup exists for.
 
 ## Setup
 
@@ -84,7 +89,7 @@ someone else. A rename keeps the same `repository_id` but changes
 `workflow_ref`, so publishes fail until the allowlist is updated. That is the
 correct direction to fail, but it will look like an outage to whoever hits it.
 
-### 2. Build leg
+### 2. Build workflow
 
 In the job that assembles the build artifacts, after `pnpm install`, the
 artifact downloads, and `publish-native-addons.ts --mode pkg-pr-new` (which
@@ -117,7 +122,7 @@ than publishing a version with a dangling dep.
 > events `github.sha` is the ephemeral **merge** commit, whereas the checkout
 > being packed is the PR **head** commit.
 
-### 3. Trusted leg
+### 3. Publishing workflow
 
 ```yaml
 on:
@@ -183,7 +188,7 @@ would let one PR change what installs for another. Derive it from the API.
 
 ### 4. Verify
 
-After a labeled PR builds and the trusted leg runs:
+After a labeled PR builds and the publishing workflow runs:
 
 ```bash
 curl https://registry-bridge.viteplus.dev/-/refs
@@ -193,7 +198,7 @@ Verify a same-repo PR first, then a fork PR, then confirm an unlabeled fork PR
 does **not** publish.
 
 Note that `workflow_run` only fires for workflow files already on the default
-branch, so the trusted leg cannot be exercised from the pull request that
+branch, so the publishing workflow cannot be exercised from the pull request that
 introduces it. The first real verification happens after merge.
 
 ## Notes

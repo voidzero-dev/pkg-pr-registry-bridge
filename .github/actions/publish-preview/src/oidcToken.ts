@@ -5,7 +5,7 @@
  * `permissions: id-token: write`. Requesting a token with the bridge as
  * audience proves "this workflow, in this repository, ran this" without the
  * repository storing a bridge credential, which is what lets fork PRs publish
- * through the trusted `workflow_run` leg.
+ * through the publishing `workflow_run` workflow.
  *
  * Reads the runner environment directly rather than depending on
  * `@actions/core`, keeping the bundled action free of runtime deps.
