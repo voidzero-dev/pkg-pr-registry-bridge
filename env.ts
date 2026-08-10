@@ -16,4 +16,16 @@ export default defineEnv({
   WORKSPACE_PACKAGES: string(),
   // Bearer token guarding the admin endpoints. Secret: `void secret put ADMIN_TOKEN`.
   ADMIN_TOKEN: string().secret().optional(),
+  // GitHub Actions OIDC publishing (RFC 0002). NOT secrets: all four hold
+  // public identifiers, and the verification key is GitHub's public JWKS, so
+  // they live in `.env.production` rather than `void secret put`.
+  //
+  // Optional as a group: leaving all four unset disables the OIDC path and
+  // leaves admin-token publishing untouched. Setting only SOME of them is
+  // rejected at request time, so a half-configured deploy fails loudly instead
+  // of silently refusing every token.
+  OIDC_AUDIENCE: string().optional(),
+  OIDC_TRUSTED_WORKFLOWS: string().optional(),
+  OIDC_TRUSTED_REPOSITORY_ID: string().optional(),
+  OIDC_TRUSTED_OWNER_ID: string().optional(),
 })
