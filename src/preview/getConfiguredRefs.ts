@@ -132,11 +132,36 @@ export async function unregisterRef(env: Env, ref: string): Promise<void> {
 export async function registerRef(
   env: Env,
   ref: string,
-  extra?: { publishedAt?: string; prUrl?: string },
+  extra?: {
+    publishedAt?: string
+    prUrl?: string
+    /**
+     * Refuse to re-point an already-registered ref at a different pull request
+     * (RFC 0002 SR-2). A commit belongs to one PR, and the `pr-<n>` dist-tag
+     * follows `prUrl`, so allowing a rewrite would let a later publish drag
+     * another PR's tag onto this commit. Set for CI (OIDC) publishers; the
+     * operator token can still correct a bad registration.
+     *
+     * Re-registering the same ref with the same prUrl stays fine, and so does a
+     * PR accumulating one ref per pushed commit: that is how `pr-<n>` is meant
+     * to advance to a PR's head build.
+     */
+    immutablePrUrl?: boolean
+  },
 ): Promise<ParsedPreviewRef> {
   const [parsed] = parseConfiguredPreviewRefs(ref)
   await mutateRefIndex(env, (index) => {
     const existing = index[canonical(parsed)]
+    if (
+      extra?.immutablePrUrl &&
+      extra.prUrl &&
+      existing?.prUrl &&
+      existing.prUrl !== extra.prUrl
+    ) {
+      throw new Error(
+        `ref ${canonical(parsed)} is already registered to ${existing.prUrl}`,
+      )
+    }
     // Preserve a prior publish time / PR url when re-registering without them.
     index[canonical(parsed)] = {
       expiresAt: Date.now() + REF_TTL_MS,

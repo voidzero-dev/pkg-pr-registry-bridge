@@ -34,4 +34,28 @@ export interface Env {
   KV: KVNamespace
   /** Bearer token guarding the admin endpoints (`/-/refs`, `/-/purge`, etc.). */
   ADMIN_TOKEN?: string
+  /**
+   * Audience required in GitHub Actions OIDC tokens (RFC 0002). No default:
+   * every environment sets its own, and an unset value disables the OIDC path
+   * rather than falling back to another binding. Deliberately NOT derived from
+   * PUBLIC_BASE_URL, which staging points at production, so a fallback would
+   * make a staging-minted token valid against production.
+   */
+  OIDC_AUDIENCE?: string
+  /**
+   * Comma-separated allowlist of exact `workflow_ref` values permitted to
+   * publish, e.g.
+   * `voidzero-dev/vite-plus/.github/workflows/publish-preview-register.yml@refs/heads/main`.
+   */
+  OIDC_TRUSTED_WORKFLOWS?: string
+  /**
+   * Immutable GitHub numeric ids the token must carry. `workflow_ref` embeds a
+   * repository NAME, and names can be renamed, transferred, or released and
+   * reclaimed; these anchor trust to the repository itself. Read them with:
+   *   gh api repos/<owner>/<repo> --jq '{repo: .id, owner: .owner.id}'
+   * Required whenever OIDC_TRUSTED_WORKFLOWS is set; a partial OIDC config is
+   * rejected at request time rather than silently disabling the path.
+   */
+  OIDC_TRUSTED_REPOSITORY_ID?: string
+  OIDC_TRUSTED_OWNER_ID?: string
 }

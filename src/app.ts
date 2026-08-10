@@ -50,7 +50,11 @@ import {
   tarballUrl,
 } from './cache/r2Cache'
 import { kvCachedText } from './cache/kvCache'
-import { requireAdmin } from './security/auth'
+import {
+  assertPrUrlInRepository,
+  requireAdmin,
+  requirePublisher,
+} from './security/auth'
 import {
   packumentCacheControl,
   tarballCacheControl,
@@ -92,8 +96,18 @@ app.use('*', cors())
 
 app.get('/_health', (c) => c.json({ status: 'ok' }))
 
-const admin = (c: { req: { header: (k: string) => string | undefined }; env: Env }) =>
+type AuthCtx = { req: { header: (k: string) => string | undefined }; env: Env }
+
+/** Admin-only guard, for endpoints an OIDC identity must never reach. */
+const admin = (c: AuthCtx) =>
   requireAdmin({ env: c.env, authorization: c.req.header('authorization') })
+
+/**
+ * Publish guard: the operator's admin token OR a GitHub Actions OIDC token.
+ * Returns which one, so `/-/register` can apply the CI-only prUrl rules.
+ */
+const publisher = (c: AuthCtx) =>
+  requirePublisher({ env: c.env, authorization: c.req.header('authorization') })
 
 /**
  * Validate a preview (name, version) target. `unknownStatus` is 404 on the serve
@@ -210,7 +224,7 @@ app.get('/tarballs/*', async (c) => {
  * never buffers or hashes the payload, so it cannot OOM regardless of size.
  */
 app.put('/-/tarball/*', async (c) => {
-  admin(c)
+  await publisher(c)
   const parsed = parseUploadPath(new URL(c.req.url).pathname)
   if (!parsed) throw new HttpError(404, 'Not found')
   const { name, version, shasum } = parsed
@@ -244,7 +258,7 @@ app.put('/-/tarball/*', async (c) => {
  * leaves only invisible artifacts instead of a mixed served state.
  */
 app.post('/-/publish', async (c) => {
-  admin(c)
+  await publisher(c)
   const body = (await c.req.json().catch(() => ({}))) as {
     ref?: string
     packages?: Array<{
@@ -314,7 +328,7 @@ app.post('/-/publish', async (c) => {
  * time is stamped server-side here (the moment the release became visible).
  */
 app.post('/-/register', async (c) => {
-  admin(c)
+  const who = await publisher(c)
   const body = (await c.req.json().catch(() => ({}))) as {
     ref?: string
     prUrl?: string
@@ -324,11 +338,21 @@ app.post('/-/register', async (c) => {
   const prUrl = (body.prUrl ?? '').trim() || undefined
   if (!ref) throw new HttpError(400, 'Missing ref')
 
+  // The `pr-<n>` dist-tag follows prUrl, and VP_PR_VERSION resolves installs by
+  // PR number, so a CI identity may only name a PR of its own repository and
+  // may not re-point a ref another run already registered.
+  if (prUrl) assertPrUrlInRepository(prUrl, who)
+
   const publishedAt = new Date().toISOString()
   let parsed
   try {
-    parsed = await registerRef(c.env, ref, { publishedAt, prUrl })
+    parsed = await registerRef(c.env, ref, {
+      publishedAt,
+      prUrl,
+      immutablePrUrl: who.kind === 'oidc',
+    })
   } catch (err) {
+    if (err instanceof HttpError) throw err
     throw new HttpError(400, `Invalid or unregisterable ref: ${ref} (${err})`)
   }
   return c.json({ ref, version: parsed.version, publishedAt }, 201)

@@ -119,3 +119,116 @@ describe('buildPreviewTarball', () => {
     expect(offenders).toEqual([])
   })
 })
+
+/**
+ * The mode comes from the tar header, which is attacker-controlled for any
+ * archive the bridge did not build. It used to pass straight through, so a
+ * crafted tarball's setuid bit survived into the published one. "The bytes we
+ * publish are ones we constructed" only holds if the metadata is ours too.
+ */
+describe('buildPreviewTarball: metadata normalization', () => {
+  const pkg = { name: 'vite-plus', version: '1.0.0' }
+  const batch = new Set(['vite-plus'])
+
+  async function rebuiltAttrs(
+    attrs: Record<string, unknown>,
+  ): Promise<Record<string, any>> {
+    const source = await createTarGzip([
+      { name: 'package/package.json', data: JSON.stringify(pkg) },
+      { name: 'package/bin/vp', data: '#!/bin/sh\n', attrs: attrs as never },
+    ])
+    const built = await buildPreviewTarball(source, 'vite-plus', '0.0.0-commit.abc1234', batch)
+    const files = await parseTarGzip(built.tarball)
+    return files.find((f) => f.name === 'package/bin/vp')!.attrs as Record<string, any>
+  }
+
+  /** The tar writer left-pads mode to 7 chars, so compare the octal value. */
+  const modeOf = (attrs: Record<string, any>): number =>
+    Number.parseInt(attrs.mode, 8)
+
+  it('strips the setuid bit', async () => {
+    const attrs = await rebuiltAttrs({ mode: '4755' })
+    expect(modeOf(attrs)).toBe(0o755)
+  })
+
+  it('strips setgid and sticky bits', async () => {
+    expect(modeOf(await rebuiltAttrs({ mode: '2755' }))).toBe(0o755)
+    expect(modeOf(await rebuiltAttrs({ mode: '1777' }))).toBe(0o755)
+  })
+
+  it('keeps executables executable', async () => {
+    expect(modeOf(await rebuiltAttrs({ mode: '755' }))).toBe(0o755)
+    expect(modeOf(await rebuiltAttrs({ mode: '700' }))).toBe(0o755)
+  })
+
+  it('normalizes non-executables to 644', async () => {
+    expect(modeOf(await rebuiltAttrs({ mode: '666' }))).toBe(0o644)
+    expect(modeOf(await rebuiltAttrs({ mode: '000' }))).toBe(0o644)
+  })
+
+  it('falls back to 644 for an unparseable mode', async () => {
+    expect(modeOf(await rebuiltAttrs({ mode: 'zzz' }))).toBe(0o644)
+  })
+
+  it('flattens ownership, which describes the packing machine only', async () => {
+    const attrs = await rebuiltAttrs({ mode: '755', uid: 501, gid: 20, user: 'attacker', group: 'wheel' })
+    expect(attrs.uid).toBe(0)
+    expect(attrs.gid).toBe(0)
+    expect(attrs.user).toBe('')
+    expect(attrs.group).toBe('')
+  })
+})
+
+/**
+ * Determinism is what makes the content-addressed store behave: identical
+ * content must land on the same key rather than accumulating one object per
+ * republish. That needs both a fixed mtime and a gzip layer that does not
+ * stamp the current time into its header.
+ */
+describe('buildPreviewTarball: reproducibility', () => {
+  const pkg = { name: 'vite-plus', version: '1.0.0' }
+  const batch = new Set(['vite-plus'])
+  const version = '0.0.0-commit.abc1234'
+
+  const source = (mtime: number) =>
+    createTarGzip([
+      { name: 'package/package.json', data: JSON.stringify(pkg), attrs: { mtime } as never },
+      { name: 'package/index.js', data: 'export const x = 1\n', attrs: { mtime } as never },
+    ])
+
+  it('produces identical bytes for identical content', async () => {
+    const a = await buildPreviewTarball(await source(1e12), 'vite-plus', version, batch)
+    const b = await buildPreviewTarball(await source(1e12), 'vite-plus', version, batch)
+    expect(b.shasum).toBe(a.shasum)
+    expect(b.integrity).toBe(a.integrity)
+  })
+
+  it('leaves no wall-clock timestamp in the gzip header', async () => {
+    // The gzip header carries its own MTIME field. Asserting it is zeroed
+    // covers second-granularity nondeterminism directly, instead of sleeping
+    // through a wall-clock second on every test run to try to observe it.
+    const built = await buildPreviewTarball(await source(1e12), 'vite-plus', version, batch)
+    expect([...built.tarball.slice(4, 8)]).toEqual([0, 0, 0, 0])
+  })
+
+  it('erases a source mtime, so hostile timestamps cannot vary the output', async () => {
+    // Two archives differing ONLY in mtime must rebuild to the same bytes,
+    // otherwise an untrusted archive could mint unlimited distinct CAS keys.
+    const a = await buildPreviewTarball(await source(1e12), 'vite-plus', version, batch)
+    const b = await buildPreviewTarball(await source(4e12), 'vite-plus', version, batch)
+    expect(b.shasum).toBe(a.shasum)
+  })
+
+  it('stamps the node-tar portable mtime that pnpm pack already uses', async () => {
+    const built = await buildPreviewTarball(await source(1e12), 'vite-plus', version, batch)
+    const files = await parseTarGzip(built.tarball)
+    for (const file of files) {
+      // nanotar's parser reports SECONDS while its writer takes MILLISECONDS.
+      // That asymmetry is why passing parsed attrs straight back to the writer
+      // divided by 1000 twice and wrote 1970-01-06; pin the round-tripped value
+      // so a regression there is caught here.
+      expect(file.attrs?.mtime).toBe(499_162_500)
+      expect(new Date(499_162_500 * 1000).toISOString()).toBe('1985-10-26T08:15:00.000Z')
+    }
+  })
+})

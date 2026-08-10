@@ -138,6 +138,43 @@ curl https://<your-slug>.void.app/_health
 curl https://<your-slug>.void.app/-/refs      # public read; empty until you publish
 ```
 
+### Optional: token-less publishing with GitHub OIDC
+
+The publish endpoints also accept a GitHub Actions OIDC token, so CI can
+publish without holding `ADMIN_TOKEN` at all. This is what lets fork pull
+requests publish, since GitHub withholds secrets from them. Set four **vars**
+(not secrets; all four hold public identifiers, and the verification key is
+GitHub's public JWKS):
+
+```bash
+# The audience CI will request. Set it per environment and never derive it
+# from PUBLIC_BASE_URL: a staging bridge whose PUBLIC_BASE_URL points at
+# production would otherwise accept production-audience tokens.
+OIDC_AUDIENCE=https://registry-bridge.acme.dev
+
+# Exact workflow_ref values allowed to publish, comma-separated.
+OIDC_TRUSTED_WORKFLOWS=acme-corp/acme-bundler/.github/workflows/publish-preview-register.yml@refs/heads/main
+
+# Immutable numeric identity. workflow_ref embeds a repository NAME, and names
+# can be renamed, transferred, or released and reclaimed by someone else.
+#   gh api repos/acme-corp/acme-bundler --jq '{repo: .id, owner: .owner.id}'
+OIDC_TRUSTED_REPOSITORY_ID=123456789
+OIDC_TRUSTED_OWNER_ID=987654321
+```
+
+All four are required together: a partial configuration is rejected at request
+time rather than silently disabling the path. Leave all four unset to keep
+admin-token-only publishing.
+
+An OIDC identity may upload tarballs, publish metadata, and register refs. It
+may **not** purge, which stays on `ADMIN_TOKEN` along with `pnpm warm` and
+manual operations.
+
+This alone does not give you fork-PR publishing: that also needs the
+two-workflow split on the consumer side, because fork `pull_request` runs cannot
+mint an OIDC token either. [`ci-setup.md`](./ci-setup.md) has the full wiring
+(build leg, `authorize` job, trusted leg) and RFC 0002 has the reasoning.
+
 ## 6. Attach a custom domain (optional)
 
 ```bash
