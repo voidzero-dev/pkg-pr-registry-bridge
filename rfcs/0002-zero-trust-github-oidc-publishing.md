@@ -360,6 +360,7 @@ jobs:
     outputs:
       pr: ${{ steps.check.outputs.pr }}
       pr-url: ${{ steps.check.outputs.pr_url }}
+      is-fork: ${{ steps.check.outputs.is_fork }}
     steps:
       # Resolves the PR from head_sha, then fails the job unless that PR is
       # open against this repo AND currently carries `preview-build`.
@@ -370,6 +371,10 @@ jobs:
 
   publish:
     needs: authorize
+    # Fork PRs wait on a required-reviewer environment; same-repo PRs use an
+    # unprotected one and publish unattended. See the environment gate note
+    # below and 8.1.
+    environment: ${{ needs.authorize.outputs.is-fork == 'true' && 'preview-build-release' || 'preview-build-release-auto' }}
     permissions:
       id-token: write      # mint the bridge OIDC token
       actions: read        # download the triggering run's artifact
@@ -416,6 +421,18 @@ Details that matter:
   re-pushes coalesce as today.
 - Same-repo PRs use this same path. One publish flow to maintain, and the
   `PKG_PR_BRIDGE_ADMIN_TOKEN` secret leaves the repo.
+- **The `publish` job selects its environment by PR origin.** Fork PRs run
+  in `preview-build-release`, which requires a reviewer to approve the run
+  before the job starts and a token exists; same-repo PRs run in
+  `preview-build-release-auto`, which has no protection rules, so they
+  publish unattended once labeled. Both environments must exist in repo
+  settings: a workflow referencing a missing environment gets one created
+  implicitly with no rules, which looks like a gate and is not one. The
+  initial implementation gated every publish; vite-plus#2404 (2026-08-11)
+  narrowed the gate to forks, because for a self-labeled same-repo run the
+  approval confirmed nothing the label had not, and approval notifications
+  proved easy to miss. After any approval wait, the job re-asserts SR-1
+  (PR open, still labeled, head sha unchanged) before minting the token.
 
 ## 8. Security
 
@@ -444,6 +461,15 @@ Also worth stating plainly: GitHub's default for public repositories
 requires approval only for *first-time* contributors. Once someone has a
 merged PR, their fork PRs run workflows automatically, so that gate does not
 add much against a patient attacker.
+
+The implementation layers one more human step on top of the label, for
+forks only: the `publish` job runs in a required-reviewer environment, so a
+person confirms each fork publish run after `authorize` passes and before a
+token exists (section 7). That gate is the one control that stays standing
+if the `authorize` logic is ever weakened. It is scoped to forks because
+for a same-repo PR the label already binds consent to the exact built sha:
+the build runs only on `labeled` events, and `authorize` refuses a run
+whose sha the PR has moved past.
 
 ### 8.2 Security requirements
 
@@ -601,7 +627,9 @@ org fails closed rather than continuing to publish (5.1). Set both whenever
 - The label becomes a publishing permission. Triage-role users, who
   previously could trigger only builds, can now put code on the production
   registry. Anyone reviewing who holds triage in `voidzero-dev/vite-plus`
-  should do so with that in mind.
+  should do so with that in mind. Since vite-plus#2404 a labeled same-repo
+  PR publishes unattended; only fork publishes wait for an environment
+  approval.
 - Fork code gets pushed to `ghcr.io/voidzero-dev/vite-plus:pr-<n>`, under the
   org namespace, and the sticky comment advertises a `curl | bash` install
   from a voidzero-branded URL. The comment must say the build came from a
