@@ -1,4 +1,5 @@
 import type { Env } from '../config'
+import { r2Get } from './r2Get'
 
 const MAX_CAS_ATTEMPTS = 6
 
@@ -11,7 +12,7 @@ export async function readR2Json<T extends object>(
   env: Env,
   key: string,
 ): Promise<{ value: T; etag: string | null }> {
-  const obj = await env.STORAGE.get(key)
+  const obj = await r2Get(env, key)
   if (!obj) return { value: {} as T, etag: null }
   const value = await obj.json<T>().catch(() => ({}) as T)
   return { value, etag: obj.etag }

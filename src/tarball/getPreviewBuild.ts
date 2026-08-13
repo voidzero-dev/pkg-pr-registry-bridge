@@ -7,6 +7,7 @@ import {
   tarballContentUrl,
   tarballKey,
 } from '../cache/r2Cache'
+import { r2Get } from '../cache/r2Get'
 import { resolveVersionMeta } from '../preview/metaIndex'
 import type { PreviewMeta } from './buildPreviewTarball'
 
@@ -23,7 +24,7 @@ export async function getPreviewMeta(
   name: string,
   version: string,
 ): Promise<PreviewMeta> {
-  const cached = await env.STORAGE.get(metaKey(name, version))
+  const cached = await r2Get(env, metaKey(name, version))
   if (!cached) {
     throw new HttpError(404, `No published metadata: ${name}@${version}`)
   }
@@ -66,7 +67,7 @@ export async function getPreviewTarballBody(
     // Content-addressed request: a publish always has the CAS object, so this is
     // the hot path (one get) and its bytes are immutable (the URL pins the exact
     // shasum).
-    const cas = await env.STORAGE.get(casKey(name, version, shasum))
+    const cas = await r2Get(env, casKey(name, version, shasum))
     if (cas) return { kind: 'body', body: cas.body, contentLength: cas.size, immutable: true }
     // Migration fallback for an old version-addressed publish action: it stored
     // the bytes at tarballKey and published this same shasum, so serve them for
@@ -80,7 +81,7 @@ export async function getPreviewTarballBody(
     // CAS object and return to the hot path.
     const meta = await resolveVersionMeta(env, name, version)
     if (meta && meta.shasum === shasum) {
-      const legacy = await env.STORAGE.get(tarballKey(name, version))
+      const legacy = await r2Get(env, tarballKey(name, version))
       if (legacy) return { kind: 'body', body: legacy.body, contentLength: legacy.size, immutable: false }
     }
     throw new HttpError(404, `No such tarball: ${name}@${version} (${shasum})`)
@@ -96,7 +97,7 @@ export async function getPreviewTarballBody(
 
   // No published shasum yet: serve legacy version-addressed bytes if present,
   // else 404 (nothing published for this version).
-  const legacy = await env.STORAGE.get(tarballKey(name, version))
+  const legacy = await r2Get(env, tarballKey(name, version))
   if (legacy) return { kind: 'body', body: legacy.body, contentLength: legacy.size, immutable: false }
 
   throw new HttpError(404, `No such tarball: ${name}@${version}`)
