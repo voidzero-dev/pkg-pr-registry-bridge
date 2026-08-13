@@ -8,6 +8,7 @@ import {
 } from './parseConfiguredPreviewRefs'
 import { REFS_INDEX_KEY } from '../cache/r2Cache'
 import { casR2Json, readR2Json } from '../cache/r2Cas'
+import { describeError } from '../util/errors'
 
 // Runtime-registered refs live in ONE R2 object, read on every packument request
 // with a cheap `get`. The earlier design stored one KV key per ref and read them
@@ -80,7 +81,7 @@ export async function getConfiguredRefsWithEtag(
       })
     }
   } catch (err) {
-    console.warn('Failed to read preview refs from R2:', err)
+    console.warn('Failed to read preview refs from R2:', describeError(err))
   }
 
   return { refs, etag }

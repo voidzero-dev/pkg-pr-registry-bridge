@@ -50,6 +50,7 @@ import {
   tarballUrl,
 } from './cache/r2Cache'
 import { kvCachedText } from './cache/kvCache'
+import { describeError } from './util/errors'
 import {
   assertPrUrlInRepository,
   requireAdmin,
@@ -527,7 +528,10 @@ app.get('*', async (c) => {
           )
           time[ref.version] = preview.publishedAt ?? UNPUBLISHED_PREVIEW_TIME
         } catch (err) {
-          console.warn(`Failed to inject preview ref ${ref.version}:`, err)
+          console.warn(
+            `Failed to inject preview ref ${ref.version} into ${name}:`,
+            describeError(err),
+          )
         }
       }),
     )
@@ -555,7 +559,7 @@ app.onError((err, c) => {
   if (err instanceof HttpError) {
     return c.json({ error: err.message }, err.status as ContentfulStatusCode)
   }
-  console.error('Unhandled error:', err)
+  console.error('Unhandled error:', describeError(err))
   return c.json({ error: 'Internal error' }, 500)
 })
 

@@ -2,6 +2,7 @@ import type { Env } from '../config'
 import type { PreviewMeta } from '../tarball/buildPreviewTarball'
 import { metaIndexKey, metaKey } from '../cache/r2Cache'
 import { casR2Json, readR2Json } from '../cache/r2Cas'
+import { r2Get } from '../cache/r2Get'
 import { REF_TTL_MS } from './getConfiguredRefs'
 
 /** `0.0.0-commit.<sha>` -> its immutable meta (the same value stored at `metaKey`). */
@@ -30,7 +31,7 @@ export async function resolveVersionMeta(
 ): Promise<PreviewMeta | undefined> {
   const fromIndex = (await readMetaIndex(env, name))[version]
   if (fromIndex) return fromIndex
-  const obj = await env.STORAGE.get(metaKey(name, version))
+  const obj = await r2Get(env, metaKey(name, version))
   if (!obj) return undefined
   return obj.json<PreviewMeta>().catch(() => undefined)
 }
