@@ -216,25 +216,25 @@ importers:
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.20.0
-        version: 0.20.3(@cloudflare/workers-types@4.20260702.1)(@vitest/runner@4.1.10)(@vitest/snapshot@4.1.10)(vitest@4.1.10(@types/node@24.13.3)(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.12)))
+        version: 0.20.3(@cloudflare/workers-types@4.20260702.1)(@vitest/runner@4.1.10)(@vitest/snapshot@4.1.10)(vitest@4.1.10(@types/node@24.13.3)(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12)))
       '@types/node':
         specifier: ^24.13.2
         version: 24.13.3
       esbuild:
         specifier: ^0.28.1
-        version: 0.28.1
+        version: 0.28.2
       typescript:
         specifier: ^7.0.0
         version: 7.0.2
       vite:
         specifier: ^8.1.0
-        version: 8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.12)
+        version: 8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12)
       vitest:
         specifier: ^4.1.0
-        version: 4.1.10(@types/node@24.13.3)(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.12))
+        version: 4.1.10(@types/node@24.13.3)(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12))
       void:
         specifier: ^0.10.5
-        version: 0.10.12(arktype@2.2.1)(kysely@0.29.5)(valibot@1.4.1(typescript@7.0.2))(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.12))(vitest@4.1.10(@types/node@24.13.3)(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.12)))(zod@4.4.3)
+        version: 0.10.12(arktype@2.2.1)(kysely@0.29.5)(valibot@1.4.1(typescript@7.0.2))(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12))(vitest@4.1.10(@types/node@24.13.3)(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12)))(zod@4.4.3)
       wrangler:
         specifier: ^4.105.0
         version: 4.120.0(@cloudflare/workers-types@4.20260702.1)
@@ -2552,12 +2552,12 @@ snapshots:
     optionalDependencies:
       workerd: 1.20260804.1
 
-  '@cloudflare/vite-plugin@1.51.3(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.12))(wrangler@4.120.0(@cloudflare/workers-types@4.20260702.1))':
+  '@cloudflare/vite-plugin@1.51.3(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12))(wrangler@4.120.0(@cloudflare/workers-types@4.20260702.1))':
     dependencies:
       '@cloudflare/unenv-preset': 2.16.1(unenv@2.0.0-rc.24)(workerd@1.20260804.1)
       miniflare: 5.20260804.1-alpha
       unenv: 2.0.0-rc.24
-      vite: 8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.12)
+      vite: 8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12)
       workerd: 1.20260804.1
       wrangler: 4.120.0(@cloudflare/workers-types@4.20260702.1)
       ws: 8.21.0
@@ -2565,14 +2565,14 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@cloudflare/vitest-pool-workers@0.20.3(@cloudflare/workers-types@4.20260702.1)(@vitest/runner@4.1.10)(@vitest/snapshot@4.1.10)(vitest@4.1.10(@types/node@24.13.3)(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.12)))':
+  '@cloudflare/vitest-pool-workers@0.20.3(@cloudflare/workers-types@4.20260702.1)(@vitest/runner@4.1.10)(@vitest/snapshot@4.1.10)(vitest@4.1.10(@types/node@24.13.3)(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12)))':
     dependencies:
       '@vitest/runner': 4.1.10
       '@vitest/snapshot': 4.1.10
       cjs-module-lexer: 1.2.3
       esbuild: 0.28.1
       miniflare: 5.20260801.1-alpha
-      vitest: 4.1.10(@types/node@24.13.3)(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.12))
+      vitest: 4.1.10(@types/node@24.13.3)(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12))
       wrangler: 4.120.0(@cloudflare/workers-types@4.20260702.1)
       zod: 4.4.3
     transitivePeerDependencies:
@@ -3255,13 +3255,13 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.1.0
 
-  '@vitest/mocker@4.1.10(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.12))':
+  '@vitest/mocker@4.1.10(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12))':
     dependencies:
       '@vitest/spy': 4.1.10
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.12)
+      vite: 8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12)
 
   '@vitest/pretty-format@4.1.10':
     dependencies:
@@ -3303,7 +3303,7 @@ snapshots:
 
   base64-js@1.5.1: {}
 
-  better-auth@1.6.27(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(kysely@0.29.5)(pg@8.22.0))(pg@8.22.0)(vitest@4.1.10(@types/node@24.13.3)(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.12))):
+  better-auth@1.6.27(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(kysely@0.29.5)(pg@8.22.0))(pg@8.22.0)(vitest@4.1.10(@types/node@24.13.3)(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12))):
     dependencies:
       '@better-auth/core': 1.6.27(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@cloudflare/workers-types@4.20260702.1)(better-call@1.4.0(zod@4.4.3))(jose@6.2.8)(kysely@0.29.5)(nanostores@1.4.2)
       '@better-auth/drizzle-adapter': 1.6.27(@better-auth/core@1.6.27(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@cloudflare/workers-types@4.20260702.1)(better-call@1.4.0(zod@4.4.3))(jose@6.2.8)(kysely@0.29.5)(nanostores@1.4.2))(@better-auth/utils@0.4.2)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(kysely@0.29.5)(pg@8.22.0))
@@ -3327,7 +3327,7 @@ snapshots:
       drizzle-kit: 0.31.10
       drizzle-orm: 0.45.2(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(kysely@0.29.5)(pg@8.22.0)
       pg: 8.22.0
-      vitest: 4.1.10(@types/node@24.13.3)(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.12))
+      vitest: 4.1.10(@types/node@24.13.3)(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12))
     transitivePeerDependencies:
       - '@cloudflare/workers-types'
       - '@opentelemetry/api'
@@ -3961,7 +3961,7 @@ snapshots:
     optionalDependencies:
       typescript: 7.0.2
 
-  vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.12):
+  vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.5
@@ -3970,14 +3970,14 @@ snapshots:
       tinyglobby: 0.2.17
     optionalDependencies:
       '@types/node': 24.13.3
-      esbuild: 0.28.1
+      esbuild: 0.28.2
       fsevents: 2.3.3
       tsx: 4.23.12
 
-  vitest@4.1.10(@types/node@24.13.3)(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.12)):
+  vitest@4.1.10(@types/node@24.13.3)(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12)):
     dependencies:
       '@vitest/expect': 4.1.10
-      '@vitest/mocker': 4.1.10(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.12))
+      '@vitest/mocker': 4.1.10(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12))
       '@vitest/pretty-format': 4.1.10
       '@vitest/runner': 4.1.10
       '@vitest/snapshot': 4.1.10
@@ -3994,21 +3994,21 @@ snapshots:
       tinyexec: 1.2.4
       tinyglobby: 0.2.17
       tinyrainbow: 3.1.0
-      vite: 8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.12)
+      vite: 8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 24.13.3
     transitivePeerDependencies:
       - msw
 
-  void@0.10.12(arktype@2.2.1)(kysely@0.29.5)(valibot@1.4.1(typescript@7.0.2))(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.12))(vitest@4.1.10(@types/node@24.13.3)(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.12)))(zod@4.4.3):
+  void@0.10.12(arktype@2.2.1)(kysely@0.29.5)(valibot@1.4.1(typescript@7.0.2))(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12))(vitest@4.1.10(@types/node@24.13.3)(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12)))(zod@4.4.3):
     dependencies:
       '@cloudflare/sandbox': 0.12.5
-      '@cloudflare/vite-plugin': 1.51.3(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.12))(wrangler@4.120.0(@cloudflare/workers-types@4.20260702.1))
+      '@cloudflare/vite-plugin': 1.51.3(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12))(wrangler@4.120.0(@cloudflare/workers-types@4.20260702.1))
       '@cloudflare/workers-types': 4.20260702.1
       '@hono/oauth-providers': 0.8.7(hono@4.13.1)
       '@napi-rs/keyring': 1.3.0
-      better-auth: 1.6.27(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(kysely@0.29.5)(pg@8.22.0))(pg@8.22.0)(vitest@4.1.10(@types/node@24.13.3)(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.12)))
+      better-auth: 1.6.27(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(kysely@0.29.5)(pg@8.22.0))(pg@8.22.0)(vitest@4.1.10(@types/node@24.13.3)(vite@8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12)))
       better-sqlite3: 12.11.1
       blake3-jit: 1.1.0
       drizzle-arktype: 0.1.3(arktype@2.2.1)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(kysely@0.29.5)(pg@8.22.0))
@@ -4022,7 +4022,7 @@ snapshots:
       jsonc-parser: 3.3.1
       pg: 8.22.0
       proper-lockfile: 4.1.2
-      vite: 8.2.1(@types/node@24.13.3)(esbuild@0.28.1)(tsx@4.23.12)
+      vite: 8.2.1(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12)
       wrangler: 4.120.0(@cloudflare/workers-types@4.20260702.1)
     optionalDependencies:
       arktype: 2.2.1
