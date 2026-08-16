@@ -45,4 +45,4 @@ jobs:
       # The deploy-time check (bun e2e) needs a live deployment and runs from
       # `vp run deploy`, not here.
       - name: Test
-        run: vp test run
+        run: vp test

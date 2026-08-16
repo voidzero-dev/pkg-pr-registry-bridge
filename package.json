@@ -14,8 +14,7 @@
     "warm": "node scripts/warm.mjs",
     "smoke": "node scripts/smoke-test.mjs",
     "deploy:staging": "void deploy --project pkg-pr-registry-bridge-staging",
-    "test": "vp test run",
-    "test:watch": "vp test",
+    "test": "vp test",
     "test:e2e": "node scripts/e2e-bun.mjs",
     "build:action": "node scripts/build-action.mjs"
   },

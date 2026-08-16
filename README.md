@@ -254,7 +254,7 @@ loads `.env*` into the Worker's vars.
 ```bash
 vp install         # also runs `void prepare` (generates .void/ types)
 vp check           # format + lint + type-check (oxfmt, oxlint, tsgolint)
-vp test run        # vitest, runs the worker in workerd (Miniflare)
+vp test            # vitest, runs the worker in workerd (Miniflare)
 vp dev             # local worker via Miniflare, http://localhost:5173
 ```
 

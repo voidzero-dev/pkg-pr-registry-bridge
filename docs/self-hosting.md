@@ -56,7 +56,7 @@ cd registry-bridge
 curl -fsSL https://vite.plus | bash   # install the vp CLI if you don't have it
 vp install              # also runs `void prepare` (generates .void/ types)
 vp check                # format + lint + type-check
-vp test run             # vitest in workerd (Miniflare), no network/secrets
+vp test                 # vitest in workerd (Miniflare), no network/secrets
 ```
 
 ## 2. Point the bridge at your repo (`.env`)
