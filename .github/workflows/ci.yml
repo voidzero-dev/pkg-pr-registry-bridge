@@ -28,6 +28,12 @@ jobs:
         with:
           cache: true
 
+      # Fail when the lockfile carries duplicate dependency entries that a
+      # dedupe would collapse (Renovate PRs are deduped via the shared
+      # preset's pnpmDedupe post-update option; this gates everyone else).
+      - name: Dedupe check
+        run: vp dedupe --check
+
       # vp check runs oxfmt, oxlint and the type-aware pass (tsgolint),
       # covering both tsconfig projects (Worker + publish action).
       - name: Check
