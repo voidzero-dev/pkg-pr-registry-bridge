@@ -8,7 +8,6 @@
   "scripts": {
     "dev": "vp dev",
     "build": "vp build",
-    "check": "vp check",
     "prepare": "vp config && void prepare",
     "deploy": "void deploy && node scripts/e2e-bun.mjs",
     "deploy:only": "void deploy",

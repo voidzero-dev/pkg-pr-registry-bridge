@@ -252,10 +252,10 @@ Hono registry app in `src/app.ts`. Void infers the `STORAGE` R2 binding and
 loads `.env*` into the Worker's vars.
 
 ```bash
-pnpm install       # also runs `void prepare` (generates .void/ types)
-pnpm check         # format + lint + type-check (oxfmt, oxlint, tsgolint)
-pnpm test          # vitest, runs the worker in workerd (Miniflare)
-pnpm dev           # `vp dev` (local worker via Miniflare, http://localhost:5173)
+vp install         # also runs `void prepare` (generates .void/ types)
+vp check           # format + lint + type-check (oxfmt, oxlint, tsgolint)
+vp test run        # vitest, runs the worker in workerd (Miniflare)
+vp dev             # local worker via Miniflare, http://localhost:5173
 ```
 
 For local admin testing, put `ADMIN_TOKEN=…` in `.env.local` (gitignored).

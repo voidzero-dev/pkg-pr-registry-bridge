@@ -53,9 +53,10 @@ point the bridge at a different project.
 ```bash
 git clone https://github.com/acme-corp/registry-bridge.git   # your fork
 cd registry-bridge
-pnpm install            # also runs `void prepare` (generates .void/ types)
-pnpm check              # format + lint + type-check
-pnpm test               # vitest in workerd (Miniflare), no network/secrets
+curl -fsSL https://vite.plus | bash   # install the vp CLI if you don't have it
+vp install              # also runs `void prepare` (generates .void/ types)
+vp check                # format + lint + type-check
+vp test run             # vitest in workerd (Miniflare), no network/secrets
 ```
 
 ## 2. Point the bridge at your repo (`.env`)
