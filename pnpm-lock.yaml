@@ -236,9 +236,6 @@ importers:
       '@types/node':
         specifier: ^24.13.2
         version: 24.13.3
-      esbuild:
-        specifier: ^0.28.1
-        version: 0.28.2
       node:
         specifier: runtime:24.19.0
         version: runtime:24.19.0
