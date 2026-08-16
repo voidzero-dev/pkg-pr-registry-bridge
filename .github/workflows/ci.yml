@@ -59,8 +59,9 @@ jobs:
           # The action shells out to `pnpm pack` and documents that consumers
           # provide pnpm (action.yml: "run pnpm/action-setup and `pnpm install`
           # first"). setup-vp keeps its managed pnpm internal to vp, so install
-          # the devEngines-pinned version for the smoke run.
-          npm install -g "pnpm@$(node -p 'require("./package.json").devEngines.packageManager.version')"
+          # the devEngines-pinned version for the smoke run; vp's global bin
+          # dir is already on PATH.
+          vp install -g "pnpm@$(node -p 'require("./package.json").devEngines.packageManager.version')"
           mkdir -p "$RUNNER_TEMP/action-smoke/pkgs/pkg-a" "$RUNNER_TEMP/action-smoke/pkgs/pkg-b"
           cat > "$RUNNER_TEMP/action-smoke/pkgs/pkg-a/package.json" <<'EOF'
           { "name": "@bridge-smoke/pkg-a", "version": "0.0.0" }
