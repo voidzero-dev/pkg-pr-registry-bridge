@@ -1,12 +1,7 @@
 import type { Env } from '../config'
 import { HttpError } from '../httpError'
 import { timingSafeEqual } from './timingSafeEqual'
-import {
-  getOidcConfig,
-  looksLikeJwt,
-  verifyOidcToken,
-  type OidcClaims,
-} from './oidc'
+import { getOidcConfig, looksLikeJwt, verifyOidcToken, type OidcClaims } from './oidc'
 
 interface AuthInput {
   env: { ADMIN_TOKEN?: string }
@@ -14,9 +9,7 @@ interface AuthInput {
 }
 
 /** Who is making a write request. */
-export type Publisher =
-  | { kind: 'admin' }
-  | { kind: 'oidc'; claims: OidcClaims }
+export type Publisher = { kind: 'admin' } | { kind: 'oidc'; claims: OidcClaims }
 
 function bearer(authorization: string | undefined): string {
   return (authorization ?? '').replace(/^Bearer\s+/i, '')
@@ -92,16 +85,10 @@ export async function requirePublisher({
  * that lookup without a GitHub API dependency, so it enforces the containment
  * it can.
  */
-export function assertPrUrlInRepository(
-  prUrl: string,
-  publisher: Publisher,
-): void {
+export function assertPrUrlInRepository(prUrl: string, publisher: Publisher): void {
   if (publisher.kind !== 'oidc') return
   const expected = `https://github.com/${publisher.claims.repository}/pull/`
   if (!prUrl.startsWith(expected)) {
-    throw new HttpError(
-      403,
-      `prUrl must be a pull request of ${publisher.claims.repository}`,
-    )
+    throw new HttpError(403, `prUrl must be a pull request of ${publisher.claims.repository}`)
   }
 }

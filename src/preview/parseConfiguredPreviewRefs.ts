@@ -52,15 +52,11 @@ function splitRefs(input: string | undefined): string[] {
 }
 
 /** Strict parser: throws on an invalid or non-commit ref. */
-export function parseConfiguredPreviewRefs(
-  input: string | undefined,
-): ParsedPreviewRef[] {
+export function parseConfiguredPreviewRefs(input: string | undefined): ParsedPreviewRef[] {
   return splitRefs(input).map((value) => {
     const ref = parseSingleRef(value)
     if (!ref) {
-      throw new Error(
-        `Invalid preview ref (only commit.<sha> is supported): ${value}`,
-      )
+      throw new Error(`Invalid preview ref (only commit.<sha> is supported): ${value}`)
     }
     return ref
   })

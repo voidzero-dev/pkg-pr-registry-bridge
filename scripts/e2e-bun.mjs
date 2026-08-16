@@ -49,10 +49,7 @@ async function resolveVersion(base) {
 }
 
 const config = readConfig()
-const bridgeUrl = (process.env.BRIDGE_URL || config.baseUrl || '').replace(
-  /\/+$/,
-  '',
-)
+const bridgeUrl = (process.env.BRIDGE_URL || config.baseUrl || '').replace(/\/+$/, '')
 
 if (!bridgeUrl) {
   console.error('e2e: could not determine bridge URL (set BRIDGE_URL)')
@@ -70,9 +67,7 @@ await waitForHealth(bridgeUrl)
 
 const version = await resolveVersion(bridgeUrl)
 if (!version) {
-  console.log(
-    'e2e: no preview ref available on the bridge; nothing to validate, skipping.',
-  )
+  console.log('e2e: no preview ref available on the bridge; nothing to validate, skipping.')
   process.exit(0)
 }
 
@@ -159,14 +154,10 @@ try {
       }
       const pkg = JSON.parse(fs.readFileSync(pj, 'utf8'))
       if (pkg.name !== expectedName) {
-        failures.push(
-          `node_modules/${name}: name ${pkg.name} !== ${expectedName}`,
-        )
+        failures.push(`node_modules/${name}: name ${pkg.name} !== ${expectedName}`)
       }
       if (pkg.version !== expectedVersion) {
-        failures.push(
-          `node_modules/${name}: version ${pkg.version} !== ${expectedVersion}`,
-        )
+        failures.push(`node_modules/${name}: version ${pkg.version} !== ${expectedVersion}`)
       }
       if (pkg.name === expectedName && pkg.version === expectedVersion) {
         console.log(`  ✓ node_modules/${name} -> ${pkg.name}@${pkg.version}`)

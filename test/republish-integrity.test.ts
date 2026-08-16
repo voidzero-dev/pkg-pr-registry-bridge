@@ -1,12 +1,7 @@
 import { SELF, env } from 'cloudflare:test'
-import {
-  casKey,
-  metaIndexKey,
-  metaKey,
-  tarballKey,
-} from '../src/cache/r2Cache'
+import { casKey, metaIndexKey, metaKey, tarballKey } from '../src/cache/r2Cache'
 import { computeDigests } from '../src/tarball/digests'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
 import { createTarGzip } from 'nanotar'
 
 // Content-addressed tarball URLs: the dist.shasum lives in the URL/key, so a
@@ -26,7 +21,8 @@ const NAME = 'vite-plus'
 // tests do not depend on npm.
 beforeAll(() => {
   vi.stubGlobal('fetch', (input: RequestInfo | URL) => {
-    const url = typeof input === 'string' ? input : input.toString()
+    const url =
+      typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
     if (url.startsWith('https://registry.npmjs.org/')) {
       return Promise.resolve(
         new Response(JSON.stringify({ error: 'Not found' }), {
@@ -44,10 +40,7 @@ afterAll(() => vi.unstubAllGlobals())
 // A gzipped preview tarball whose `index.js` carries a marker, so two builds of
 // the same (name, version) can be given DISTINCT bytes (and thus distinct
 // shasums), mirroring a non-byte-reproducible rebuild.
-function makeTarball(
-  pkg: Record<string, any>,
-  marker: string,
-): Promise<Uint8Array> {
+function makeTarball(pkg: Record<string, any>, marker: string): Promise<Uint8Array> {
   return createTarGzip([
     { name: 'package/package.json', data: JSON.stringify(pkg) },
     { name: 'package/index.js', data: `export const build = ${JSON.stringify(marker)}\n` },
@@ -83,7 +76,9 @@ async function publishRegister(
     headers: JSON_AUTH,
     body: JSON.stringify({
       ref,
-      packages: [{ name, version, packageJson, integrity: digests.integrity, shasum: digests.shasum }],
+      packages: [
+        { name, version, packageJson, integrity: digests.integrity, shasum: digests.shasum },
+      ],
     }),
   })
   expect(pub.status).toBe(201)
@@ -233,9 +228,7 @@ describe('content-addressed republish integrity', () => {
       redirect: 'manual',
     })
     expect(res.status).toBe(302)
-    expect(res.headers.get('location')).toBe(
-      `${BASE}/tarballs/${NAME}/${version}/${shasum}.tgz`,
-    )
+    expect(res.headers.get('location')).toBe(`${BASE}/tarballs/${NAME}/${version}/${shasum}.tgz`)
     // The version->build mapping is mutable, so the redirect is not cached.
     expect(res.headers.get('cache-control')).toBe('no-store')
 

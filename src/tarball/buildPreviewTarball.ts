@@ -1,9 +1,4 @@
-import {
-  createTar,
-  parseTarGzip,
-  type ParsedTarFileItem,
-  type TarFileInput,
-} from 'nanotar'
+import { createTar, parseTarGzip, type ParsedTarFileItem, type TarFileInput } from 'nanotar'
 import { HttpError } from '../httpError'
 import { rewritePackageJson } from './rewritePackageJson'
 import { computeDigests } from './digests'
@@ -39,9 +34,7 @@ function withEndOfArchiveMarker(tar: Uint8Array): Uint8Array {
 
 /** Gzip a byte buffer using the runtime's CompressionStream (deterministic). */
 async function gzip(data: Uint8Array): Promise<Uint8Array> {
-  const stream = new Response(data).body!.pipeThrough(
-    new CompressionStream('gzip'),
-  )
+  const stream = new Response(data).body!.pipeThrough(new CompressionStream('gzip'))
   return new Uint8Array(await new Response(stream).arrayBuffer())
 }
 
@@ -159,9 +152,7 @@ async function parsePackageJson(gzippedTarball: Uint8Array): Promise<{
   pkg: Record<string, any>
 }> {
   const files = await parseTarGzip(gzippedTarball)
-  const pkgEntry = files.find(
-    (f) => isPackageManifest(normalizeEntryName(f.name)) && f.data,
-  )
+  const pkgEntry = files.find((f) => isPackageManifest(normalizeEntryName(f.name)) && f.data)
   if (!pkgEntry || !pkgEntry.data) {
     throw new HttpError(422, 'Upstream tarball is missing package/package.json')
   }

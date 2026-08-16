@@ -62,10 +62,7 @@ export interface TarballRequest {
  * addressed build's basename is a 40-hex shasum, which a `0.0.0-commit.<sha>`
  * version can never be, so there is no ambiguity.
  */
-function parsePrefixedTarballPath(
-  pathname: string,
-  prefix: string,
-): TarballRequest | null {
+function parsePrefixedTarballPath(pathname: string, prefix: string): TarballRequest | null {
   const decoded = decodePath(pathname)
   if (!decoded || !decoded.startsWith(prefix)) return null
 
@@ -142,7 +139,7 @@ export function parseNpmTarballPath(pathname: string): TarballRequest | null {
   const file = decoded.slice(sep + '/-/'.length)
   if (!name || !file.endsWith('.tgz') || file.includes('/')) return null
 
-  const unscoped = name.startsWith('@') ? name.split('/').pop() ?? '' : name
+  const unscoped = name.startsWith('@') ? (name.split('/').pop() ?? '') : name
   if (!unscoped) return null
 
   const base = file.slice(0, -'.tgz'.length)

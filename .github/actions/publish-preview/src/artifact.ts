@@ -14,14 +14,7 @@
  *  - the reader refuses symlinks, so the artifact cannot point at files outside
  *    itself.
  */
-import {
-  lstatSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs'
+import { lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /** Advisory description of a packed batch. Never trusted by the reader. */
@@ -84,10 +77,7 @@ export function prepareOutputDir(dir: string): void {
 }
 
 export function writeManifest(dir: string, manifest: PackManifest): void {
-  writeFileSync(
-    join(dir, MANIFEST_NAME),
-    `${JSON.stringify(manifest, null, 2)}\n`,
-  )
+  writeFileSync(join(dir, MANIFEST_NAME), `${JSON.stringify(manifest, null, 2)}\n`)
 }
 
 /**

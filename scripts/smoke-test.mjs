@@ -33,7 +33,7 @@ if (!base) {
 
 const ADMIN_TOKEN = process.env.SMOKE_ADMIN_TOKEN
 if (WRITE && !ADMIN_TOKEN) {
-  console.error('--write requires SMOKE_ADMIN_TOKEN (the deployment\'s ADMIN_TOKEN)')
+  console.error("--write requires SMOKE_ADMIN_TOKEN (the deployment's ADMIN_TOKEN)")
   process.exit(2)
 }
 
@@ -123,7 +123,9 @@ async function runAdminLifecycle() {
     // 5. Now it is served, and its advertised integrity must match the bytes
     // (the invariant both production incidents violated).
     const dist = await fetchDist()
-    console.log(`    packument after register: integrity=${dist?.integrity?.slice(0, 20)}… tarball=${dist?.tarball}`)
+    console.log(
+      `    packument after register: integrity=${dist?.integrity?.slice(0, 20)}… tarball=${dist?.tarball}`,
+    )
     assert(dist, 'version absent from packument after register')
     assert(dist.integrity === integrity, 'packument integrity != uploaded integrity')
     // dist.tarball is the content-addressed URL: the shasum lives in the path,
@@ -144,13 +146,17 @@ async function runAdminLifecycle() {
     const tres = await fetch(tarUrl)
     const served = new Uint8Array(await tres.arrayBuffer())
     const servedIntegrity = sri(served)
-    console.log(`    GET ${tarUrl} -> ${tres.status}, served integrity=${servedIntegrity.slice(0, 20)}…`)
+    console.log(
+      `    GET ${tarUrl} -> ${tres.status}, served integrity=${servedIntegrity.slice(0, 20)}…`,
+    )
     assert(tres.status === 200, `served tarball status ${tres.status}`)
     assert(servedIntegrity === integrity, 'served tarball bytes != advertised integrity')
   } finally {
     // Fully clean up: unregister too, or every run leaks a registered e2e ref
     // into /-/refs (and packument rebuilds) until the 90-day TTL.
-    const p = await postJson('/-/purge', { package: name, version, unregister: true }).catch(() => null)
+    const p = await postJson('/-/purge', { package: name, version, unregister: true }).catch(
+      () => null,
+    )
     console.log(`    cleanup: purge+unregister -> ${p ? p.status : 'error (ignored)'}`)
   }
 }
@@ -195,10 +201,7 @@ const checks = [
       const body = await res.text()
       const parsed = JSON.parse(body || 'null')
       const nr = Array.isArray(parsed?.refs) ? parsed.refs.length : 'n/a'
-      console.log(
-        `    ${res.status} refs=${nr}` +
-          (res.status === 200 ? '' : ` ${truncate(body)}`),
-      )
+      console.log(`    ${res.status} refs=${nr}` + (res.status === 200 ? '' : ` ${truncate(body)}`))
       assert(res.status === 200, `status ${res.status}`)
       assert(Array.isArray(parsed?.refs), 'refs is not an array')
     },

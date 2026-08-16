@@ -4,7 +4,7 @@
  * skipping it: a silently ignored entry would publish a subset of the batch and
  * look like success.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
 import {
   mkdirSync,
   mkdtempSync,

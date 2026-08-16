@@ -65,10 +65,7 @@ export async function fetchNpmPackument(
  * null. Kept separate from fetchNpmPackument so the served response carries the
  * compact abbreviated version docs while still preserving npm's real times.
  */
-async function fetchNpmTime(
-  env: Env,
-  name: string,
-): Promise<Record<string, string> | null> {
+async function fetchNpmTime(env: Env, name: string): Promise<Record<string, string> | null> {
   const res = await npmFetch(env, name, FULL_ACCEPT)
 
   if (res.status === 404) return null
@@ -76,9 +73,7 @@ async function fetchNpmTime(
 
   const data = (await res.json()) as Record<string, any>
   const time = data?.time
-  return time && typeof time === 'object'
-    ? (time as Record<string, string>)
-    : null
+  return time && typeof time === 'object' ? (time as Record<string, string>) : null
 }
 
 /** Cached npm `time` TTL: short, only to bound a brand-new version's lag. */
@@ -94,16 +89,16 @@ const NPM_TIME_TTL_S = 5 * 60
  * Refs/versions stay fresh (read live), so this adds no publish-visibility lag.
  * KV, not the Cache API, because the Void runtime forbids `caches.default`.
  */
-export async function getNpmTimeCached(
-  env: Env,
-  name: string,
-): Promise<Record<string, string>> {
+export async function getNpmTimeCached(env: Env, name: string): Promise<Record<string, string>> {
   // The fetcher returns the small EXTRACTED map (not the multi-MB body), and `{}`
   // for a 404 so a not-on-npm package is cached and not re-fetched in full every
   // request.
   return (
-    (await kvCached(env, `npm-time/${name}`, NPM_TIME_TTL_S, async () =>
-      (await fetchNpmTime(env, name)) ?? {},
+    (await kvCached(
+      env,
+      `npm-time/${name}`,
+      NPM_TIME_TTL_S,
+      async () => (await fetchNpmTime(env, name)) ?? {},
     )) ?? {}
   )
 }
@@ -122,10 +117,7 @@ const NPM_PACKUMENT_TTL_S = 5 * 60
  * to the TTL, which the served `max-age=300` already allows). A 404 (not on npm)
  * returns null and is left uncached so it stays cheap to re-probe.
  */
-export function getNpmPackumentCached(
-  env: Env,
-  name: string,
-): Promise<Record<string, any> | null> {
+export function getNpmPackumentCached(env: Env, name: string): Promise<Record<string, any> | null> {
   return kvCached(env, `npm-packument/${name}`, NPM_PACKUMENT_TTL_S, () =>
     fetchNpmPackument(env, name),
   )

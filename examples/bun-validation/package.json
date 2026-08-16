@@ -2,19 +2,19 @@
   "name": "bun-validation",
   "version": "0.0.0",
   "private": true,
-  "devDependencies": {
-    "vite": "npm:@voidzero-dev/vite-plus-core@0.0.0-commit.6acea1aa818e96365b5811d47360367ba18a3a05",
-    "@voidzero-dev/vite-plus-core": "0.0.0-commit.6acea1aa818e96365b5811d47360367ba18a3a05",
-    "vite-plus": "0.0.0-commit.6acea1aa818e96365b5811d47360367ba18a3a05"
-  },
-  "overrides": {
-    "vite": "npm:@voidzero-dev/vite-plus-core@0.0.0-commit.6acea1aa818e96365b5811d47360367ba18a3a05"
-  },
   "scripts": {
     "dev": "vp dev",
     "build": "vp build",
     "preview": "vp preview",
     "check": "vp check"
+  },
+  "devDependencies": {
+    "@voidzero-dev/vite-plus-core": "0.0.0-commit.6acea1aa818e96365b5811d47360367ba18a3a05",
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.0.0-commit.6acea1aa818e96365b5811d47360367ba18a3a05",
+    "vite-plus": "0.0.0-commit.6acea1aa818e96365b5811d47360367ba18a3a05"
+  },
+  "overrides": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.0.0-commit.6acea1aa818e96365b5811d47360367ba18a3a05"
   },
   "devEngines": {
     "packageManager": {

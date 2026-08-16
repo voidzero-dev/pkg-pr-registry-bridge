@@ -33,9 +33,7 @@ export async function cleanupExpiredArtifacts(
     let cursor: string | undefined
     do {
       const listing = await env.STORAGE.list({ prefix, cursor })
-      const expired = listing.objects
-        .filter((o) => o.uploaded.getTime() < cutoff)
-        .map((o) => o.key)
+      const expired = listing.objects.filter((o) => o.uploaded.getTime() < cutoff).map((o) => o.key)
       if (expired.length > 0) {
         // R2 bulk delete takes up to 1000 keys; a list page is <= 1000.
         await env.STORAGE.delete(expired)

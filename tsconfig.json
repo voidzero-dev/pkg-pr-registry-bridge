@@ -4,12 +4,8 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "lib": [
-      "ES2022"
-    ],
-    "types": [
-      "void/env"
-    ],
+    "lib": ["ES2022"],
+    "types": ["void/env"],
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
@@ -18,18 +14,8 @@
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": [
-    "src",
-    "routes",
-    "crons",
-    "env.ts",
-    "test",
-    "vite.config.ts",
-    "vitest.config.ts"
-  ],
+  "include": ["src", "routes", "crons", "env.ts", "test", "vite.config.ts", "vitest.config.ts"],
   // The action tests run in Node, not the Worker: tsconfig.action.json checks
   // them (and the action source) against Node types.
-  "exclude": [
-    "test/action"
-  ]
+  "exclude": ["test/action"]
 }

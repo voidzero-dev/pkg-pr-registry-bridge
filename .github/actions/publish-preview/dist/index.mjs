@@ -403,9 +403,7 @@ function withEndOfArchiveMarker(tar) {
   return out;
 }
 async function gzip(data) {
-  const stream = new Response(data).body.pipeThrough(
-    new CompressionStream("gzip")
-  );
+  const stream = new Response(data).body.pipeThrough(new CompressionStream("gzip"));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 var CANONICAL_MTIME_MS = 4991625e5;
@@ -429,9 +427,7 @@ function encodePackageJson(pkg) {
 }
 async function parsePackageJson(gzippedTarball) {
   const files = await parseTarGzip(gzippedTarball);
-  const pkgEntry = files.find(
-    (f) => isPackageManifest(normalizeEntryName(f.name)) && f.data
-  );
+  const pkgEntry = files.find((f) => isPackageManifest(normalizeEntryName(f.name)) && f.data);
   if (!pkgEntry || !pkgEntry.data) {
     throw new HttpError(422, "Upstream tarball is missing package/package.json");
   }
@@ -539,7 +535,7 @@ async function gunzipBounded(gzipped, maxTotalBytes) {
     }
   } catch (err) {
     if (err instanceof HttpError) throw err;
-    reject(`Tarball is not valid gzip: ${err}`);
+    reject(`Tarball is not valid gzip: ${String(err)}`);
   }
   const out = new Uint8Array(total);
   let offset = 0;
@@ -593,7 +589,7 @@ async function validateArchive(gzippedTarball, policy = DEFAULT_ARCHIVE_POLICY) 
   try {
     files = parseTar(inflated);
   } catch (err) {
-    reject(`Tarball is not a readable tar archive: ${err}`);
+    reject(`Tarball is not a readable tar archive: ${String(err)}`);
   }
   assertCanonicalEntries(files, policy);
   return files;
@@ -622,9 +618,7 @@ function parseConfiguredPreviewRefs(input2) {
   return splitRefs(input2).map((value) => {
     const ref = parseSingleRef(value);
     if (!ref) {
-      throw new Error(
-        `Invalid preview ref (only commit.<sha> is supported): ${value}`
-      );
+      throw new Error(`Invalid preview ref (only commit.<sha> is supported): ${value}`);
     }
     return ref;
   });
@@ -632,22 +626,13 @@ function parseConfiguredPreviewRefs(input2) {
 
 // .github/actions/publish-preview/src/localPack.ts
 import { execFile } from "node:child_process";
-import {
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  statSync
-} from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 // src/preview/packages.ts
-var PREVIEW_PACKAGES = /* @__PURE__ */ new Set([
-  "@voidzero-dev/vite-plus-core",
-  "vite-plus"
-]);
+var PREVIEW_PACKAGES = /* @__PURE__ */ new Set(["@voidzero-dev/vite-plus-core", "vite-plus"]);
 function isWorkspacePackage(name, env) {
   const patterns = (env.WORKSPACE_PACKAGES ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   if (patterns.length === 0) return PREVIEW_PACKAGES.has(name);
@@ -735,9 +720,7 @@ async function packDirectory(dir) {
     });
     const tgzs = readdirSync(dest).filter((f) => f.endsWith(".tgz"));
     if (tgzs.length !== 1) {
-      throw new Error(
-        `expected pnpm pack to produce one tarball for ${dir}, found ${tgzs.length}`
-      );
+      throw new Error(`expected pnpm pack to produce one tarball for ${dir}, found ${tgzs.length}`);
     }
     return new Uint8Array(readFileSync(join(dest, tgzs[0])));
   } finally {
@@ -746,14 +729,7 @@ async function packDirectory(dir) {
 }
 
 // .github/actions/publish-preview/src/artifact.ts
-import {
-  lstatSync,
-  mkdirSync,
-  readdirSync as readdirSync2,
-  readFileSync as readFileSync2,
-  rmSync as rmSync2,
-  writeFileSync
-} from "node:fs";
+import { lstatSync, mkdirSync, readdirSync as readdirSync2, readFileSync as readFileSync2, rmSync as rmSync2, writeFileSync } from "node:fs";
 import { join as join2 } from "node:path";
 var MANIFEST_NAME = "manifest.json";
 var MAX_ARTIFACT_PACKAGES = 128;
@@ -771,11 +747,8 @@ function prepareOutputDir(dir) {
   }
 }
 function writeManifest(dir, manifest) {
-  writeFileSync(
-    join2(dir, MANIFEST_NAME),
-    `${JSON.stringify(manifest, null, 2)}
-`
-  );
+  writeFileSync(join2(dir, MANIFEST_NAME), `${JSON.stringify(manifest, null, 2)}
+`);
 }
 function readArtifactTarballs(dir) {
   let entries;
@@ -885,7 +858,7 @@ async function withRetry(label, fn, attempts = 4) {
       if (i < attempts) await new Promise((r) => setTimeout(r, 1e3 * i));
     }
   }
-  throw new Error(`${label} failed after ${attempts} attempts: ${lastErr}`);
+  throw new Error(`${label} failed after ${attempts} attempts: ${String(lastErr)}`);
 }
 var TRANSFER_TIMEOUT_MS = 12e4;
 var PUBLISH_TIMEOUT_MS = 3e4;
@@ -933,13 +906,12 @@ function manifestFromEntries(files, label) {
   try {
     parsed = JSON.parse(new TextDecoder().decode(entry.data));
   } catch (err) {
-    throw new Error(`${label}: invalid package/package.json (${err})`);
+    throw new Error(`${label}: invalid package/package.json (${String(err)})`);
   }
   const projected = { name: parsed.name };
   for (const field of DEPENDENCY_FIELDS) {
-    if (parsed[field]) projected[field] = Object.fromEntries(
-      Object.keys(parsed[field]).map((dep) => [dep, true])
-    );
+    if (parsed[field])
+      projected[field] = Object.fromEntries(Object.keys(parsed[field]).map((dep) => [dep, true]));
   }
   return projected;
 }

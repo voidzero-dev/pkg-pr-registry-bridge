@@ -4,10 +4,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { Env } from './config'
 import { HttpError } from './httpError'
 import { isWorkspacePackage } from './preview/packages'
-import {
-  parsePreviewVersion,
-  shaToVersion,
-} from './preview/parsePreviewVersion'
+import { parsePreviewVersion, shaToVersion } from './preview/parsePreviewVersion'
 import {
   getConfiguredRefs,
   getConfiguredRefsWithEtag,
@@ -29,16 +26,10 @@ import {
   parseTarballPath,
   parseUploadPath,
 } from './registry/parsePackageName'
-import {
-  getNpmPackumentCached,
-  getNpmTimeCached,
-} from './registry/fetchNpmPackument'
+import { getNpmPackumentCached, getNpmTimeCached } from './registry/fetchNpmPackument'
 import { buildVersionMetadata } from './registry/buildVersionMetadata'
 import { redirectToNpm } from './registry/redirectToNpm'
-import {
-  getPreviewMeta,
-  getPreviewTarballBody,
-} from './tarball/getPreviewBuild'
+import { getPreviewMeta, getPreviewTarballBody } from './tarball/getPreviewBuild'
 import type { PreviewMeta } from './tarball/buildPreviewTarball'
 import {
   casKey,
@@ -51,15 +42,8 @@ import {
 } from './cache/r2Cache'
 import { kvCachedText } from './cache/kvCache'
 import { describeError } from './util/errors'
-import {
-  assertPrUrlInRepository,
-  requireAdmin,
-  requirePublisher,
-} from './security/auth'
-import {
-  packumentCacheControl,
-  tarballCacheControl,
-} from './cache/headers'
+import { assertPrUrlInRepository, requireAdmin, requirePublisher } from './security/auth'
+import { packumentCacheControl, tarballCacheControl } from './cache/headers'
 
 /**
  * Fallback `time` (release date) for a preview registered but not yet published
@@ -114,12 +98,7 @@ const publisher = (c: AuthCtx) =>
  * Validate a preview (name, version) target. `unknownStatus` is 404 on the serve
  * paths (the resource isn't found) and 400 on the admin write paths (bad input).
  */
-function assertPreviewTarget(
-  env: Env,
-  name: string,
-  version: string,
-  unknownStatus = 404,
-): void {
+function assertPreviewTarget(env: Env, name: string, version: string, unknownStatus = 404): void {
   if (!isWorkspacePackage(name, env)) {
     throw new HttpError(unknownStatus, `Unknown preview package: ${name || '(empty)'}`)
   }
@@ -316,7 +295,7 @@ app.post('/-/publish', async (c) => {
     // well-formed commit ref); registration itself happens on /-/register.
     parsed = parseConfiguredPreviewRefs(ref)[0]
   } catch (err) {
-    throw new HttpError(400, `Invalid ref: ${ref} (${err})`)
+    throw new HttpError(400, `Invalid ref: ${ref} (${String(err)})`)
   }
   return c.json({ ref, version: parsed.version, published }, 201)
 })
@@ -354,7 +333,7 @@ app.post('/-/register', async (c) => {
     })
   } catch (err) {
     if (err instanceof HttpError) throw err
-    throw new HttpError(400, `Invalid or unregisterable ref: ${ref} (${err})`)
+    throw new HttpError(400, `Invalid or unregisterable ref: ${ref} (${String(err)})`)
   }
   return c.json({ ref, version: parsed.version, publishedAt }, 201)
 })
@@ -421,9 +400,7 @@ app.post('/-/purge', async (c) => {
     c.env.STORAGE.delete(tarballKey(name, version)),
     c.env.STORAGE.delete(metaKey(name, version)),
     removeFromMetaIndex(c.env, name, version),
-    ...(body.unregister === true
-      ? [unregisterRef(c.env, `${parsed.type}.${parsed.ref}`)]
-      : []),
+    ...(body.unregister === true ? [unregisterRef(c.env, `${parsed.type}.${parsed.ref}`)] : []),
   ])
   return c.json({ purged: { package: name, version } })
 })
@@ -456,11 +433,7 @@ app.get('*', async (c) => {
   // pkg.pr.new-style direct download: /<owner>/<repo>[/<pkg>]@<ref> -> 302 to
   // the canonical tarball. Discriminated here (ahead of the packument parse)
   // because the URL shape overlaps the scoped-packument namespace.
-  const download = parsePkgPrNewDownload(
-    pathname,
-    c.env.PREVIEW_OWNER,
-    c.env.PREVIEW_REPO,
-  )
+  const download = parsePkgPrNewDownload(pathname, c.env.PREVIEW_OWNER, c.env.PREVIEW_REPO)
   if (download) {
     return await serveDownloadRedirect(c.env, download, c.req.method === 'HEAD')
   }
@@ -492,8 +465,7 @@ app.get('*', async (c) => {
       readMetaIndex(c.env, name),
     ])
 
-    const packument: Record<string, any> =
-      base ?? { name, 'dist-tags': {}, versions: {} }
+    const packument: Record<string, any> = base ?? { name, 'dist-tags': {}, versions: {} }
 
     packument.name = name
     packument['dist-tags'] ??= {}
@@ -517,15 +489,8 @@ app.get('*', async (c) => {
     await Promise.all(
       refs.map(async (ref) => {
         try {
-          const preview =
-            metaIndex[ref.version] ??
-            (await getPreviewMeta(c.env, name, ref.version))
-          packument.versions[ref.version] = buildVersionMetadata(
-            c.env,
-            name,
-            ref.version,
-            preview,
-          )
+          const preview = metaIndex[ref.version] ?? (await getPreviewMeta(c.env, name, ref.version))
+          packument.versions[ref.version] = buildVersionMetadata(c.env, name, ref.version, preview)
           time[ref.version] = preview.publishedAt ?? UNPUBLISHED_PREVIEW_TIME
         } catch (err) {
           console.warn(
@@ -539,10 +504,7 @@ app.get('*', async (c) => {
     // Mutable `pr-<n>` dist-tags: point each PR at its latest-published commit
     // version present in this packument, so `<pkg>@pr-<n>` installs the PR's head
     // build. The per-commit versions stay immutable; only the tag moves.
-    for (const [prNum, version] of latestVersionByPr(
-      refs,
-      (v) => v in packument.versions,
-    )) {
+    for (const [prNum, version] of latestVersionByPr(refs, (v) => v in packument.versions)) {
       packument['dist-tags'][`pr-${prNum}`] = version
     }
 

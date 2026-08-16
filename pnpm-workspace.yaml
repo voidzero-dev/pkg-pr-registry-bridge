@@ -10,3 +10,17 @@ allowBuilds:
   better-sqlite3: false
 minimumReleaseAgeExclude:
   - void@0.10.5
+catalog:
+  vite: npm:@voidzero-dev/vite-plus-core@0.2.9
+  vitest: 4.1.10
+  vite-plus: 0.2.9
+overrides:
+  vite: 'catalog:'
+  vitest: 'catalog:'
+peerDependencyRules:
+  allowAny:
+    - vite
+    - vitest
+  allowedVersions:
+    vite: '*'
+    vitest: '*'

@@ -1,12 +1,6 @@
 import type { Env } from '../config'
 import { HttpError } from '../httpError'
-import {
-  casKey,
-  isShasum,
-  metaKey,
-  tarballContentUrl,
-  tarballKey,
-} from '../cache/r2Cache'
+import { casKey, isShasum, metaKey, tarballContentUrl, tarballKey } from '../cache/r2Cache'
 import { r2Get } from '../cache/r2Get'
 import { resolveVersionMeta } from '../preview/metaIndex'
 import type { PreviewMeta } from './buildPreviewTarball'
@@ -82,7 +76,8 @@ export async function getPreviewTarballBody(
     const meta = await resolveVersionMeta(env, name, version)
     if (meta && meta.shasum === shasum) {
       const legacy = await r2Get(env, tarballKey(name, version))
-      if (legacy) return { kind: 'body', body: legacy.body, contentLength: legacy.size, immutable: false }
+      if (legacy)
+        return { kind: 'body', body: legacy.body, contentLength: legacy.size, immutable: false }
     }
     throw new HttpError(404, `No such tarball: ${name}@${version} (${shasum})`)
   }
@@ -98,7 +93,8 @@ export async function getPreviewTarballBody(
   // No published shasum yet: serve legacy version-addressed bytes if present,
   // else 404 (nothing published for this version).
   const legacy = await r2Get(env, tarballKey(name, version))
-  if (legacy) return { kind: 'body', body: legacy.body, contentLength: legacy.size, immutable: false }
+  if (legacy)
+    return { kind: 'body', body: legacy.body, contentLength: legacy.size, immutable: false }
 
   throw new HttpError(404, `No such tarball: ${name}@${version}`)
 }

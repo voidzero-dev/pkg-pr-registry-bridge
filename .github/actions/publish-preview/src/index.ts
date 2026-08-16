@@ -78,7 +78,7 @@ async function withRetry<T>(label: string, fn: () => Promise<T>, attempts = 4): 
       if (i < attempts) await new Promise((r) => setTimeout(r, 1000 * i))
     }
   }
-  throw new Error(`${label} failed after ${attempts} attempts: ${lastErr}`)
+  throw new Error(`${label} failed after ${attempts} attempts: ${String(lastErr)}`)
 }
 
 // Per-attempt fetch deadlines. Without one, a hung connection stalls up to
@@ -206,13 +206,12 @@ function manifestFromEntries(
   try {
     parsed = JSON.parse(new TextDecoder().decode(entry.data))
   } catch (err) {
-    throw new Error(`${label}: invalid package/package.json (${err})`)
+    throw new Error(`${label}: invalid package/package.json (${String(err)})`)
   }
   const projected: Record<string, any> = { name: parsed.name }
   for (const field of DEPENDENCY_FIELDS) {
-    if (parsed[field]) projected[field] = Object.fromEntries(
-      Object.keys(parsed[field]).map((dep) => [dep, true]),
-    )
+    if (parsed[field])
+      projected[field] = Object.fromEntries(Object.keys(parsed[field]).map((dep) => [dep, true]))
   }
   return projected
 }
@@ -277,8 +276,7 @@ async function publishAll(opts: {
   for (const [i, source] of sources.entries()) {
     const { name } = source
     const bytes = await (nextBytes ?? startRead(i))
-    nextBytes =
-      source.prefetch && i + 1 < sources.length ? startRead(i + 1) : null
+    nextBytes = source.prefetch && i + 1 < sources.length ? startRead(i + 1) : null
     const build = await buildPreviewTarball(bytes, name, version, batch)
     await uploadTarball(bridge, auth, name, version, build.tarball, build.shasum)
     await post(
@@ -346,12 +344,13 @@ async function main(): Promise<void> {
   // it and produce the canonical ref + synthetic version (one source of truth).
   // In `upload` mode this is wired to workflow_run.head_sha, a trusted payload
   // field, and is what makes the artifact's own manifest advisory.
-  const rawSha = input('sha', true).toLowerCase().replace(/^commit\./, '')
+  const rawSha = input('sha', true)
+    .toLowerCase()
+    .replace(/^commit\./, '')
   const [parsed] = parseConfiguredPreviewRefs(`commit.${rawSha}`)
   const ref = `commit.${parsed.ref}`
   const version = parsed.version
-  const workspacePackages =
-    input('workspace-packages') || 'vite-plus,@voidzero-dev/vite-plus-*'
+  const workspacePackages = input('workspace-packages') || 'vite-plus,@voidzero-dev/vite-plus-*'
   const env = { WORKSPACE_PACKAGES: workspacePackages }
   const cwd = process.cwd()
 

@@ -6,7 +6,7 @@
  * built on "find the first package/package.json" passes while pnpm extracts
  * the last, so the validator would approve metadata no consumer ever sees.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import { createTar, createTarGzip, type TarFileInput } from 'nanotar'
 import {
   assertBoundedTarRecords,
@@ -139,7 +139,6 @@ function paxRecord(key: string, value: string): Uint8Array {
   return new TextEncoder().encode(`${digits + suffix.length}${suffix}`)
 }
 
-
 describe('validateArchive: accepts real package tarballs', () => {
   it('accepts a normal npm layout', async () => {
     const files = await validateArchive(await createTarGzip(goodEntries()))
@@ -188,9 +187,7 @@ describe('validateArchive: parser differentials', () => {
       { name: 'package/package.json', data: manifest() },
       { name: './package/package.json', data: manifest({ name: 'evil' }) },
     ])
-    await expect(validateArchive(archive)).rejects.toThrow(
-      /Duplicate entry|more than one/,
-    )
+    await expect(validateArchive(archive)).rejects.toThrow(/Duplicate entry|more than one/)
   })
 
   it('rejects a duplicate manifest disguised by a doubled slash', async () => {
@@ -248,7 +245,12 @@ describe('validateArchive: unsafe paths and entry types', () => {
 
   // Reachable only by calling the entry policy directly, which is exactly the
   // point: if nanotar ever stops sanitizing, these are what still refuse.
-  const file = { name: 'package/package.json', type: 'file', size: 2, data: new Uint8Array([123, 125]) }
+  const file = {
+    name: 'package/package.json',
+    type: 'file',
+    size: 2,
+    data: new Uint8Array([123, 125]),
+  }
   const withEntry = (name: string) =>
     [file, { name, type: 'file', size: 1, data: new Uint8Array([120]) }] as never
 
@@ -261,9 +263,7 @@ describe('validateArchive: unsafe paths and entry types', () => {
   })
 
   it('refuses a drive-letter path on its own', () => {
-    expect(() => assertCanonicalEntries(withEntry('C:/windows/x.dll'))).toThrow(
-      /drive-letter/i,
-    )
+    expect(() => assertCanonicalEntries(withEntry('C:/windows/x.dll'))).toThrow(/drive-letter/i)
   })
 
   it('refuses a backslash traversal on its own', () => {
@@ -303,12 +303,15 @@ describe('validateArchive: unsafe paths and entry types', () => {
       // and nanotar's writer does not emit these types.
       const typed = files.map((f, i) =>
         i === 1
-          ? { ...f, type: { '1': 'hardLink', '2': 'symbolicLink', '3': 'characterDevice', '6': 'fifo' }[typeFlag] }
+          ? {
+              ...f,
+              type: { '1': 'hardLink', '2': 'symbolicLink', '3': 'characterDevice', '6': 'fifo' }[
+                typeFlag
+              ],
+            }
           : f,
       )
-      expect(() => assertCanonicalEntries(typed as never)).toThrow(
-        /Unsupported tar entry type/,
-      )
+      expect(() => assertCanonicalEntries(typed as never)).toThrow(/Unsupported tar entry type/)
     })
   }
 
@@ -371,16 +374,12 @@ describe('validateArchive: size and count bounds', () => {
   })
 
   it('rejects non-gzip input', async () => {
-    await expect(validateArchive(new Uint8Array([1, 2, 3, 4]))).rejects.toThrow(
-      /not valid gzip/,
-    )
+    await expect(validateArchive(new Uint8Array([1, 2, 3, 4]))).rejects.toThrow(/not valid gzip/)
   })
 
   it('rejects gzip that is not a tar archive', async () => {
     const notTar = await gzipBytes(new TextEncoder().encode('hello world'))
-    await expect(validateArchive(notTar)).rejects.toThrow(
-      /no entries|not a readable tar archive/,
-    )
+    await expect(validateArchive(notTar)).rejects.toThrow(/no entries|not a readable tar archive/)
   })
 })
 
