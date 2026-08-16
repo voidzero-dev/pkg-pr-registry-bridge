@@ -16,7 +16,7 @@
     "deploy:staging": "void deploy --project pkg-pr-registry-bridge-staging",
     "test": "vp test",
     "test:e2e": "node scripts/e2e-bun.mjs",
-    "build:action": "node scripts/build-action.mjs"
+    "build:action": "vp pack"
   },
   "dependencies": {
     "hono": "^4.12.27",
@@ -25,7 +25,6 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.21.0",
     "@types/node": "^24.13.2",
-    "esbuild": "^0.28.1",
     "typescript": "^7.0.0",
     "vite": "catalog:",
     "vite-plus": "catalog:",
