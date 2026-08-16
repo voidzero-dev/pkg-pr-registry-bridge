@@ -46,6 +46,49 @@ jobs:
           vp run build:action
           git diff --exit-code -- .github/actions/publish-preview/dist
 
+      # The steps above prove the bundle rebuilds reproducibly; these prove it
+      # RUNS. `uses: ./` executes the committed dist exactly as a consumer
+      # would (action.yml -> node24 -> dist/index.mjs), in the network-free
+      # `pack` mode against a throwaway fixture in RUNNER_TEMP (outside the
+      # checkout, so pnpm cannot mistake it for this workspace). It exercises
+      # input parsing, ref/version derivation, glob expansion, batch
+      # validation of a cross-package dep, `pnpm pack`, and the artifact
+      # contract (pkg-<n>.tgz + manifest.json + the `version` output).
+      - name: Prepare action smoke fixture
+        run: |
+          mkdir -p "$RUNNER_TEMP/action-smoke/pkgs/pkg-a" "$RUNNER_TEMP/action-smoke/pkgs/pkg-b"
+          cat > "$RUNNER_TEMP/action-smoke/pkgs/pkg-a/package.json" <<'EOF'
+          { "name": "@bridge-smoke/pkg-a", "version": "0.0.0" }
+          EOF
+          cat > "$RUNNER_TEMP/action-smoke/pkgs/pkg-b/package.json" <<'EOF'
+          {
+            "name": "@bridge-smoke/pkg-b",
+            "version": "0.0.0",
+            "dependencies": { "@bridge-smoke/pkg-a": "0.0.0" }
+          }
+          EOF
+      - name: Smoke-run action bundle (pack mode)
+        id: action-smoke
+        uses: ./
+        with:
+          mode: pack
+          sha: ${{ github.sha }}
+          packages: ${{ runner.temp }}/action-smoke/pkgs/*
+          workspace-packages: '@bridge-smoke/*'
+          output-dir: ${{ runner.temp }}/action-smoke/out
+      - name: Verify smoke output
+        env:
+          VERSION: ${{ steps.action-smoke.outputs.version }}
+        run: |
+          out="$RUNNER_TEMP/action-smoke/out"
+          ls -l "$out"
+          test -s "$out/pkg-0.tgz"
+          test -s "$out/pkg-1.tgz"
+          tar -tzf "$out/pkg-0.tgz" | grep -qx 'package/package.json'
+          jq -e --arg v "$VERSION" \
+            '.version == $v and [.packages[].name] == ["@bridge-smoke/pkg-a", "@bridge-smoke/pkg-b"]' \
+            "$out/manifest.json"
+
       # vitest runs the Worker in workerd (Miniflare); no network or secrets.
       # The deploy-time check (bun e2e) needs a live deployment and runs from
       # `vp run deploy`, not here.
