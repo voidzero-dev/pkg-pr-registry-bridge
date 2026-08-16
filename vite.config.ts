@@ -27,7 +27,7 @@ export default defineConfig({
     outDir: '.github/actions/publish-preview/dist',
     format: 'esm',
     platform: 'node',
-    target: 'node20',
+    target: 'node22',
     fixedExtension: true,
     // The action runs with no install step, so every dependency must land in
     // the bundle (node builtins stay external); onlyBundle: false silences the
