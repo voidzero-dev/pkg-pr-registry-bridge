@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { isR2TransientError, r2Get } from '../src/cache/r2Get'
 import { describeError } from '../src/util/errors'
 import type { Env } from '../src/config'
@@ -28,7 +28,9 @@ describe('isR2TransientError', () => {
   })
 
   it('rejects other errors and non-errors', () => {
-    expect(isR2TransientError(new Error('get: The specified object does not exist. (10007)'))).toBe(false)
+    expect(isR2TransientError(new Error('get: The specified object does not exist. (10007)'))).toBe(
+      false,
+    )
     expect(isR2TransientError(new Error('network timeout'))).toBe(false)
     expect(isR2TransientError('(10001)')).toBe(false)
     expect(isR2TransientError(undefined)).toBe(false)
@@ -47,10 +49,7 @@ describe('r2Get', () => {
   it('retries once on 10001 and returns the second result', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const obj = { body: 'bytes' }
-    const get = vi
-      .fn()
-      .mockRejectedValueOnce(r2InternalError())
-      .mockResolvedValueOnce(obj)
+    const get = vi.fn().mockRejectedValueOnce(r2InternalError()).mockResolvedValueOnce(obj)
     const result = await r2Get(envWithGet(get), 'meta/pkg/1.0.0')
     expect(result).toBe(obj)
     expect(get).toHaveBeenCalledTimes(2)
@@ -72,10 +71,7 @@ describe('r2Get', () => {
   it('rethrows with the key attached when the retry also fails', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const second = r2InternalError()
-    const get = vi
-      .fn()
-      .mockRejectedValueOnce(r2InternalError())
-      .mockRejectedValueOnce(second)
+    const get = vi.fn().mockRejectedValueOnce(r2InternalError()).mockRejectedValueOnce(second)
     const err = await r2Get(envWithGet(get), 'meta/pkg/1.0.0').then(
       () => {
         throw new Error('expected r2Get to reject')

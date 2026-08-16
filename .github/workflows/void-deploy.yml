@@ -25,23 +25,19 @@ jobs:
       # Actions are pinned to a full commit SHA (org policy); kept in sync with ci.yml.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      # setup-vp installs vp (version resolved from the pnpm catalog), the
+      # Node.js and pnpm pinned in devEngines, and the project dependencies,
+      # with lockfile-keyed caching.
+      - uses: voidzero-dev/setup-vp@313600b80b104eadebb9111787d37a2e83e014ca # v1.17.0
         with:
-          version: 11.21.0
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
+          cache: true
 
       # Staging-first gate, even though PRs already smoke-test staging
       # (staging.yml), a change can still reach main without that check: a fork
       # PR can't read VOID_TOKEN, and direct pushes skip PR CI. So re-run the
       # staging deploy + smoke here and only ship to production when it passes.
       - name: Deploy to staging
-        run: pnpm exec void deploy --project pkg-pr-registry-bridge-staging
+        run: vp run deploy:staging
 
       # --write runs the admin write lifecycle too (see scripts/smoke-test.mjs
       # header); staging only, production smoke below stays read-only.
@@ -52,7 +48,7 @@ jobs:
 
       # Only reached when the staging smoke test passed.
       - name: Deploy to production
-        run: pnpm exec void deploy
+        run: vp run deploy:only
         env:
           # VOID_PROJECT is required because the project link in `.void/` is
           # gitignored, so there is nothing to resolve from in CI. The OIDC

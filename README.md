@@ -134,7 +134,7 @@ networkConcurrency = 8
 ## Why the bridge needs a list of preview refs
 
 A package manager fetches the **packument** (`GET /vite-plus`) to discover which
-versions exist *before* it resolves a version, and the request carries no
+versions exist _before_ it resolves a version, and the request carries no
 desired-version hint. So the bridge has to know which synthetic preview versions
 to list in that packument. pkg.pr.new has no API to enumerate its builds as
 semver versions, so the set is maintained explicitly.
@@ -232,12 +232,12 @@ Non-secret values are declared in `env.ts` (typed and validated) and set in
 `.env` (committed), with per-environment overrides in `.env.production`. Secrets
 are uploaded with `void secret put`:
 
-| Var | Meaning |
-| --- | --- |
-| `PUBLIC_BASE_URL` | Public origin of the bridge; used in `dist.tarball` URLs. Must match the deployed route. |
-| `NPM_REGISTRY` | npm fallback registry (`https://registry.npmjs.org`). |
-| `PREVIEW_OWNER` / `PREVIEW_REPO` | Fixed upstream repo (`voidzero-dev` / `vite-plus`). |
-| `WORKSPACE_PACKAGES` | Allowlist for the tarball endpoint. Exact names or `prefix*`, e.g. `vite-plus,@voidzero-dev/vite-plus-*`. |
+| Var                              | Meaning                                                                                                   |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `PUBLIC_BASE_URL`                | Public origin of the bridge; used in `dist.tarball` URLs. Must match the deployed route.                  |
+| `NPM_REGISTRY`                   | npm fallback registry (`https://registry.npmjs.org`).                                                     |
+| `PREVIEW_OWNER` / `PREVIEW_REPO` | Fixed upstream repo (`voidzero-dev` / `vite-plus`).                                                       |
+| `WORKSPACE_PACKAGES`             | Allowlist for the tarball endpoint. Exact names or `prefix*`, e.g. `vite-plus,@voidzero-dev/vite-plus-*`. |
 
 Bindings/secrets:
 
@@ -252,10 +252,10 @@ Hono registry app in `src/app.ts`. Void infers the `STORAGE` R2 binding and
 loads `.env*` into the Worker's vars.
 
 ```bash
-pnpm install       # also runs `void prepare` (generates .void/ types)
-pnpm typecheck
-pnpm test          # vitest, runs the worker in workerd (Miniflare)
-pnpm dev           # `vite dev` (local worker via Miniflare, http://localhost:5173)
+vp install         # also runs `void prepare` (generates .void/ types)
+vp check           # format + lint + type-check (oxfmt, oxlint, tsgolint)
+vp test            # vitest, runs the worker in workerd (Miniflare)
+vp dev             # local worker via Miniflare, http://localhost:5173
 ```
 
 For local admin testing, put `ADMIN_TOKEN=…` in `.env.local` (gitignored).

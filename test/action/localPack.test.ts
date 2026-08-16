@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test'
 import {
   assertValidBatch,
   expandPackageDirs,
@@ -79,37 +79,29 @@ afterAll(() => {
 
 describe('parsePackagesInput', () => {
   it('splits on newlines and commas, dropping blanks', () => {
-    expect(
-      parsePackagesInput('packages/cli\n packages/core ,packages/cli/npm/*\n\n'),
-    ).toEqual(['packages/cli', 'packages/core', 'packages/cli/npm/*'])
+    expect(parsePackagesInput('packages/cli\n packages/core ,packages/cli/npm/*\n\n')).toEqual([
+      'packages/cli',
+      'packages/core',
+      'packages/cli/npm/*',
+    ])
   })
 })
 
 describe('expandPackageDirs', () => {
   it('expands globs to package dirs and keeps explicit dirs', () => {
     const dirs = expandPackageDirs(['packages/cli', 'packages/cli/npm/*'], root)
-    expect(dirs).toEqual([
-      join(root, 'packages/cli'),
-      join(root, 'packages/cli/npm/darwin-arm64'),
-    ])
+    expect(dirs).toEqual([join(root, 'packages/cli'), join(root, 'packages/cli/npm/darwin-arm64')])
     expect(readManifest(dirs[1]).name).toBe('@voidzero-dev/vite-plus-darwin-arm64')
   })
 
   it('dedupes overlapping patterns', () => {
     const dirs = expandPackageDirs(['packages/*', 'packages/cli'], root)
-    expect(dirs).toEqual([
-      join(root, 'packages/cli'),
-      join(root, 'packages/prompts'),
-    ])
+    expect(dirs).toEqual([join(root, 'packages/cli'), join(root, 'packages/prompts')])
   })
 
   it('fails loudly on an explicit dir without a package.json', () => {
-    expect(() => expandPackageDirs(['packages/nope'], root)).toThrow(
-      /no package\.json/,
-    )
-    expect(() => expandPackageDirs(['packages/nope/*'], root)).toThrow(
-      /matched no directory/,
-    )
+    expect(() => expandPackageDirs(['packages/nope'], root)).toThrow(/no package\.json/)
+    expect(() => expandPackageDirs(['packages/nope/*'], root)).toThrow(/matched no directory/)
   })
 })
 
@@ -121,7 +113,10 @@ describe('assertValidBatch', () => {
 
   it('returns the batch names when every workspace dep is covered', () => {
     const batch = assertValidBatch(
-      [pkg('vite-plus', { '@voidzero-dev/vite-plus-prompts': '0.2.2', picomatch: '^2.3.1' }), pkg('@voidzero-dev/vite-plus-prompts')],
+      [
+        pkg('vite-plus', { '@voidzero-dev/vite-plus-prompts': '0.2.2', picomatch: '^2.3.1' }),
+        pkg('@voidzero-dev/vite-plus-prompts'),
+      ],
       env,
     )
     expect(batch).toEqual(new Set(['vite-plus', '@voidzero-dev/vite-plus-prompts']))
@@ -132,17 +127,14 @@ describe('assertValidBatch', () => {
     expect(() => assertValidBatch([pkg('left-pad')], env)).toThrow(
       /not an allowed workspace package/,
     )
-    expect(() =>
-      assertValidBatch([pkg('vite-plus'), pkg('vite-plus')], env),
-    ).toThrow(/duplicate package/)
+    expect(() => assertValidBatch([pkg('vite-plus'), pkg('vite-plus')], env)).toThrow(
+      /duplicate package/,
+    )
   })
 
   it('rejects a workspace dep missing from the batch', () => {
     expect(() =>
-      assertValidBatch(
-        [pkg('vite-plus', { '@voidzero-dev/vite-plus-prompts': '0.2.2' })],
-        env,
-      ),
+      assertValidBatch([pkg('vite-plus', { '@voidzero-dev/vite-plus-prompts': '0.2.2' })], env),
     ).toThrow(/not in this publish batch/)
   })
 })
@@ -154,9 +146,7 @@ describe('packDirectory', () => {
     // pnpm pack resolved `workspace:*` to the concrete version; a batch of just
     // vite-plus leaves that (unlisted) workspace dep alone.
     const solo = await buildPreviewTarball(packed, 'vite-plus', VERSION, new Set(['vite-plus']))
-    expect(solo.packageJson.dependencies['@voidzero-dev/vite-plus-prompts']).toBe(
-      '0.2.2',
-    )
+    expect(solo.packageJson.dependencies['@voidzero-dev/vite-plus-prompts']).toBe('0.2.2')
 
     // Publishing prompts in the same batch pins the dep to the synthetic
     // version, so the whole batch resolves through the bridge.
@@ -167,9 +157,7 @@ describe('packDirectory', () => {
       new Set(['vite-plus', '@voidzero-dev/vite-plus-prompts']),
     )
     expect(build.packageJson.version).toBe(VERSION)
-    expect(build.packageJson.dependencies['@voidzero-dev/vite-plus-prompts']).toBe(
-      VERSION,
-    )
+    expect(build.packageJson.dependencies['@voidzero-dev/vite-plus-prompts']).toBe(VERSION)
     expect(build.integrity).toMatch(/^sha512-/)
     expect(build.shasum).toMatch(/^[0-9a-f]{40}$/)
   }, 60_000)

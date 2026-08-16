@@ -211,15 +211,15 @@ export interface Env {
 Hono on Workers. The router must accept three packument spellings plus the
 tarball, purge, and catch-all fallback routes.
 
-| Method | Path                                            | Handler            |
-|--------|-------------------------------------------------|--------------------|
-| GET    | `/:pkg` (unscoped, e.g. `/vite-plus`)           | packument          |
-| GET    | `/@:scope/:pkg` (decoded scoped)                | packument          |
-| GET    | `/@:scope%2f:pkg` (encoded scoped)              | packument          |
-| GET    | `/tarballs/:pkg/:file`                          | preview tarball    |
-| GET    | `/tarballs/@:scope/:pkg/:file`                  | preview tarball    |
-| POST   | `/-/purge`                                      | purge (MVP2)       |
-| GET    | `/-/*` and any other path                       | npm fallback proxy |
+| Method | Path                                  | Handler            |
+| ------ | ------------------------------------- | ------------------ |
+| GET    | `/:pkg` (unscoped, e.g. `/vite-plus`) | packument          |
+| GET    | `/@:scope/:pkg` (decoded scoped)      | packument          |
+| GET    | `/@:scope%2f:pkg` (encoded scoped)    | packument          |
+| GET    | `/tarballs/:pkg/:file`                | preview tarball    |
+| GET    | `/tarballs/@:scope/:pkg/:file`        | preview tarball    |
+| POST   | `/-/purge`                            | purge (MVP2)       |
+| GET    | `/-/*` and any other path             | npm fallback proxy |
 
 Implementation notes:
 
@@ -237,14 +237,9 @@ The pure functions from the source design are runtime-agnostic and used
 verbatim:
 
 ```ts
-export const PREVIEW_PACKAGES = new Set([
-  '@voidzero-dev/vite-plus-core',
-  'vite-plus',
-])
+export const PREVIEW_PACKAGES = new Set(['@voidzero-dev/vite-plus-core', 'vite-plus'])
 
-export type PreviewRef =
-  | { type: 'pr'; ref: string }
-  | { type: 'commit'; ref: string }
+export type PreviewRef = { type: 'pr'; ref: string } | { type: 'commit'; ref: string }
 
 export function parsePreviewVersion(version: string): PreviewRef | null {
   const pr = version.match(/^0\.0\.0-pr\.(\d+)$/)
@@ -262,8 +257,10 @@ owner/repo/base come from bindings:
 export function toPkgPrNewUrl(env: Env, packageName: string, version: string) {
   const preview = parsePreviewVersion(version)
   if (!preview) return null
-  return `${env.PKG_PR_NEW_BASE}/${env.PREVIEW_OWNER}/${env.PREVIEW_REPO}` +
+  return (
+    `${env.PKG_PR_NEW_BASE}/${env.PREVIEW_OWNER}/${env.PREVIEW_REPO}` +
     `/${packageName}@${preview.ref}`
+  )
 }
 ```
 
@@ -330,8 +327,8 @@ async function digests(bytes: Uint8Array) {
     crypto.subtle.digest('SHA-512', bytes),
   ])
   return {
-    shasum: hex(sha1),                         // dist.shasum
-    integrity: `sha512-${base64(sha512)}`,     // dist.integrity (SRI)
+    shasum: hex(sha1), // dist.shasum
+    integrity: `sha512-${base64(sha512)}`, // dist.integrity (SRI)
   }
 }
 ```
@@ -624,7 +621,10 @@ app.get('/:pkg{.+}', async (c) => {
   for (const ref of refs) {
     const pkgJson = await readUpstreamPackageJson(c.env, name, ref) // stream early-exit
     packument.versions[ref.version] = buildPreviewVersionMetadata({
-      env: c.env, packageName: name, version: ref.version, upstreamPackageJson: pkgJson,
+      env: c.env,
+      packageName: name,
+      version: ref.version,
+      upstreamPackageJson: pkgJson,
     })
     packument['dist-tags'][ref.tag] = ref.version
   }

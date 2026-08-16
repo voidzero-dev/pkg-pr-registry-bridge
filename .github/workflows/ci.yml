@@ -15,36 +15,39 @@ concurrency:
 
 jobs:
   test:
-    name: typecheck + test
+    name: check + test
     runs-on: ubuntu-latest
     steps:
       # Actions are pinned to a full commit SHA (org policy).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      # setup-vp installs vp (version resolved from the pnpm catalog), the
+      # Node.js and pnpm pinned in devEngines, and the project dependencies,
+      # with lockfile-keyed caching.
+      - uses: voidzero-dev/setup-vp@313600b80b104eadebb9111787d37a2e83e014ca # v1.17.0
         with:
-          version: 11.21.0
+          cache: true
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: pnpm
+      # Fail when the lockfile carries duplicate dependency entries that a
+      # dedupe would collapse (Renovate PRs are deduped via the shared
+      # preset's pnpmDedupe post-update option; this gates everyone else).
+      - name: Dedupe check
+        run: vp dedupe --check
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Typecheck
-        run: pnpm typecheck
+      # vp check runs oxfmt, oxlint and the type-aware pass (tsgolint),
+      # covering both tsconfig projects (Worker + publish action).
+      - name: Check
+        run: vp check
 
       # The publish action bundles the Worker's own modules; re-bundle and fail
       # if the committed dist drifts (or an import it pulls in broke).
       - name: Verify action bundle is up to date
         run: |
-          pnpm build:action
+          vp run build:action
           git diff --exit-code -- .github/actions/publish-preview/dist
 
       # vitest runs the Worker in workerd (Miniflare); no network or secrets.
       # The deploy-time check (bun e2e) needs a live deployment and runs from
-      # `pnpm run deploy`, not here.
+      # `vp run deploy`, not here.
       - name: Test
-        run: pnpm test
+        run: vp test

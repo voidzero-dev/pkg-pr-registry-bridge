@@ -198,7 +198,7 @@ export async function gunzipBounded(
     }
   } catch (err) {
     if (err instanceof HttpError) throw err
-    reject(`Tarball is not valid gzip: ${err}`)
+    reject(`Tarball is not valid gzip: ${String(err)}`)
   }
   const out = new Uint8Array(total)
   let offset = 0
@@ -294,7 +294,7 @@ export async function validateArchive(
   try {
     files = parseTar(inflated)
   } catch (err) {
-    reject(`Tarball is not a readable tar archive: ${err}`)
+    reject(`Tarball is not a readable tar archive: ${String(err)}`)
   }
   assertCanonicalEntries(files, policy)
   return files

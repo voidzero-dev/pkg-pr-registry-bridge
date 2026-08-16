@@ -1,7 +1,7 @@
 # Wiring vite-plus CI to the registry bridge
 
 Bridge: `https://registry-bridge.viteplus.dev`
-Repo:   `voidzero-dev/vite-plus` (owner/repo are fixed in the Worker)
+Repo: `voidzero-dev/vite-plus` (owner/repo are fixed in the Worker)
 
 vite-plus publishes preview builds with a GitHub Actions OIDC token, so it
 stores no bridge credential. `ADMIN_TOKEN` still exists on the Worker, but only
@@ -84,7 +84,7 @@ gh api repos/voidzero-dev/vite-plus --jq '{repo: .id, owner: .owner.id}'
 it would make a staging-minted token valid against production.
 
 The numeric ids matter because `OIDC_TRUSTED_WORKFLOWS` embeds a repository
-*name*, and names can be renamed, transferred, or released and reclaimed by
+_name_, and names can be renamed, transferred, or released and reclaimed by
 someone else. A rename keeps the same `repository_id` but changes
 `workflow_ref`, so publishes fail until the allowlist is updated. That is the
 correct direction to fail, but it will look like an outage to whoever hits it.

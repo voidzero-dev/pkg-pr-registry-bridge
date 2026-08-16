@@ -1,8 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import {
-  isPreviewVersion,
-  parsePreviewVersion,
-} from '../src/preview/parsePreviewVersion'
+import { describe, expect, it } from 'vite-plus/test'
+import { isPreviewVersion, parsePreviewVersion } from '../src/preview/parsePreviewVersion'
 import {
   parseConfiguredPreviewRefs,
   prNumberFromUrl,
@@ -15,10 +12,7 @@ import {
 } from '../src/registry/parsePackageName'
 import { rewritePackageJson } from '../src/tarball/rewritePackageJson'
 import { isWorkspacePackage } from '../src/preview/packages'
-import {
-  assertSafeTarballPath,
-  isUnderPackageRoot,
-} from '../src/security/validateTarballPath'
+import { assertSafeTarballPath, isUnderPackageRoot } from '../src/security/validateTarballPath'
 import { buildVersionMetadata } from '../src/registry/buildVersionMetadata'
 import { computeDigests } from '../src/tarball/digests'
 import type { Env } from '../src/config'
@@ -37,11 +31,7 @@ describe('parsePreviewVersion', () => {
       ref: 'a832a55',
     })
     // Full 40-char SHA-1.
-    expect(
-      parsePreviewVersion(
-        '0.0.0-commit.0123456789abcdef0123456789abcdef01234567',
-      ),
-    ).toEqual({
+    expect(parsePreviewVersion('0.0.0-commit.0123456789abcdef0123456789abcdef01234567')).toEqual({
       type: 'commit',
       ref: '0123456789abcdef0123456789abcdef01234567',
     })
@@ -90,9 +80,7 @@ describe('parseConfiguredPreviewRefs', () => {
 
 describe('prNumberFromUrl', () => {
   it('extracts the PR number from a GitHub PR url', () => {
-    expect(
-      prNumberFromUrl('https://github.com/voidzero-dev/vite-plus/pull/1569'),
-    ).toBe('1569')
+    expect(prNumberFromUrl('https://github.com/voidzero-dev/vite-plus/pull/1569')).toBe('1569')
     // trailing path segments (e.g. /files) are tolerated.
     expect(prNumberFromUrl('https://github.com/o/r/pull/42/files')).toBe('42')
   })
@@ -129,18 +117,12 @@ describe('parseTarballPath', () => {
       name: 'vite-plus',
       version: '0.0.0-pr.1891',
     })
-    expect(
-      parseTarballPath(
-        '/tarballs/@voidzero-dev/vite-plus-core/0.0.0-pr.1891.tgz',
-      ),
-    ).toEqual({
+    expect(parseTarballPath('/tarballs/@voidzero-dev/vite-plus-core/0.0.0-pr.1891.tgz')).toEqual({
       name: '@voidzero-dev/vite-plus-core',
       version: '0.0.0-pr.1891',
     })
     expect(
-      parseTarballPath(
-        '/tarballs/@voidzero-dev%2Fvite-plus-core/0.0.0-commit.a832a55.tgz',
-      ),
+      parseTarballPath('/tarballs/@voidzero-dev%2Fvite-plus-core/0.0.0-commit.a832a55.tgz'),
     ).toEqual({
       name: '@voidzero-dev/vite-plus-core',
       version: '0.0.0-commit.a832a55',
@@ -149,13 +131,13 @@ describe('parseTarballPath', () => {
 
   it('parses a content-addressed path (trailing 40-hex shasum)', () => {
     const shasum = 'a'.repeat(40)
+    expect(parseTarballPath(`/tarballs/vite-plus/0.0.0-commit.a832a55/${shasum}.tgz`)).toEqual({
+      name: 'vite-plus',
+      version: '0.0.0-commit.a832a55',
+      shasum,
+    })
     expect(
-      parseTarballPath(`/tarballs/vite-plus/0.0.0-commit.a832a55/${shasum}.tgz`),
-    ).toEqual({ name: 'vite-plus', version: '0.0.0-commit.a832a55', shasum })
-    expect(
-      parseTarballPath(
-        `/tarballs/@voidzero-dev/vite-plus-core/0.0.0-commit.a832a55/${shasum}.tgz`,
-      ),
+      parseTarballPath(`/tarballs/@voidzero-dev/vite-plus-core/0.0.0-commit.a832a55/${shasum}.tgz`),
     ).toEqual({
       name: '@voidzero-dev/vite-plus-core',
       version: '0.0.0-commit.a832a55',
@@ -171,9 +153,10 @@ describe('parseTarballPath', () => {
 
 describe('parseNpmTarballPath', () => {
   it('parses npm-convention unscoped and scoped tarball paths', () => {
-    expect(
-      parseNpmTarballPath('/vite-plus/-/vite-plus-0.0.0-commit.a832a55.tgz'),
-    ).toEqual({ name: 'vite-plus', version: '0.0.0-commit.a832a55' })
+    expect(parseNpmTarballPath('/vite-plus/-/vite-plus-0.0.0-commit.a832a55.tgz')).toEqual({
+      name: 'vite-plus',
+      version: '0.0.0-commit.a832a55',
+    })
     expect(
       parseNpmTarballPath(
         '/@voidzero-dev/vite-plus-core/-/vite-plus-core-0.0.0-commit.a832a55.tgz',
@@ -197,13 +180,9 @@ describe('parseNpmTarballPath', () => {
     // No `/-/` separator (a packument request).
     expect(parseNpmTarballPath('/vite-plus')).toBeNull()
     // Filename does not start with the unscoped package name.
-    expect(
-      parseNpmTarballPath('/vite-plus/-/other-0.0.0-commit.a832a55.tgz'),
-    ).toBeNull()
+    expect(parseNpmTarballPath('/vite-plus/-/other-0.0.0-commit.a832a55.tgz')).toBeNull()
     // Missing .tgz suffix.
-    expect(
-      parseNpmTarballPath('/vite-plus/-/vite-plus-0.0.0-commit.a832a55'),
-    ).toBeNull()
+    expect(parseNpmTarballPath('/vite-plus/-/vite-plus-0.0.0-commit.a832a55')).toBeNull()
     // Registry API path.
     expect(parseNpmTarballPath('/-/v1/search?text=vite')).toBeNull()
   })
@@ -222,9 +201,7 @@ describe('isWorkspacePackage', () => {
   it('matches exact names and prefix patterns from config', () => {
     expect(isWorkspacePackage('vite-plus', env)).toBe(true)
     expect(isWorkspacePackage('@voidzero-dev/vite-plus-core', env)).toBe(true)
-    expect(
-      isWorkspacePackage('@voidzero-dev/vite-plus-darwin-arm64', env),
-    ).toBe(true)
+    expect(isWorkspacePackage('@voidzero-dev/vite-plus-darwin-arm64', env)).toBe(true)
     expect(isWorkspacePackage('react', env)).toBe(false)
     expect(isWorkspacePackage('@voidzero-dev/other', env)).toBe(false)
   })
@@ -232,9 +209,7 @@ describe('isWorkspacePackage', () => {
   it('falls back to PREVIEW_PACKAGES when unconfigured', () => {
     const e = { WORKSPACE_PACKAGES: '' }
     expect(isWorkspacePackage('vite-plus', e)).toBe(true)
-    expect(isWorkspacePackage('@voidzero-dev/vite-plus-darwin-arm64', e)).toBe(
-      false,
-    )
+    expect(isWorkspacePackage('@voidzero-dev/vite-plus-darwin-arm64', e)).toBe(false)
   })
 })
 
@@ -289,9 +264,7 @@ describe('rewritePackageJson', () => {
       ]),
     )
     expect(out.version).toBe(`0.0.0-commit.${sha}`)
-    expect(out.dependencies['@voidzero-dev/vite-plus-core']).toBe(
-      `0.0.0-commit.${sha}`,
-    )
+    expect(out.dependencies['@voidzero-dev/vite-plus-core']).toBe(`0.0.0-commit.${sha}`)
     expect(out.dependencies.picomatch).toBe('^2.3.1')
     expect(out.optionalDependencies['@voidzero-dev/vite-plus-darwin-arm64']).toBe(
       `0.0.0-commit.${sha}`,
@@ -312,9 +285,7 @@ describe('rewritePackageJson', () => {
       `0.0.0-commit.${sha}`,
       new Set(['vite-plus']),
     )
-    expect(out.optionalDependencies['@voidzero-dev/vite-plus-darwin-arm64']).toBe(
-      '0.2.2',
-    )
+    expect(out.optionalDependencies['@voidzero-dev/vite-plus-darwin-arm64']).toBe('0.2.2')
   })
 })
 

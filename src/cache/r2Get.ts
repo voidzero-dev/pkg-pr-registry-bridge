@@ -19,18 +19,12 @@ export function isR2TransientError(err: unknown): boolean {
  * attached (the runtime error names only the operation) and the original as
  * `cause`, so the upstream warn/error log identifies the failing object.
  */
-export async function r2Get(
-  env: Env,
-  key: string,
-): Promise<R2ObjectBody | null> {
+export async function r2Get(env: Env, key: string): Promise<R2ObjectBody | null> {
   try {
     return await env.STORAGE.get(key)
   } catch (err) {
     if (!isR2TransientError(err)) throw err
-    console.warn(
-      `R2 get ${key} hit a transient internal error, retrying once:`,
-      describeError(err),
-    )
+    console.warn(`R2 get ${key} hit a transient internal error, retrying once:`, describeError(err))
     try {
       return await env.STORAGE.get(key)
     } catch (retryErr) {

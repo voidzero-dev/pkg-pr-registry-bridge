@@ -1,27 +1,19 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended"
-  ],
+  "extends": ["config:recommended", "github>Boshen/renovate"],
   "description": [
-    "minimumReleaseAge keeps Renovate from proposing a version newer than pnpm's minimum-release-age cooldown. pnpm 11 enforces a 1-day supply-chain policy on `pnpm install --frozen-lockfile`, so a same-day bump writes a too-new lockfile entry and CI fails with ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION. 3 days clears the 1-day floor with margin. internalChecksFilter=strict holds such an update until it ages in, instead of opening a red PR."
+    "The shared preset sets a 3-day minimumReleaseAge for npm and GitHub Actions updates, clearing pnpm 11's 1-day supply-chain cooldown on `pnpm install --frozen-lockfile` (a too-new lockfile entry fails CI with ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION). internalChecksFilter=strict holds such an update until it ages in, instead of opening a red PR. The preset's vite+ group updates vite-plus and @voidzero-dev/vite-plus-* immediately; pnpm-workspace.yaml excludes those packages from the cooldown so their bumps install."
   ],
-  "minimumReleaseAge": "3 days",
   "internalChecksFilter": "strict",
   "packageRules": [
     {
       "description": [
-        "nanotar (bundled) and esbuild (the bundler) are compiled into the committed publish-action bundle (.github/actions/publish-preview/dist). A bump to either can change that bundle, so flag those PRs with `needs-bundle-rebuild`, which triggers the rebuild-bundle workflow to re-run `pnpm build:action` and push the refreshed dist; the 'Verify action bundle' CI check is the backstop for anything else."
+        "nanotar (bundled) and esbuild (the bundler) are compiled into the committed publish-action bundle (.github/actions/publish-preview/dist). A bump to either can change that bundle, so flag those PRs with `needs-bundle-rebuild`, which triggers the rebuild-bundle workflow to re-run `vp run build:action` and push the refreshed dist; the 'Verify action bundle' CI check is the backstop for anything else."
       ],
-      "matchPackageNames": [
-        "nanotar",
-        "esbuild"
-      ],
-      "addLabels": [
-        "needs-bundle-rebuild"
-      ],
+      "matchPackageNames": ["nanotar", "esbuild"],
+      "addLabels": ["needs-bundle-rebuild"],
       "prBodyNotes": [
-        "ℹ️ This dependency is compiled into the committed publish-action bundle. The `needs-bundle-rebuild` label triggers a workflow that re-runs `pnpm build:action` and pushes the refreshed `.github/actions/publish-preview/dist` to this branch automatically, so the \"Verify action bundle\" check passes without a manual rebuild. If that push doesn't run (e.g. a fork PR the bot can't push to), rebuild and commit the dist yourself."
+        "ℹ️ This dependency is compiled into the committed publish-action bundle. The `needs-bundle-rebuild` label triggers a workflow that re-runs `vp run build:action` and pushes the refreshed `.github/actions/publish-preview/dist` to this branch automatically, so the \"Verify action bundle\" check passes without a manual rebuild. If that push doesn't run (e.g. a fork PR the bot can't push to), rebuild and commit the dist yourself."
       ]
     }
   ]

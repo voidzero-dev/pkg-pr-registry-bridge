@@ -24,8 +24,7 @@ import { readConfig, normalizeSha } from './lib/config.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ACTION = path.join(root, '.github/actions/publish-preview/dist/index.mjs')
-const ADMIN_TOKEN =
-  process.env.PKG_PR_BRIDGE_ADMIN_TOKEN || process.env.ADMIN_TOKEN || ''
+const ADMIN_TOKEN = process.env.PKG_PR_BRIDGE_ADMIN_TOKEN || process.env.ADMIN_TOKEN || ''
 
 function publish(sha, bridge, repo, packages) {
   return new Promise((resolve, reject) => {
@@ -74,7 +73,9 @@ try {
   positional = positionals
 } catch (err) {
   console.error(`warm: ${err.message}`)
-  console.error('usage: node scripts/warm.mjs --repo <vite-plus-checkout> [--packages "<list>"] <sha>')
+  console.error(
+    'usage: node scripts/warm.mjs --repo <vite-plus-checkout> [--packages "<list>"] <sha>',
+  )
   process.exit(1)
 }
 
@@ -83,7 +84,7 @@ if (positional.length === 0) {
   process.exit(0)
 }
 if (positional.length > 1) {
-  console.error('warm: one sha per run (a checkout holds one commit\'s artifacts)')
+  console.error("warm: one sha per run (a checkout holds one commit's artifacts)")
   process.exit(1)
 }
 const sha = normalizeSha(positional[0])

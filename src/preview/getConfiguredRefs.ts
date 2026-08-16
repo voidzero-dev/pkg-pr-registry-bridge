@@ -34,10 +34,7 @@ function canonical(ref: ParsedPreviewRef): string {
  * losing writer re-reads and retries. Expired entries are pruned on every write
  * so the object stays small.
  */
-async function mutateRefIndex(
-  env: Env,
-  mutate: (index: RefIndex) => void,
-): Promise<void> {
+async function mutateRefIndex(env: Env, mutate: (index: RefIndex) => void): Promise<void> {
   await casR2Json<RefIndex>(env, REFS_INDEX_KEY, (index) => {
     const now = Date.now()
     for (const key of Object.keys(index)) {
@@ -60,10 +57,7 @@ export async function getConfiguredRefsWithEtag(
   let etag: string | null = null
   const refs: ConfiguredPreviewRef[] = []
   try {
-    const { value: index, etag: indexEtag } = await readR2Json<RefIndex>(
-      env,
-      REFS_INDEX_KEY,
-    )
+    const { value: index, etag: indexEtag } = await readR2Json<RefIndex>(env, REFS_INDEX_KEY)
     etag = indexEtag
     const now = Date.now()
     // Each index entry is already in hand here, so attach its runtime state
@@ -87,9 +81,7 @@ export async function getConfiguredRefsWithEtag(
   return { refs, etag }
 }
 
-export async function getConfiguredRefs(
-  env: Env,
-): Promise<ConfiguredPreviewRef[]> {
+export async function getConfiguredRefs(env: Env): Promise<ConfiguredPreviewRef[]> {
   return (await getConfiguredRefsWithEtag(env)).refs
 }
 
@@ -153,15 +145,8 @@ export async function registerRef(
   const [parsed] = parseConfiguredPreviewRefs(ref)
   await mutateRefIndex(env, (index) => {
     const existing = index[canonical(parsed)]
-    if (
-      extra?.immutablePrUrl &&
-      extra.prUrl &&
-      existing?.prUrl &&
-      existing.prUrl !== extra.prUrl
-    ) {
-      throw new Error(
-        `ref ${canonical(parsed)} is already registered to ${existing.prUrl}`,
-      )
+    if (extra?.immutablePrUrl && extra.prUrl && existing?.prUrl && existing.prUrl !== extra.prUrl) {
+      throw new Error(`ref ${canonical(parsed)} is already registered to ${existing.prUrl}`)
     }
     // Preserve a prior publish time / PR url when re-registering without them.
     index[canonical(parsed)] = {

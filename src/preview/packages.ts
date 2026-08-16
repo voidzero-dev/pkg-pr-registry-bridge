@@ -3,10 +3,7 @@
  * Everything else is proxied to npm unchanged. The bridge must never become a
  * generic arbitrary-URL proxy.
  */
-export const PREVIEW_PACKAGES = new Set<string>([
-  '@voidzero-dev/vite-plus-core',
-  'vite-plus',
-])
+export const PREVIEW_PACKAGES = new Set<string>(['@voidzero-dev/vite-plus-core', 'vite-plus'])
 
 /**
  * Packages the tarball endpoint may serve. Broader than PREVIEW_PACKAGES: it
@@ -17,10 +14,7 @@ export const PREVIEW_PACKAGES = new Set<string>([
  * allowlist 404s at the tarball endpoint. Only PREVIEW_PACKAGES get synthetic
  * versions injected into packuments.
  */
-export function isWorkspacePackage(
-  name: string,
-  env: { WORKSPACE_PACKAGES?: string },
-): boolean {
+export function isWorkspacePackage(name: string, env: { WORKSPACE_PACKAGES?: string }): boolean {
   const patterns = (env.WORKSPACE_PACKAGES ?? '')
     .split(',')
     .map((s) => s.trim())

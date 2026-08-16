@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import { createTarGzip, parseTarGzip } from 'nanotar'
 import { buildPreviewTarball } from '../src/tarball/buildPreviewTarball'
 
@@ -44,9 +44,9 @@ describe('buildPreviewTarball', () => {
     expect(build.packageJson.dependencies['vite-plus']).toBe('0.0.0-commit.a832a55')
     expect(build.packageJson.dependencies.picomatch).toBe('^2.3.1')
     // batch-member deps are pinned to the synthetic version.
-    expect(
-      build.packageJson.optionalDependencies['@voidzero-dev/vite-plus-darwin-arm64'],
-    ).toBe('0.0.0-commit.a832a55')
+    expect(build.packageJson.optionalDependencies['@voidzero-dev/vite-plus-darwin-arm64']).toBe(
+      '0.0.0-commit.a832a55',
+    )
 
     const files = await parseTarGzip(build.tarball)
 
@@ -63,9 +63,7 @@ describe('buildPreviewTarball', () => {
   })
 
   it('throws 422 when package/package.json is missing', async () => {
-    const upstream = await createTarGzip([
-      { name: 'package/README.md', data: '# hi\n' },
-    ])
+    const upstream = await createTarGzip([{ name: 'package/README.md', data: '# hi\n' }])
     await expect(
       buildPreviewTarball(upstream, 'vite-plus', '0.0.0-commit.a832a55', new Set(['vite-plus'])),
     ).rejects.toThrow(/missing package\/package\.json/)
@@ -82,9 +80,7 @@ describe('buildPreviewTarball', () => {
   // 5038080 = 492 * 10240 bytes).
   it('always emits a valid end-of-archive marker, even on a 10240-byte boundary', async () => {
     async function gunzip(gz: Uint8Array): Promise<Uint8Array> {
-      const stream = new Response(gz).body!.pipeThrough(
-        new DecompressionStream('gzip'),
-      )
+      const stream = new Response(gz).body!.pipeThrough(new DecompressionStream('gzip'))
       return new Uint8Array(await new Response(stream).arrayBuffer())
     }
 
@@ -130,9 +126,7 @@ describe('buildPreviewTarball: metadata normalization', () => {
   const pkg = { name: 'vite-plus', version: '1.0.0' }
   const batch = new Set(['vite-plus'])
 
-  async function rebuiltAttrs(
-    attrs: Record<string, unknown>,
-  ): Promise<Record<string, any>> {
+  async function rebuiltAttrs(attrs: Record<string, unknown>): Promise<Record<string, any>> {
     const source = await createTarGzip([
       { name: 'package/package.json', data: JSON.stringify(pkg) },
       { name: 'package/bin/vp', data: '#!/bin/sh\n', attrs: attrs as never },
@@ -143,8 +137,7 @@ describe('buildPreviewTarball: metadata normalization', () => {
   }
 
   /** The tar writer left-pads mode to 7 chars, so compare the octal value. */
-  const modeOf = (attrs: Record<string, any>): number =>
-    Number.parseInt(attrs.mode, 8)
+  const modeOf = (attrs: Record<string, any>): number => Number.parseInt(attrs.mode, 8)
 
   it('strips the setuid bit', async () => {
     const attrs = await rebuiltAttrs({ mode: '4755' })
@@ -171,7 +164,13 @@ describe('buildPreviewTarball: metadata normalization', () => {
   })
 
   it('flattens ownership, which describes the packing machine only', async () => {
-    const attrs = await rebuiltAttrs({ mode: '755', uid: 501, gid: 20, user: 'attacker', group: 'wheel' })
+    const attrs = await rebuiltAttrs({
+      mode: '755',
+      uid: 501,
+      gid: 20,
+      user: 'attacker',
+      group: 'wheel',
+    })
     expect(attrs.uid).toBe(0)
     expect(attrs.gid).toBe(0)
     expect(attrs.user).toBe('')
@@ -208,7 +207,7 @@ describe('buildPreviewTarball: reproducibility', () => {
     // covers second-granularity nondeterminism directly, instead of sleeping
     // through a wall-clock second on every test run to try to observe it.
     const built = await buildPreviewTarball(await source(1e12), 'vite-plus', version, batch)
-    expect([...built.tarball.slice(4, 8)]).toEqual([0, 0, 0, 0])
+    expect(Array.from(built.tarball.slice(4, 8))).toEqual([0, 0, 0, 0])
   })
 
   it('erases a source mtime, so hostile timestamps cannot vary the output', async () => {

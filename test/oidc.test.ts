@@ -13,7 +13,7 @@
  * PR's dist-tag.
  */
 import { SELF, env } from 'cloudflare:test'
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { GITHUB_OIDC_ISSUER, verifyOidcToken } from '../src/security/oidc'
 import type { Env } from '../src/config'
 
@@ -33,8 +33,7 @@ let publicJwk: Record<string, unknown>
 let jwksFetches = 0
 
 function b64url(bytes: Uint8Array | string): string {
-  const arr =
-    typeof bytes === 'string' ? new TextEncoder().encode(bytes) : bytes
+  const arr = typeof bytes === 'string' ? new TextEncoder().encode(bytes) : bytes
   let binary = ''
   for (const b of arr) binary += String.fromCharCode(b)
   return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
@@ -43,10 +42,7 @@ function b64url(bytes: Uint8Array | string): string {
 type Claims = Record<string, unknown>
 
 /** Mint a token signed by the fixture key, with overridable claims/header. */
-async function mint(
-  claims: Claims = {},
-  header: Record<string, unknown> = {},
-): Promise<string> {
+async function mint(claims: Claims = {}, header: Record<string, unknown> = {}): Promise<string> {
   const now = Math.floor(Date.now() / 1000)
   const payload: Claims = {
     iss: GITHUB_OIDC_ISSUER,
@@ -120,7 +116,8 @@ beforeAll(async () => {
   publicJwk = { kty: jwk.kty, n: jwk.n, e: jwk.e, alg: 'RS256', use: 'sig', kid: KID }
 
   vi.stubGlobal('fetch', (input: RequestInfo | URL): Promise<Response> => {
-    const url = typeof input === 'string' ? input : input.toString()
+    const url =
+      typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
     if (url === JWKS_URL) {
       jwksFetches++
       return Promise.resolve(
@@ -182,14 +179,11 @@ describe('OIDC publishing: accepted', () => {
   })
 
   it('uploads a tarball with a valid token', async () => {
-    const res = await SELF.fetch(
-      `${BASE}/-/tarball/vite-plus/${VERSION}/${'a'.repeat(40)}.tgz`,
-      {
-        method: 'PUT',
-        headers: { authorization: `Bearer ${await mint()}` },
-        body: new Uint8Array([1, 2, 3]),
-      },
-    )
+    const res = await SELF.fetch(`${BASE}/-/tarball/vite-plus/${VERSION}/${'a'.repeat(40)}.tgz`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${await mint()}` },
+      body: new Uint8Array([1, 2, 3]),
+    })
     expect(res.status).toBe(201)
   })
 
@@ -244,10 +238,17 @@ describe('OIDC publishing: rejected tokens', () => {
       () => mint({ aud: [AUDIENCE, 'https://other.example.com'] }),
       401,
     ],
-    ['unlisted workflow_ref', () => mint({ workflow_ref: `${REPOSITORY}/.github/workflows/evil.yml@refs/heads/main` }), 403],
+    [
+      'unlisted workflow_ref',
+      () => mint({ workflow_ref: `${REPOSITORY}/.github/workflows/evil.yml@refs/heads/main` }),
+      403,
+    ],
     [
       'build-workflow workflow_ref',
-      () => mint({ workflow_ref: `${REPOSITORY}/.github/workflows/publish-preview.yml@refs/heads/main` }),
+      () =>
+        mint({
+          workflow_ref: `${REPOSITORY}/.github/workflows/publish-preview.yml@refs/heads/main`,
+        }),
       403,
     ],
     ['wrong repository_id', () => mint({ repository_id: '999999' }), 403],
@@ -309,22 +310,18 @@ describe('OIDC token parsing bounds (SR-3)', () => {
   // `env` from cloudflare:test is typed from the test wrangler config; the
   // verifier only touches KV on it.
   const reject = (token: string, expected: RegExp) =>
-    expect(verifyOidcToken(env as unknown as Env, token, config)).rejects.toThrow(
-      expected,
-    )
+    expect(verifyOidcToken(env as unknown as Env, token, config)).rejects.toThrow(expected)
 
   it('rejects a two-segment token', () => reject('aaaa.bbbb', /three segments/))
   it('rejects a four-segment token', () => reject('aa.bb.cc.dd', /three segments/))
   it('rejects an empty segment', () => reject('aa..cc', /three segments|empty segment/))
-  it('rejects an oversized token', () =>
-    reject(`${'a'.repeat(9000)}.bb.cc`, /too large/))
+  it('rejects an oversized token', () => reject(`${'a'.repeat(9000)}.bb.cc`, /too large/))
   it('rejects base64url padding', () => reject('aa=.bb.cc', /base64url/))
   it('rejects an oversized header segment', () =>
     reject(`${'a'.repeat(2000)}.bb.cc`, /header too large/))
 
   it('rejects an over-long kid before fetching keys', async () => {
-    const token =
-      `${b64url(JSON.stringify({ alg: 'RS256', kid: 'k'.repeat(500) }))}.bb.cc`
+    const token = `${b64url(JSON.stringify({ alg: 'RS256', kid: 'k'.repeat(500) }))}.bb.cc`
     await reject(token, /kid/)
     expect(jwksFetches).toBe(0)
   })
@@ -416,7 +413,11 @@ describe('OIDC publishing: prUrl scoping (SR-2)', () => {
 
   it('lets the admin token correct a bad registration', async () => {
     const ref = `commit.${'e'.repeat(40)}`
-    await post('/-/register', { ref, prUrl: `https://github.com/${REPOSITORY}/pull/1` }, await mint())
+    await post(
+      '/-/register',
+      { ref, prUrl: `https://github.com/${REPOSITORY}/pull/1` },
+      await mint(),
+    )
     const fixed = await post(
       '/-/register',
       { ref, prUrl: `https://github.com/${REPOSITORY}/pull/2` },
@@ -455,9 +456,9 @@ describe('OIDC publishing: config states', () => {
     clearAll()
     try {
       expect((await post('/-/publish', publishBody(), 'test-admin-token')).status).toBe(201)
-      expect(
-        (await post('/-/register', { ref: `commit.${SHA}` }, 'test-admin-token')).status,
-      ).toBe(201)
+      expect((await post('/-/register', { ref: `commit.${SHA}` }, 'test-admin-token')).status).toBe(
+        201,
+      )
     } finally {
       restore()
     }
@@ -483,11 +484,7 @@ describe('OIDC publishing: config states', () => {
     try {
       expect((await post('/-/publish', publishBody(), jwtShaped)).status).toBe(201)
       // And /-/purge, which never had the routing, still agrees.
-      const purge = await post(
-        '/-/purge',
-        { package: 'vite-plus', version: VERSION },
-        jwtShaped,
-      )
+      const purge = await post('/-/purge', { package: 'vite-plus', version: VERSION }, jwtShaped)
       expect(purge.status).toBe(200)
     } finally {
       mutable.ADMIN_TOKEN = previous
@@ -504,9 +501,7 @@ describe('OIDC publishing: config states', () => {
     try {
       const res = await post('/-/publish', publishBody(), 'test-admin-token')
       expect(res.status).toBe(503)
-      expect(((await res.json()) as { error: string }).error).toMatch(
-        /OIDC_TRUSTED_REPOSITORY_ID/,
-      )
+      expect(((await res.json()) as { error: string }).error).toMatch(/OIDC_TRUSTED_REPOSITORY_ID/)
     } finally {
       mutable.OIDC_TRUSTED_REPOSITORY_ID = saved.OIDC_TRUSTED_REPOSITORY_ID
     }
@@ -515,11 +510,7 @@ describe('OIDC publishing: config states', () => {
 
 describe('OIDC publishing: endpoint scoping', () => {
   it('does not accept an OIDC token for purge', async () => {
-    const res = await post(
-      '/-/purge',
-      { package: 'vite-plus', version: VERSION },
-      await mint(),
-    )
+    const res = await post('/-/purge', { package: 'vite-plus', version: VERSION }, await mint())
     expect(res.status).toBe(401)
   })
 })

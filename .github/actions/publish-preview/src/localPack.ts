@@ -6,13 +6,7 @@
  * (`pnpm install`) before the action runs.
  */
 import { execFile } from 'node:child_process'
-import {
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-} from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -136,9 +130,7 @@ export async function packDirectory(dir: string): Promise<Uint8Array> {
     })
     const tgzs = readdirSync(dest).filter((f) => f.endsWith('.tgz'))
     if (tgzs.length !== 1) {
-      throw new Error(
-        `expected pnpm pack to produce one tarball for ${dir}, found ${tgzs.length}`,
-      )
+      throw new Error(`expected pnpm pack to produce one tarball for ${dir}, found ${tgzs.length}`)
     }
     return new Uint8Array(readFileSync(join(dest, tgzs[0])))
   } finally {

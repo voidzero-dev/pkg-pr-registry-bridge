@@ -8,13 +8,13 @@ preview builds (or builds package directories in CI) can run its own bridge.
 Each step below shows the vite-plus value (the one committed here) next to the
 equivalent for a hypothetical example project, so you can see what to swap:
 
-| | vite-plus (this repo) | Example project |
-| --- | --- | --- |
-| GitHub repo | `voidzero-dev/vite-plus` | `acme-corp/acme-bundler` |
-| Main package | `vite-plus` | `acme-bundler` |
-| Meta/alias package | `@voidzero-dev/vite-plus-core` | `@acme/bundler-core` |
-| Platform binaries | `@voidzero-dev/vite-plus-*` | `@acme/bundler-*` |
-| Public origin | `https://registry-bridge.viteplus.dev` | `https://registry-bridge.acme.dev` |
+|                    | vite-plus (this repo)                  | Example project                    |
+| ------------------ | -------------------------------------- | ---------------------------------- |
+| GitHub repo        | `voidzero-dev/vite-plus`               | `acme-corp/acme-bundler`           |
+| Main package       | `vite-plus`                            | `acme-bundler`                     |
+| Meta/alias package | `@voidzero-dev/vite-plus-core`         | `@acme/bundler-core`               |
+| Platform binaries  | `@voidzero-dev/vite-plus-*`            | `@acme/bundler-*`                  |
+| Public origin      | `https://registry-bridge.viteplus.dev` | `https://registry-bridge.acme.dev` |
 
 Read [`../README.md`](../README.md) first for how the bridge works and why it
 only serves immutable `0.0.0-commit.<sha>` builds. This guide assumes that
@@ -37,25 +37,26 @@ background and focuses on the deployment.
 You change configuration and CI wiring only; the `src/` code stays as-is when you
 point the bridge at a different project.
 
-| Knob | Where | vite-plus value | Change to |
-| --- | --- | --- | --- |
-| `PREVIEW_OWNER` | `.env` | `voidzero-dev` | your GitHub org/user |
-| `PREVIEW_REPO` | `.env` | `vite-plus` | your repo name |
-| `WORKSPACE_PACKAGES` | `.env` | `vite-plus,@voidzero-dev/vite-plus-*` | your package names/prefixes |
-| `PUBLIC_BASE_URL` | `.env.production` | `https://registry-bridge.viteplus.dev` | your deployed origin |
-| Void project slug | workflows, `package.json`, `.void/` | `pkg-pr-registry-bridge` | your project name |
-| Publish action `packages` | your upstream CI workflow | vite-plus layout | your built package dirs |
-| Publish action `workspace-packages` | your upstream CI workflow | `vite-plus,@voidzero-dev/vite-plus-*` | match `WORKSPACE_PACKAGES` |
-| Smoke/e2e assertions | `scripts/smoke-test.mjs`, `scripts/e2e-bun.mjs` | vite-plus packages | your packages (optional) |
+| Knob                                | Where                                           | vite-plus value                        | Change to                   |
+| ----------------------------------- | ----------------------------------------------- | -------------------------------------- | --------------------------- |
+| `PREVIEW_OWNER`                     | `.env`                                          | `voidzero-dev`                         | your GitHub org/user        |
+| `PREVIEW_REPO`                      | `.env`                                          | `vite-plus`                            | your repo name              |
+| `WORKSPACE_PACKAGES`                | `.env`                                          | `vite-plus,@voidzero-dev/vite-plus-*`  | your package names/prefixes |
+| `PUBLIC_BASE_URL`                   | `.env.production`                               | `https://registry-bridge.viteplus.dev` | your deployed origin        |
+| Void project slug                   | workflows, `package.json`, `.void/`             | `pkg-pr-registry-bridge`               | your project name           |
+| Publish action `packages`           | your upstream CI workflow                       | vite-plus layout                       | your built package dirs     |
+| Publish action `workspace-packages` | your upstream CI workflow                       | `vite-plus,@voidzero-dev/vite-plus-*`  | match `WORKSPACE_PACKAGES`  |
+| Smoke/e2e assertions                | `scripts/smoke-test.mjs`, `scripts/e2e-bun.mjs` | vite-plus packages                     | your packages (optional)    |
 
 ## 1. Fork and install
 
 ```bash
 git clone https://github.com/acme-corp/registry-bridge.git   # your fork
 cd registry-bridge
-pnpm install            # also runs `void prepare` (generates .void/ types)
-pnpm typecheck
-pnpm test               # vitest in workerd (Miniflare), no network/secrets
+curl -fsSL https://vite.plus | bash   # install the vp CLI if you don't have it
+vp install              # also runs `void prepare` (generates .void/ types)
+vp check                # format + lint + type-check
+vp test                 # vitest in workerd (Miniflare), no network/secrets
 ```
 
 ## 2. Point the bridge at your repo (`.env`)
@@ -227,7 +228,7 @@ In your **upstream repo** (`acme-corp/acme-bundler`):
    package directories on disk:
 
    ```yaml
-   - uses: acme-corp/registry-bridge@main        # your bridge fork
+   - uses: acme-corp/registry-bridge@main # your bridge fork
      with:
        sha: ${{ github.event.pull_request.head.sha }}
        admin-token: ${{ secrets.PKG_PR_BRIDGE_ADMIN_TOKEN }}
@@ -313,7 +314,7 @@ Two authentication paths:
   `ADMIN_TOKEN`) so the `--write` smoke lifecycle can run.
 
 Fork PRs cannot read those secrets, so `staging.yml` skips them and they get
-only `ci.yml` (typecheck + test); the push-to-main gate re-runs staging so
+only `ci.yml` (check + test); the push-to-main gate re-runs staging so
 production never ships on an unverified change.
 
 ## Ongoing maintenance

@@ -161,14 +161,14 @@ workflow in the repo cannot obtain a token the bridge accepts, even with
 `id-token: write` granted.
 
 `workflow_ref` alone is not sufficient, because it embeds a repository
-*name*, and names are mutable and reusable. If `voidzero-dev/vite-plus` were
+_name_, and names are mutable and reusable. If `voidzero-dev/vite-plus` were
 renamed, transferred, or deleted, a `workflow_ref` string match could later
 be satisfied by a repository the org does not control. `repository_id` is
 immutable and survives renames, so it anchors the check to the actual
 repository (see [SR-7](#sr-7-immutable-repository-identity)).
 
 `repository_owner_id` is checked as well, because `repository_id` alone does
-not cover a transfer *out* of the org: the id follows the repository to its
+not cover a transfer _out_ of the org: the id follows the repository to its
 new owner. Pinning both means a transferred repository fails closed rather
 than continuing to publish.
 
@@ -223,12 +223,12 @@ staging's looser allowlist replayable against production.
 
 ### 5.3 Endpoint scoping
 
-| Endpoint | Today | After |
-| --- | --- | --- |
+| Endpoint           | Today       | After               |
+| ------------------ | ----------- | ------------------- |
 | `PUT /-/tarball/*` | admin token | admin token or OIDC |
-| `POST /-/publish` | admin token | admin token or OIDC |
+| `POST /-/publish`  | admin token | admin token or OIDC |
 | `POST /-/register` | admin token | admin token or OIDC |
-| `POST /-/purge` | admin token | admin token only |
+| `POST /-/purge`    | admin token | admin token only    |
 
 An OIDC identity can add preview builds and nothing else. Deletion and any
 future admin surface stay on the operator token, which remains for
@@ -254,7 +254,7 @@ Three changes close it (see [SR-2](#sr-2-pr-number-binding)):
   `https://github.com/<repository claim>/pull/`, so a CI identity cannot name
   a pull request in another repository.
 - `/-/register` refuses to re-point an already-registered ref at a
-  *different* `prUrl`, unless the caller holds the admin token. A commit
+  _different_ `prUrl`, unless the caller holds the admin token. A commit
   belongs to one pull request, so a rewrite can only be an attempt to drag
   another PR's tag onto this commit.
 
@@ -313,7 +313,7 @@ minted per attempt so retries never send an expired token.
 - It executes nothing from the artifact: no install, no scripts, pure data
   handling.
 
-A tampered artifact can therefore only change the *contents* of the files
+A tampered artifact can therefore only change the _contents_ of the files
 inside the tarball, which land under the attacking PR's own
 `0.0.0-commit.<sha>` version. A preview build of a PR already carries that
 PR's arbitrary code by definition; the blast radius is unchanged.
@@ -376,8 +376,8 @@ jobs:
     # below and 8.1.
     environment: ${{ needs.authorize.outputs.is-fork == 'true' && 'preview-build-release' || 'preview-build-release-auto' }}
     permissions:
-      id-token: write      # mint the bridge OIDC token
-      actions: read        # download the triggering run's artifact
+      id-token: write # mint the bridge OIDC token
+      actions: read # download the triggering run's artifact
       contents: read
     steps:
       - uses: actions/download-artifact@<pinned>
@@ -458,7 +458,7 @@ maintainers use it for. It cannot carry the weight of the bridge-side
 checks (SR-2 through SR-4), which are reachable without any PR at all.
 
 Also worth stating plainly: GitHub's default for public repositories
-requires approval only for *first-time* contributors. Once someone has a
+requires approval only for _first-time_ contributors. Once someone has a
 merged PR, their fork PRs run workflows automatically, so that gate does not
 add much against a patient attacker.
 
@@ -543,21 +543,21 @@ default, but one added `build-arg` or `run:` step would reintroduce
 republishes its own bytes.** The tar codec now reads attacker-supplied
 tarballs, having only ever seen `pnpm pack` output before. Two parts:
 
-*Reject*, before reading any content:
+_Reject_, before reading any content:
 
-| Rejected | Why |
-| --- | --- |
-| Duplicate normalized paths | Parser differential (below) |
-| More than one `package/package.json` | Same, and the highest-value target |
-| `../` traversal, absolute paths, drive letters | Escape on any extractor that writes to disk |
-| Entry types other than file and directory | Symlinks, hardlinks, devices, FIFOs have no place in an npm tarball |
-| Entry count above a fixed cap | Zip-bomb by inode count |
-| Any single file, or the decompressed total, above a cap | Gzip bomb, runner OOM |
-| Entries outside the `package/` prefix | npm's own layout invariant |
+| Rejected                                                | Why                                                                 |
+| ------------------------------------------------------- | ------------------------------------------------------------------- |
+| Duplicate normalized paths                              | Parser differential (below)                                         |
+| More than one `package/package.json`                    | Same, and the highest-value target                                  |
+| `../` traversal, absolute paths, drive letters          | Escape on any extractor that writes to disk                         |
+| Entry types other than file and directory               | Symlinks, hardlinks, devices, FIFOs have no place in an npm tarball |
+| Entry count above a fixed cap                           | Zip-bomb by inode count                                             |
+| Any single file, or the decompressed total, above a cap | Gzip bomb, runner OOM                                               |
+| Entries outside the `package/` prefix                   | npm's own layout invariant                                          |
 
 Symlinks must also not be followed when enumerating `input-dir` itself.
 
-*Then canonicalize*: rather than forwarding the fork's bytes, the trusted
+_Then canonicalize_: rather than forwarding the fork's bytes, the trusted
 workflow rebuilds the tarball with the Worker's own codec, emitting exactly one
 entry per path with normalized metadata, and hashes what it emitted. The
 shasum and integrity published to the bridge describe bytes the publishing workflow
@@ -645,6 +645,7 @@ org fails closed rather than continuing to publish (5.1). Set both whenever
   Keeping the Docker job on `pull_request` instead would preserve today's
   behavior at the cost of leaving fork PRs without a preview image; see open
   question 6.
+
 - A registered `commit.<sha>` for a fork commit is reachable from the base
   repo through `refs/pull/<n>/head`, but `x-commit-key` will name a SHA that
   is not on any branch of `voidzero-dev/vite-plus`.
@@ -690,6 +691,7 @@ org fails closed rather than continuing to publish (5.1). Set both whenever
   `pull_request_review: [submitted]` with an approved state and a
   write-permission check, the same consent-gate shape as our `preview-build`
   label.
+
 - **Per-repo scoped bridge tokens.** Nicer blast radius than one admin
   token, but still a stored secret, still absent from fork runs. Solves
   nothing for external contributors.
@@ -708,7 +710,7 @@ org fails closed rather than continuing to publish (5.1). Set both whenever
 1. **Bridge PR**: `oidc.ts`, `requirePublisher()` on the three publish
    endpoints, config vars, the SR-2 `prUrl` binding, pool-workers tests with
    a locally-signed JWKS fixture. Negative tests are the point here: `alg:
-   none`, an HMAC-signed token, a wrong `aud`, an unlisted `workflow_ref`, a
+none`, an HMAC-signed token, a wrong `aud`, an unlisted `workflow_ref`, a
    correct `workflow_ref` with a mismatched `repository_id` or
    `repository_owner_id` (SR-7), an oversized and a two-segment token
    (SR-3), an expired token, and a `prUrl` bound to another commit must each
@@ -761,13 +763,13 @@ fix stands alone and is worth landing regardless of whether the rest ships.
    Proposed: skip; SR-5 keeps the token away from untrusted code, the
    publish surface is preview-only, and question 3 bounds authority more
    cheaply.
-4. Per-`repository`-claim publish rate limit: needed at launch, or deferred
+5. Per-`repository`-claim publish rate limit: needed at launch, or deferred
    until fork volume justifies it? Proposed: defer, since the label already
    bounds trigger frequency and refs expire after 90 days.
-5. Should the sticky comment render differently for fork-originated builds
+6. Should the sticky comment render differently for fork-originated builds
    (8.4), and how loudly? Proposed: a one-line banner naming the source
    fork above the install instructions.
-6. Does the Docker preview job move into the publishing workflow at all? Moving it
+7. Does the Docker preview job move into the publishing workflow at all? Moving it
    is what lets fork code reach `ghcr.io/voidzero-dev/vite-plus:pr-<n>`
    (8.4); leaving it on `pull_request` keeps forks out of the org namespace
    but also leaves them without a preview image, which is part of what this

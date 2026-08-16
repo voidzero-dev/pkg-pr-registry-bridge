@@ -3,15 +3,7 @@ import { casKey, metaIndexKey, metaKey } from '../src/cache/r2Cache'
 import { computeDigests } from '../src/tarball/digests'
 import { cleanupExpiredArtifacts } from '../src/preview/cleanupExpired'
 import { REF_TTL_MS } from '../src/preview/getConfiguredRefs'
-import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { createTarGzip, parseTarGzip } from 'nanotar'
 
 const BASE = 'https://bridge.example.com'
@@ -69,19 +61,16 @@ function json(obj: unknown, status = 200): Response {
 const PLATFORM_SHA = '1234567890abcdef1234567890abcdef12345678'
 
 beforeAll(() => {
-  const mockFetch = (
-    input: RequestInfo | URL,
-    init?: RequestInit,
-  ): Promise<Response> => {
-    const url = typeof input === 'string' ? input : input.toString()
+  const mockFetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url =
+      typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
 
     if (url === 'https://registry.npmjs.org/vite-plus') {
       // Mimic npm: `time` is present only in the full packument, not the
       // abbreviated (install-v1) form. Branch on the Accept header.
       const h = init?.headers
-      const accept = (
-        h instanceof Headers ? h.get('accept') : (h as Record<string, string>)?.accept
-      ) ?? ''
+      const accept =
+        (h instanceof Headers ? h.get('accept') : (h as Record<string, string>)?.accept) ?? ''
       const abbreviated = accept.includes('install-v1')
       if (abbreviated) abbreviatedFetches++
       else fullTimeFetches++
@@ -184,11 +173,7 @@ async function uploadFixtureTarball(
 beforeEach(async () => {
   const packages = await Promise.all(
     Object.entries(FIXTURE_PKG_JSON).map(async ([name, packageJson]) => {
-      const { shasum, integrity } = await uploadFixtureTarball(
-        name,
-        FIXTURE_VERSION,
-        packageJson,
-      )
+      const { shasum, integrity } = await uploadFixtureTarball(name, FIXTURE_VERSION, packageJson)
       fixtureShasum[name] = shasum
       return { name, version: FIXTURE_VERSION, packageJson, integrity, shasum }
     }),
@@ -212,9 +197,7 @@ describe('packument endpoint', () => {
     const preview = body.versions['0.0.0-commit.a832a55']
     expect(preview).toBeTruthy()
     expect(preview.version).toBe('0.0.0-commit.a832a55')
-    expect(preview.dependencies['@voidzero-dev/vite-plus-core']).toBe(
-      '0.0.0-commit.a832a55',
-    )
+    expect(preview.dependencies['@voidzero-dev/vite-plus-core']).toBe('0.0.0-commit.a832a55')
     expect(preview.dist.tarball).toBe(
       `${BASE}/tarballs/vite-plus/0.0.0-commit.a832a55/${fixtureShasum['vite-plus']}.tgz`,
     )
@@ -260,8 +243,7 @@ describe('packument endpoint', () => {
 
   it('caches the npm time map in KV (full packument fetched at most once)', async () => {
     const before = fullTimeFetches
-    const get = () =>
-      SELF.fetch(`${BASE}/vite-plus`, { headers: { accept: 'application/json' } })
+    const get = () => SELF.fetch(`${BASE}/vite-plus`, { headers: { accept: 'application/json' } })
     await get()
     await get()
     // With the KV cache the full (time-bearing) packument is fetched at most
@@ -274,8 +256,7 @@ describe('packument endpoint', () => {
     // this KV cache every fresh client would re-fetch the abbreviated packument
     // from npm. Two requests must hit npm for it at most once.
     const before = abbreviatedFetches
-    const get = () =>
-      SELF.fetch(`${BASE}/vite-plus`, { headers: { accept: 'application/json' } })
+    const get = () => SELF.fetch(`${BASE}/vite-plus`, { headers: { accept: 'application/json' } })
     await get()
     await get()
     expect(abbreviatedFetches - before).toBeLessThanOrEqual(1)
@@ -290,9 +271,7 @@ describe('packument endpoint', () => {
     // keys, the on-demand build would fail for these shas (no mock tarball) and
     // versions would drop.
     const previewCount = (body: Record<string, any>) =>
-      Object.keys(body.versions).filter((v) =>
-        v.startsWith('0.0.0-commit.'),
-      ).length
+      Object.keys(body.versions).filter((v) => v.startsWith('0.0.0-commit.')).length
 
     const published: string[] = []
     for (let i = 1; i <= 10; i++) {
@@ -436,9 +415,7 @@ describe('packument endpoint', () => {
     // suite never fetches, so the npm packument is a cold KV miss (a warm cache
     // would, by design, ride out the blip and serve the cached packument).
     const saved = globalThis.fetch
-    vi.stubGlobal('fetch', () =>
-      Promise.resolve(json({ error: 'upstream boom' }, 503)),
-    )
+    vi.stubGlobal('fetch', () => Promise.resolve(json({ error: 'upstream boom' }, 503)))
     try {
       const res = await SELF.fetch(`${BASE}/@voidzero-dev%2Fvite-plus-uncached`, {
         headers: { accept: 'application/json' },
@@ -457,19 +434,16 @@ describe('packument endpoint', () => {
     })
     const body = (await res.json()) as Record<string, any>
     const opt = body.versions['0.0.0-commit.a832a55'].optionalDependencies
-    expect(opt['@voidzero-dev/vite-plus-darwin-arm64']).toBe(
-      `0.0.0-commit.${PLATFORM_SHA}`,
-    )
+    expect(opt['@voidzero-dev/vite-plus-darwin-arm64']).toBe(`0.0.0-commit.${PLATFORM_SHA}`)
   })
 
   it('omits a platform package version with no published meta (no on-demand build)', async () => {
     // The fixture ref publishes only vite-plus + core, not the darwin binary.
     // The Worker no longer derives a name-based meta or builds on demand, so the
     // version is simply absent from the platform packument until CI publishes it.
-    const res = await SELF.fetch(
-      `${BASE}/@voidzero-dev%2Fvite-plus-darwin-arm64`,
-      { headers: { accept: 'application/json' } },
-    )
+    const res = await SELF.fetch(`${BASE}/@voidzero-dev%2Fvite-plus-darwin-arm64`, {
+      headers: { accept: 'application/json' },
+    })
     expect(res.status).toBe(200)
     const body = (await res.json()) as Record<string, any>
     expect(body.versions[FIXTURE_VERSION]).toBeUndefined()
@@ -518,9 +492,7 @@ describe('packument endpoint', () => {
   it('redirects non-allowlisted packages to npm', async () => {
     const res = await SELF.fetch(`${BASE}/react`, { redirect: 'manual' })
     expect(res.status).toBe(302)
-    expect(res.headers.get('location')).toBe(
-      'https://registry.npmjs.org/react',
-    )
+    expect(res.headers.get('location')).toBe('https://registry.npmjs.org/react')
   })
 })
 
@@ -547,18 +519,15 @@ describe('tarball endpoint', () => {
     const pkg = JSON.parse(new TextDecoder().decode(pkgFile!.data))
     expect(pkg.name).toBe('vite-plus')
     expect(pkg.version).toBe('0.0.0-commit.a832a55')
-    expect(pkg.dependencies['@voidzero-dev/vite-plus-core']).toBe(
-      '0.0.0-commit.a832a55',
-    )
+    expect(pkg.dependencies['@voidzero-dev/vite-plus-core']).toBe('0.0.0-commit.a832a55')
   })
 
   it('also serves the npm-convention tarball path (/<name>/-/<name>-<version>.tgz)', async () => {
     // The version-addressed npm-convention path now 302-redirects to the
     // version's current content URL (the canonical, immutable location).
-    const res = await SELF.fetch(
-      `${BASE}/vite-plus/-/vite-plus-0.0.0-commit.a832a55.tgz`,
-      { redirect: 'manual' },
-    )
+    const res = await SELF.fetch(`${BASE}/vite-plus/-/vite-plus-0.0.0-commit.a832a55.tgz`, {
+      redirect: 'manual',
+    })
     expect(res.status).toBe(302)
     expect(res.headers.get('location')).toBe(
       `${BASE}/tarballs/vite-plus/0.0.0-commit.a832a55/${fixtureShasum['vite-plus']}.tgz`,
@@ -588,10 +557,9 @@ describe('tarball endpoint', () => {
       'https://registry.npmjs.org/react/-/react-18.2.0.tgz',
     )
     // Preview package but a non-preview (real) version: proxied to npm too.
-    const realVersion = await SELF.fetch(
-      `${BASE}/vite-plus/-/vite-plus-0.2.1.tgz`,
-      { redirect: 'manual' },
-    )
+    const realVersion = await SELF.fetch(`${BASE}/vite-plus/-/vite-plus-0.2.1.tgz`, {
+      redirect: 'manual',
+    })
     expect(realVersion.status).toBe(302)
   })
 
@@ -602,12 +570,8 @@ describe('tarball endpoint', () => {
 
   it('rejects pr-number and other invalid preview versions', async () => {
     // PR-number versions are not supported (mutable refs).
-    expect(
-      (await SELF.fetch(`${BASE}/tarballs/vite-plus/0.0.0-pr.1891.tgz`)).status,
-    ).toBe(400)
-    expect(
-      (await SELF.fetch(`${BASE}/tarballs/vite-plus/0.2.1.tgz`)).status,
-    ).toBe(400)
+    expect((await SELF.fetch(`${BASE}/tarballs/vite-plus/0.0.0-pr.1891.tgz`)).status).toBe(400)
+    expect((await SELF.fetch(`${BASE}/tarballs/vite-plus/0.2.1.tgz`)).status).toBe(400)
   })
 })
 
@@ -677,9 +641,7 @@ describe('pkg.pr.new-style download', () => {
       redirect: 'manual',
     })
     expect(res.status).toBe(302)
-    expect(res.headers.get('location')).toBe(
-      `${BASE}/tarballs/vite-plus/0.0.0-commit.${sha}.tgz`,
-    )
+    expect(res.headers.get('location')).toBe(`${BASE}/tarballs/vite-plus/0.0.0-commit.${sha}.tgz`)
     // The PR->version mapping is mutable, so the redirect is not cached.
     expect(res.headers.get('cache-control')).toBe('no-store')
     // pkg.pr.new-style commit key is on the redirect too.
@@ -724,9 +686,7 @@ describe('pkg.pr.new-style download', () => {
       redirect: 'manual',
     })
     expect(res.status).toBe(302)
-    expect(res.headers.get('location')).toBe(
-      `${BASE}/tarballs/vite-plus/${verB}.tgz`,
-    )
+    expect(res.headers.get('location')).toBe(`${BASE}/tarballs/vite-plus/${verB}.tgz`)
   })
 
   it('404s for a PR with no published build', async () => {
@@ -796,10 +756,9 @@ describe('CORS', () => {
 
   it('sets the CORS header on error responses', async () => {
     // Unknown package in the download path -> 404 via onError.
-    const res = await SELF.fetch(
-      `${BASE}/voidzero-dev/vite-plus/not-a-pkg@abc1234`,
-      { redirect: 'manual' },
-    )
+    const res = await SELF.fetch(`${BASE}/voidzero-dev/vite-plus/not-a-pkg@abc1234`, {
+      redirect: 'manual',
+    })
     expect(res.status).toBe(404)
     expect(res.headers.get('access-control-allow-origin')).toBe('*')
   })
@@ -857,9 +816,7 @@ describe('admin: refs', () => {
     expect(entry!.prUrl).toBe(prUrl)
     // expiresAt is an ISO TTL in the future (90 days out).
     expect(typeof entry!.expiresAt).toBe('string')
-    expect(Date.parse(entry!.expiresAt!)).toBeGreaterThan(
-      Date.parse(entry!.publishedAt!),
-    )
+    expect(Date.parse(entry!.expiresAt!)).toBeGreaterThan(Date.parse(entry!.publishedAt!))
     // the old dist-tag field is gone.
     expect(entry).not.toHaveProperty('tag')
   })
@@ -968,9 +925,9 @@ describe('admin: refs', () => {
     // Two PRs publishing at the same time: both refs must survive the CAS
     // (the refs-index compare-and-swap runs at /-/register).
     await Promise.all([publish('aaaaaaa'), publish('bbbbbbb')])
-    const list = (await (
-      await SELF.fetch(`${BASE}/-/refs`)
-    ).json()) as { refs: Array<{ ref: string }> }
+    const list = (await (await SELF.fetch(`${BASE}/-/refs`)).json()) as {
+      refs: Array<{ ref: string }>
+    }
     const refs = list.refs.map((r) => r.ref)
     expect(refs).toContain('commit.aaaaaaa')
     expect(refs).toContain('commit.bbbbbbb')
@@ -1006,9 +963,7 @@ describe('admin: purge', () => {
 
   it('unregister:true also removes the ref; default leaves it registered', async () => {
     const listedRefs = async () =>
-      ((await (await SELF.fetch(`${BASE}/-/refs`)).json()) as any).refs.map(
-        (r: any) => r.ref,
-      )
+      ((await (await SELF.fetch(`${BASE}/-/refs`)).json()) as any).refs.map((r: any) => r.ref)
     const purge = (unregister?: boolean) =>
       SELF.fetch(`${BASE}/-/purge`, {
         method: 'POST',
@@ -1084,15 +1039,27 @@ describe('admin: purge', () => {
 
     // Build A, then republish the same version with different bytes -> build B.
     // Both CAS objects coexist (last-write-wins only moves the meta/index).
-    const A = await uploadFixtureTarball('vite-plus', version, { name: 'vite-plus', version, marker: 'A' })
+    const A = await uploadFixtureTarball('vite-plus', version, {
+      name: 'vite-plus',
+      version,
+      marker: 'A',
+    })
     await publish(A)
-    const B = await uploadFixtureTarball('vite-plus', version, { name: 'vite-plus', version, marker: 'B' })
+    const B = await uploadFixtureTarball('vite-plus', version, {
+      name: 'vite-plus',
+      version,
+      marker: 'B',
+    })
     await publish(B)
     expect(A.shasum).not.toBe(B.shasum)
 
     // Both builds are installable before the purge.
-    expect((await SELF.fetch(`${BASE}/tarballs/vite-plus/${version}/${A.shasum}.tgz`)).status).toBe(200)
-    expect((await SELF.fetch(`${BASE}/tarballs/vite-plus/${version}/${B.shasum}.tgz`)).status).toBe(200)
+    expect((await SELF.fetch(`${BASE}/tarballs/vite-plus/${version}/${A.shasum}.tgz`)).status).toBe(
+      200,
+    )
+    expect((await SELF.fetch(`${BASE}/tarballs/vite-plus/${version}/${B.shasum}.tgz`)).status).toBe(
+      200,
+    )
 
     const purged = await SELF.fetch(`${BASE}/-/purge`, {
       method: 'POST',
@@ -1103,8 +1070,12 @@ describe('admin: purge', () => {
 
     // Purge lists casVersionPrefix and deletes ALL builds, so the superseded (A)
     // build's content URL 404s too, not just the current (B) one.
-    expect((await SELF.fetch(`${BASE}/tarballs/vite-plus/${version}/${A.shasum}.tgz`)).status).toBe(404)
-    expect((await SELF.fetch(`${BASE}/tarballs/vite-plus/${version}/${B.shasum}.tgz`)).status).toBe(404)
+    expect((await SELF.fetch(`${BASE}/tarballs/vite-plus/${version}/${A.shasum}.tgz`)).status).toBe(
+      404,
+    )
+    expect((await SELF.fetch(`${BASE}/tarballs/vite-plus/${version}/${B.shasum}.tgz`)).status).toBe(
+      404,
+    )
   })
 })
 
@@ -1113,7 +1084,13 @@ describe('admin: publish', () => {
   const body = {
     ref: 'commit.f00dface',
     packages: [
-      { name: 'vite-plus', version: ver, packageJson: { name: 'vite-plus', version: ver }, integrity: 'sha512-abc', shasum: 'def' },
+      {
+        name: 'vite-plus',
+        version: ver,
+        packageJson: { name: 'vite-plus', version: ver },
+        integrity: 'sha512-abc',
+        shasum: 'def',
+      },
     ],
   }
 
@@ -1178,7 +1155,10 @@ describe('admin: per-package atomic publish', () => {
     expect(res1.status).toBe(201)
 
     // Meta is written...
-    const meta = (await (await env.STORAGE.get(metaKey('vite-plus', ver)))!.json()) as Record<string, any>
+    const meta = (await (await env.STORAGE.get(metaKey('vite-plus', ver)))!.json()) as Record<
+      string,
+      any
+    >
     expect(meta.integrity).toBe('sha512-atomic')
 
     // ...but the ref is NOT registered: not listed, not injected.
@@ -1243,17 +1223,10 @@ describe('cleanup of expired artifacts (scheduled)', () => {
     const casObjKey = casKey('vite-plus', '0.0.0-commit.old00001', 'a'.repeat(40))
     await env.STORAGE.put(casObjKey, 'x')
     // A future "now" makes every object older than the TTL, so all are expired.
-    const { deleted } = await cleanupExpiredArtifacts(
-      env,
-      Date.now() + 2 * REF_TTL_MS,
-    )
+    const { deleted } = await cleanupExpiredArtifacts(env, Date.now() + 2 * REF_TTL_MS)
     expect(deleted).toBeGreaterThanOrEqual(3)
-    expect(
-      await env.STORAGE.get('meta/vite-plus/0.0.0-commit.old00001.json'),
-    ).toBeNull()
-    expect(
-      await env.STORAGE.get('tarball/vite-plus/0.0.0-commit.old00001.tgz'),
-    ).toBeNull()
+    expect(await env.STORAGE.get('meta/vite-plus/0.0.0-commit.old00001.json')).toBeNull()
+    expect(await env.STORAGE.get('tarball/vite-plus/0.0.0-commit.old00001.tgz')).toBeNull()
     expect(await env.STORAGE.get(casObjKey)).toBeNull()
   })
 
@@ -1262,9 +1235,7 @@ describe('cleanup of expired artifacts (scheduled)', () => {
     // beforeEach published commit.a832a55, so the refs + meta indexes exist.
     const { deleted } = await cleanupExpiredArtifacts(env) // now = Date.now()
     expect(deleted).toBe(0)
-    expect(
-      await env.STORAGE.get('meta/vite-plus/0.0.0-commit.fresh001.json'),
-    ).not.toBeNull()
+    expect(await env.STORAGE.get('meta/vite-plus/0.0.0-commit.fresh001.json')).not.toBeNull()
     // The live indexes live under different prefixes and must be untouched.
     expect(await env.STORAGE.get('refs/index.json')).not.toBeNull()
     expect(await env.STORAGE.get(metaIndexKey('vite-plus'))).not.toBeNull()

@@ -8,14 +8,12 @@
   "name": "pkg-pr-registry-bridge",
   "main": "src/app.ts",
   "compatibility_date": "2026-02-24",
-  "r2_buckets": [
-    { "binding": "STORAGE", "bucket_name": "pkg-pr-registry-bridge-tarballs" }
-  ],
+  "r2_buckets": [{ "binding": "STORAGE", "bucket_name": "pkg-pr-registry-bridge-tarballs" }],
   "kv_namespaces": [{ "binding": "KV", "id": "test-npm-time-cache" }],
   "vars": {
     "NPM_REGISTRY": "https://registry.npmjs.org",
     "PREVIEW_OWNER": "voidzero-dev",
     "PREVIEW_REPO": "vite-plus",
-    "WORKSPACE_PACKAGES": "vite-plus,@voidzero-dev/vite-plus-*"
-  }
+    "WORKSPACE_PACKAGES": "vite-plus,@voidzero-dev/vite-plus-*",
+  },
 }

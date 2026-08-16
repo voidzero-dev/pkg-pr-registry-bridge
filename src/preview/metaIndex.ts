@@ -70,11 +70,7 @@ export async function upsertMetaIndex(
 }
 
 /** Drop a version from the package aggregate (on purge), so it stops being served. */
-export async function removeFromMetaIndex(
-  env: Env,
-  name: string,
-  version: string,
-): Promise<void> {
+export async function removeFromMetaIndex(env: Env, name: string, version: string): Promise<void> {
   await casR2Json<MetaIndex>(env, metaIndexKey(name), (index) => {
     delete index[version]
   })
