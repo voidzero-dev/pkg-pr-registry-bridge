@@ -12,7 +12,7 @@ concurrency:
 jobs:
   staging:
     runs-on: ubuntu-latest
-    # Fork PRs can't read VOID_TOKEN; they still get ci.yml (typecheck + test).
+    # Fork PRs can't read VOID_TOKEN; they still get ci.yml (check + test).
     if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
       # Actions are pinned to a full commit SHA (org policy); kept in sync with ci.yml.

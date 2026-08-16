@@ -253,9 +253,9 @@ loads `.env*` into the Worker's vars.
 
 ```bash
 pnpm install       # also runs `void prepare` (generates .void/ types)
-pnpm typecheck
+pnpm check         # format + lint + type-check (oxfmt, oxlint, tsgolint)
 pnpm test          # vitest, runs the worker in workerd (Miniflare)
-pnpm dev           # `vite dev` (local worker via Miniflare, http://localhost:5173)
+pnpm dev           # `vp dev` (local worker via Miniflare, http://localhost:5173)
 ```
 
 For local admin testing, put `ADMIN_TOKEN=…` in `.env.local` (gitignored).

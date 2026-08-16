@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   test:
-    name: typecheck + test
+    name: check + test
     runs-on: ubuntu-latest
     steps:
       # Actions are pinned to a full commit SHA (org policy).
@@ -33,8 +33,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck
-        run: pnpm typecheck
+      # vp check runs oxfmt, oxlint and the type-aware pass (tsgolint),
+      # covering both tsconfig projects (Worker + publish action).
+      - name: Check
+        run: pnpm check
 
       # The publish action bundles the Worker's own modules; re-bundle and fail
       # if the committed dist drifts (or an import it pulls in broke).

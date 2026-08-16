@@ -54,7 +54,7 @@ point the bridge at a different project.
 git clone https://github.com/acme-corp/registry-bridge.git   # your fork
 cd registry-bridge
 pnpm install            # also runs `void prepare` (generates .void/ types)
-pnpm typecheck
+pnpm check              # format + lint + type-check
 pnpm test               # vitest in workerd (Miniflare), no network/secrets
 ```
 
@@ -313,7 +313,7 @@ Two authentication paths:
   `ADMIN_TOKEN`) so the `--write` smoke lifecycle can run.
 
 Fork PRs cannot read those secrets, so `staging.yml` skips them and they get
-only `ci.yml` (typecheck + test); the push-to-main gate re-runs staging so
+only `ci.yml` (check + test); the push-to-main gate re-runs staging so
 production never ships on an unverified change.
 
 ## Ongoing maintenance

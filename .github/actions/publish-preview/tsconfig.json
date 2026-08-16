@@ -1,7 +1,7 @@
 {
   // Lets `vp check` type-check the action source against Node types
   // (tsgolint discovers the nearest tsconfig.json; it cannot see the
-  // custom-named tsconfig.action.json used by the `typecheck` script).
+  // custom-named tsconfig.action.json this extends).
   "extends": "../../../tsconfig.action.json",
   "include": ["src"]
 }
