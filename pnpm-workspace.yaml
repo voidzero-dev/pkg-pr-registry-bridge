@@ -21,8 +21,8 @@ catalog:
   vitest: 4.1.10
   vite-plus: 0.2.9
 overrides:
-  vite: 'catalog:'
-  vitest: 'catalog:'
+  vite@8: 'catalog:'
+  vitest@4: 'catalog:'
 peerDependencyRules:
   allowAny:
     - vite
