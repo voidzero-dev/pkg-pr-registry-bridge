@@ -8,6 +8,7 @@ import {
   encodeNpmPackageName,
   parseNpmTarballPath,
   parsePackagePath,
+  parsePackageVersionPath,
   parseTarballPath,
 } from '../src/registry/parsePackageName'
 import { rewritePackageJson } from '../src/tarball/rewritePackageJson'
@@ -108,6 +109,36 @@ describe('parsePackagePath', () => {
     expect(parsePackagePath('/vite/-/vite-5.0.0.tgz')).toBeNull()
     expect(parsePackagePath('/@scope/name/-/name-1.0.0.tgz')).toBeNull()
     expect(parsePackagePath('/-/v1/search?text=vite')).toBeNull()
+  })
+})
+
+describe('parsePackageVersionPath', () => {
+  it('parses unscoped, scoped, and encoded-scoped package versions', () => {
+    expect(parsePackageVersionPath('/vite-plus/0.0.0-commit.a832a55')).toEqual({
+      name: 'vite-plus',
+      version: '0.0.0-commit.a832a55',
+    })
+    expect(
+      parsePackageVersionPath(
+        '/@voidzero-dev/vite-plus-core/0.0.0-commit.0123456789abcdef0123456789abcdef01234567',
+      ),
+    ).toEqual({
+      name: '@voidzero-dev/vite-plus-core',
+      version: '0.0.0-commit.0123456789abcdef0123456789abcdef01234567',
+    })
+    expect(parsePackageVersionPath('/@voidzero-dev%2Fvite-plus-core/0.0.0-commit.a832a55')).toEqual(
+      {
+        name: '@voidzero-dev/vite-plus-core',
+        version: '0.0.0-commit.a832a55',
+      },
+    )
+  })
+
+  it('returns null for packument, tarball, api, and malformed paths', () => {
+    expect(parsePackageVersionPath('/vite-plus')).toBeNull()
+    expect(parsePackageVersionPath('/vite-plus/-/vite-plus-1.0.0.tgz')).toBeNull()
+    expect(parsePackageVersionPath('/-/v1/search')).toBeNull()
+    expect(parsePackageVersionPath('/vite-plus/')).toBeNull()
   })
 })
 

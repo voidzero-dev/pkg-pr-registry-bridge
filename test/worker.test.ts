@@ -496,6 +496,77 @@ describe('packument endpoint', () => {
   })
 })
 
+describe('package version endpoint', () => {
+  it('serves a published preview version', async () => {
+    const res = await SELF.fetch(`${BASE}/vite-plus/${FIXTURE_VERSION}`, {
+      headers: { accept: 'application/json' },
+    })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('application/json')
+
+    const body = (await res.json()) as Record<string, any>
+    expect(body.name).toBe('vite-plus')
+    expect(body.version).toBe(FIXTURE_VERSION)
+    expect(body.dependencies['@voidzero-dev/vite-plus-core']).toBe(FIXTURE_VERSION)
+    expect(body.dist.tarball).toBe(
+      `${BASE}/tarballs/vite-plus/${FIXTURE_VERSION}/${fixtureShasum['vite-plus']}.tgz`,
+    )
+  })
+
+  it('serves an encoded scoped package version', async () => {
+    const name = '@voidzero-dev/vite-plus-core'
+    const res = await SELF.fetch(`${BASE}/@voidzero-dev%2Fvite-plus-core/${FIXTURE_VERSION}`)
+    expect(res.status).toBe(200)
+
+    const body = (await res.json()) as Record<string, any>
+    expect(body.name).toBe(name)
+    expect(body.version).toBe(FIXTURE_VERSION)
+    expect(body.dist.tarball).toBe(
+      `${BASE}/tarballs/${name}/${FIXTURE_VERSION}/${fixtureShasum[name]}.tgz`,
+    )
+  })
+
+  it('404s a preview version with no published metadata', async () => {
+    const version = '0.0.0-commit.deadbeef'
+    const res = await SELF.fetch(`${BASE}/vite-plus/${version}`)
+    expect(res.status).toBe(404)
+    await expect(res.json()).resolves.toEqual({ error: `Version not found: vite-plus@${version}` })
+  })
+
+  it('keeps a published version hidden until its ref is registered', async () => {
+    const sha = 'adeadbeef'
+    const version = `0.0.0-commit.${sha}`
+    const publish = await SELF.fetch(`${BASE}/-/publish`, {
+      method: 'POST',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ref: `commit.${sha}`,
+        packages: [
+          {
+            name: 'vite-plus',
+            version,
+            packageJson: { name: 'vite-plus', version },
+          },
+        ],
+      }),
+    })
+    expect(publish.status).toBe(201)
+
+    const res = await SELF.fetch(`${BASE}/vite-plus/${version}`)
+    expect(res.status).toBe(404)
+  })
+
+  it('redirects normal and non-allowlisted versions to npm', async () => {
+    const normal = await SELF.fetch(`${BASE}/vite-plus/0.2.1`, { redirect: 'manual' })
+    expect(normal.status).toBe(302)
+    expect(normal.headers.get('location')).toBe('https://registry.npmjs.org/vite-plus/0.2.1')
+
+    const other = await SELF.fetch(`${BASE}/react/19.0.0`, { redirect: 'manual' })
+    expect(other.status).toBe(302)
+    expect(other.headers.get('location')).toBe('https://registry.npmjs.org/react/19.0.0')
+  })
+})
+
 describe('tarball endpoint', () => {
   it('serves a generated commit tarball with rewritten package.json and immutable cache', async () => {
     // The packument advertises the content URL (shasum in the path); fetch that
