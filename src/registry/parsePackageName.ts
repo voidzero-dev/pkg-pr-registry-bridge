@@ -14,6 +14,10 @@ export interface PackumentRequest {
   name: string
 }
 
+export interface PackageVersionRequest extends PackumentRequest {
+  version: string
+}
+
 /** Strip leading slashes and percent-decode a request path; null if malformed. */
 function decodePath(pathname: string): string | null {
   try {
@@ -46,6 +50,26 @@ export function parsePackagePath(pathname: string): PackumentRequest | null {
   // Unscoped: a single segment.
   if (segments.length !== 1 || !segments[0]) return null
   return { name: segments[0] }
+}
+
+/**
+ * Identify an npm package-version request:
+ *   /vite-plus/0.0.0-commit.<sha>
+ *   /@voidzero-dev/vite-plus-core/0.0.0-commit.<sha>
+ *   /@voidzero-dev%2Fvite-plus-core/0.0.0-commit.<sha>
+ */
+export function parsePackageVersionPath(pathname: string): PackageVersionRequest | null {
+  const decoded = decodePath(pathname)
+  if (!decoded || decoded.includes('/-/') || decoded.startsWith('-/')) return null
+
+  const segments = decoded.split('/')
+  if (decoded.startsWith('@')) {
+    if (segments.length !== 3 || segments.some((segment) => !segment)) return null
+    return { name: `${segments[0]}/${segments[1]}`, version: segments[2] }
+  }
+
+  if (segments.length !== 2 || segments.some((segment) => !segment)) return null
+  return { name: segments[0], version: segments[1] }
 }
 
 export interface TarballRequest {

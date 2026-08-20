@@ -22,6 +22,7 @@ import {
 import {
   parseNpmTarballPath,
   parsePackagePath,
+  parsePackageVersionPath,
   parsePkgPrNewDownload,
   parseTarballPath,
   parseUploadPath,
@@ -436,6 +437,27 @@ app.get('*', async (c) => {
   const download = parsePkgPrNewDownload(pathname, c.env.PREVIEW_OWNER, c.env.PREVIEW_REPO)
   if (download) {
     return await serveDownloadRedirect(c.env, download, c.req.method === 'HEAD')
+  }
+
+  // npm package-version endpoint (`/<name>/<version>`). Some clients fetch a
+  // version document directly after resolution instead of reading it only from
+  // the packument. Serve registered preview metadata from R2; normal versions
+  // and packages still go to npm unchanged.
+  const packageVersion = parsePackageVersionPath(pathname)
+  if (packageVersion) {
+    const { name, version } = packageVersion
+    if (!isWorkspacePackage(name, c.env) || !parsePreviewVersion(version)) {
+      return redirectToNpm(c.env, c.req.raw)
+    }
+
+    const [refs, preview] = await Promise.all([
+      getConfiguredRefs(c.env),
+      resolveVersionMeta(c.env, name, version),
+    ])
+    if (!refs.some((ref) => ref.version === version) || !preview) {
+      throw new HttpError(404, `Version not found: ${name}@${version}`)
+    }
+    return packumentResponse(JSON.stringify(buildVersionMetadata(c.env, name, version, preview)))
   }
 
   const pkgReq = parsePackagePath(pathname)
