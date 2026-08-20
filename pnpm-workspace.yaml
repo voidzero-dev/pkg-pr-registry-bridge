@@ -17,9 +17,9 @@ minimumReleaseAgeExclude:
   - vite-plus
   - '@voidzero-dev/vite-plus-*'
 catalog:
-  vite: npm:@voidzero-dev/vite-plus-core@0.0.0-commit.940a1ea72060f5a0bdfc6e434770c606993f5b5e
-  vitest: 4.1.10
-  vite-plus: 0.0.0-commit.940a1ea72060f5a0bdfc6e434770c606993f5b5e
+  vite: npm:@voidzero-dev/vite-plus-core@0.0.0-commit.9726a197fb80371c6bb44d9482a4e556303bb737
+  vitest: 4.1.11
+  vite-plus: 0.0.0-commit.9726a197fb80371c6bb44d9482a4e556303bb737
 overrides:
   vite@*: 'catalog:'
   vitest@*: 'catalog:'
