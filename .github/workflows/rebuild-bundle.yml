@@ -43,7 +43,7 @@ jobs:
       # setup-vp installs vp (version resolved from the pnpm catalog), the
       # Node.js and pnpm pinned in devEngines, and the project dependencies,
       # with lockfile-keyed caching.
-      - uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1.15.0
+      - uses: voidzero-dev/setup-vp@a8f9aba07c5d294a209256cc6426a5b3d431ee94 # main
         with:
           cache: true
 
