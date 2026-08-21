@@ -232,7 +232,7 @@ importers:
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.21.0
-        version: 0.21.3(@cloudflare/workers-types@4.20260702.1)(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.11(@types/node@24.13.3)(@vitest/browser-preview@4.1.11)(@voidzero-dev/vite-plus-core@0.0.0-commit.8b5f2064803292e4338ba6ac3b72e57a6585097b(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12)(typescript@7.0.2)))
+        version: 0.21.3(@cloudflare/workers-types@4.20260702.1)(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.11)
       '@types/node':
         specifier: ^24.13.2
         version: 24.13.3
@@ -253,7 +253,7 @@ importers:
         version: 4.1.11(@types/node@24.13.3)(@vitest/browser-preview@4.1.11)(@voidzero-dev/vite-plus-core@0.0.0-commit.8b5f2064803292e4338ba6ac3b72e57a6585097b(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12)(typescript@7.0.2))
       void:
         specifier: ^0.10.5
-        version: 0.10.12(@voidzero-dev/vite-plus-core@0.0.0-commit.8b5f2064803292e4338ba6ac3b72e57a6585097b(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12)(typescript@7.0.2))(arktype@2.2.1)(kysely@0.29.5)(valibot@1.4.1(typescript@7.0.2))(vitest@4.1.11(@types/node@24.13.3)(@vitest/browser-preview@4.1.11)(@voidzero-dev/vite-plus-core@0.0.0-commit.8b5f2064803292e4338ba6ac3b72e57a6585097b(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12)(typescript@7.0.2)))(zod@4.4.3)
+        version: 0.10.12(@voidzero-dev/vite-plus-core@0.0.0-commit.8b5f2064803292e4338ba6ac3b72e57a6585097b(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12)(typescript@7.0.2))(arktype@2.2.1)(kysely@0.29.5)(valibot@1.4.1(typescript@7.0.2))(vitest@4.1.11)(zod@4.4.3)
       wrangler:
         specifier: ^4.121.0
         version: 4.123.0(@cloudflare/workers-types@4.20260702.1)
@@ -2253,6 +2253,7 @@ packages:
 
   drizzle-kit@0.31.10:
     resolution: {integrity: sha512-7OZcmQUrdGI+DUNNsKBn1aW8qSoKuTH7d0mYgSP8bAzdFzKoovxEFnoGQp2dVs82EOJeYycqRtciopszwUf8bw==}
+    hasBin: true
 
   drizzle-orm@0.45.2:
     resolution: {integrity: sha512-kY0BSaTNYWnoDMVoyY8uxmyHjpJW1geOmBMdSSicKo9CIIWkSxMIj2rkeSR51b8KAPB7m+qysjuHme5nKP+E5Q==}
@@ -2537,6 +2538,7 @@ packages:
 
   lz-string@1.5.0:
     resolution: {integrity: sha512-h5bgJWpxJNswbU7qCrV0tIKQCaS3blPDrqKWx+QxzuzL1zGUzij9XCWLrSLsJPu5t+eWA/ycetzYAO5IOMcWAQ==}
+    hasBin: true
 
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
@@ -2566,6 +2568,7 @@ packages:
   nanoid@3.3.18:
     resolution: {integrity: sha512-DTg4MJbGMWkfi6VZFdNt2/caMbQy4Ou+Op/hJQvGEWcnVfoA1QA+xzRKAzw9jD6+GVOOeYr/mIcuDSdug6F6+w==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
+    hasBin: true
 
   nanostores@1.4.2:
     resolution: {integrity: sha512-Wxv8Roefr2nqtiRG0bnaFlpYqpIVtOEeJZHaH+4nGgOK1/7n6OHOuHCb/bhqrNQgZM8fyd0s1PqhdrJc9Ib44g==}
@@ -2700,6 +2703,7 @@ packages:
               os: linux
               libc: musl
     version: 24.19.0
+    hasBin: true
 
   obug@2.1.3:
     resolution: {integrity: sha512-9miFgM2OFba7hB+pRgvtV84pYTBaoTHohvmIgiRt6dRIzbwEOIaNaP+dIlGs2fNFoB0SeISs0Jz5WFVRid6Xyg==}
@@ -2723,6 +2727,7 @@ packages:
 
   oxlint-tsgolint@7.0.2001:
     resolution: {integrity: sha512-KjK/XLcXr1DSyonKhsuFqJRiuKqcyG9j3LJ8nkOsrLzGvodBPqzHOKauy10asLMDI0sUpvb+1sxlzff3udZvfg==}
+    hasBin: true
 
   oxlint@1.79.0:
     resolution: {integrity: sha512-hVJ9hq9m2unPS+Of4eJJgCPdIeCC+3DHEUX3tkmrPJr3OK2hz7PhXwgC+ZP71ZcYu8cCDEtQrqLxWNvxBppBVg==}
@@ -2812,6 +2817,7 @@ packages:
     resolution: {integrity: sha512-8Mf2cbV7x1cXPUILADGI3wuhfqWvtiLA1iclTDbFRZkgRQS0NqsPZphna9V+HyTEadheuPmjaJMsbzKQFOzLug==}
     engines: {node: '>=10'}
     deprecated: No longer maintained. Please contact the author of the relevant native addon; alternatives are available.
+    hasBin: true
 
   pretty-format@27.5.1:
     resolution: {integrity: sha512-Qb1gy5OrP5+zDf2Bvnzdl3jsTf1qXVMazbvCoKhtKqVs4/YK4ozX4gKQJJVyNe+cajNPn0KoC0MC3FUmaHWEmQ==}
@@ -2825,6 +2831,7 @@ packages:
 
   rc@1.2.8:
     resolution: {integrity: sha512-y3bGgqKj3QBdxLbLkomlohkvsA8gdAiUQlSBJnBhfn+BPxg4bc62d8TcBW15wavDfgexCgccckhcZvywyQYPOw==}
+    hasBin: true
 
   react-is@17.0.2:
     resolution: {integrity: sha512-w2GsyukL62IJnlaff/nRegPQR94C/XXamvMWmSHRJ4y7Ts/4ocGRmTHvOs8PSE6pB3dWOrD/nueuU5sduBsQ4w==}
@@ -2849,6 +2856,7 @@ packages:
   semver@7.8.5:
     resolution: {integrity: sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==}
     engines: {node: '>=10'}
+    hasBin: true
 
   set-cookie-parser@3.1.2:
     resolution: {integrity: sha512-5/r/lTwbJ3zQ+qwdUFZYeRNqda7P5HD8zQKqlSjdGt1/S0cjLAphHusj4Y58ahDtWn/g32xrIS58/ikOvwl0Lw==}
@@ -2941,6 +2949,7 @@ packages:
   tsx@4.23.12:
     resolution: {integrity: sha512-FDf4L4sYzKtzWYhU/Xm0AQFdTjdIxNo9ElTf2mxXM6k8YMHXzYUe4yODVaXP4V9uMFbVg8c0qyBccK2OOxb45Q==}
     engines: {node: '>=18.0.0'}
+    hasBin: true
 
   tunnel-agent@0.6.0:
     resolution: {integrity: sha512-McnNiV1l8RYeY8tBgEpuodCC1mLUdbSN+CYBL7kJsJNInOP8UjDDEwdk6Mw60vdLLrr5NHKZhMAOSrR2NZuQ+w==}
@@ -2948,6 +2957,7 @@ packages:
   typescript@7.0.2:
     resolution: {integrity: sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA==}
     engines: {node: '>=16.20.0'}
+    hasBin: true
 
   undici-types@7.18.2:
     resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
@@ -3046,14 +3056,17 @@ packages:
   why-is-node-running@2.3.0:
     resolution: {integrity: sha512-hUrmaWBdVDcxvYqnyh09zunKzROWjbZTiNy8dBEjkS7ehEDQibXJ7XvlmtbwuTclUiIyN+CyXQD4Vmko8fNm8w==}
     engines: {node: '>=8'}
+    hasBin: true
 
   workerd@1.20260804.1:
     resolution: {integrity: sha512-b0P38g5/ssemwWxd/mafNYggEZ0ere7PCiUH6RCHkgqjRhhXTP45nDiL2L3iIvi8uF2IjNrGpVgMXEunCaeY/w==}
     engines: {node: '>=16'}
+    hasBin: true
 
   workerd@1.20260811.1:
     resolution: {integrity: sha512-kh+FFm55JQ4ssxhHZV9VPdMQq3D1nHxNJgwxMtWGD4dGppJvLySdguTRDKgeNTvgq6heSz+6TTXyPSDGj8Yllw==}
     engines: {node: '>=16'}
+    hasBin: true
 
   wrangler@4.123.0:
     resolution: {integrity: sha512-VXo2I1oa0x9aGAKIFPRSQPqTh0RBY5Ktl44YOhNmsJQFUdJKDA2vVTU6Xj+FC2koll6orJqWZN8jbXVIk9O67Q==}
@@ -3226,7 +3239,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@cloudflare/vitest-pool-workers@0.21.3(@cloudflare/workers-types@4.20260702.1)(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.11(@types/node@24.13.3)(@vitest/browser-preview@4.1.11)(@voidzero-dev/vite-plus-core@0.0.0-commit.8b5f2064803292e4338ba6ac3b72e57a6585097b(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12)(typescript@7.0.2)))':
+  '@cloudflare/vitest-pool-workers@0.21.3(@cloudflare/workers-types@4.20260702.1)(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.11)':
     dependencies:
       '@vitest/runner': 4.1.11
       '@vitest/snapshot': 4.1.11
@@ -4227,7 +4240,7 @@ snapshots:
 
   base64-js@1.5.1: {}
 
-  better-auth@1.6.27(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(kysely@0.29.5)(pg@8.22.0))(pg@8.22.0)(vitest@4.1.11(@types/node@24.13.3)(@vitest/browser-preview@4.1.11)(@voidzero-dev/vite-plus-core@0.0.0-commit.8b5f2064803292e4338ba6ac3b72e57a6585097b(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12)(typescript@7.0.2))):
+  better-auth@1.6.27(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(kysely@0.29.5)(pg@8.22.0))(pg@8.22.0)(vitest@4.1.11):
     dependencies:
       '@better-auth/core': 1.6.27(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@cloudflare/workers-types@4.20260702.1)(better-call@1.4.0(zod@4.4.3))(jose@6.2.8)(kysely@0.29.5)(nanostores@1.4.2)
       '@better-auth/drizzle-adapter': 1.6.27(@better-auth/core@1.6.27(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@cloudflare/workers-types@4.20260702.1)(better-call@1.4.0(zod@4.4.3))(jose@6.2.8)(kysely@0.29.5)(nanostores@1.4.2))(@better-auth/utils@0.4.2)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(kysely@0.29.5)(pg@8.22.0))
@@ -5037,14 +5050,14 @@ snapshots:
     transitivePeerDependencies:
       - msw
 
-  void@0.10.12(@voidzero-dev/vite-plus-core@0.0.0-commit.8b5f2064803292e4338ba6ac3b72e57a6585097b(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12)(typescript@7.0.2))(arktype@2.2.1)(kysely@0.29.5)(valibot@1.4.1(typescript@7.0.2))(vitest@4.1.11(@types/node@24.13.3)(@vitest/browser-preview@4.1.11)(@voidzero-dev/vite-plus-core@0.0.0-commit.8b5f2064803292e4338ba6ac3b72e57a6585097b(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12)(typescript@7.0.2)))(zod@4.4.3):
+  void@0.10.12(@voidzero-dev/vite-plus-core@0.0.0-commit.8b5f2064803292e4338ba6ac3b72e57a6585097b(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12)(typescript@7.0.2))(arktype@2.2.1)(kysely@0.29.5)(valibot@1.4.1(typescript@7.0.2))(vitest@4.1.11)(zod@4.4.3):
     dependencies:
       '@cloudflare/sandbox': 0.12.5
       '@cloudflare/vite-plugin': 1.51.3(@voidzero-dev/vite-plus-core@0.0.0-commit.8b5f2064803292e4338ba6ac3b72e57a6585097b(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12)(typescript@7.0.2))(wrangler@4.123.0(@cloudflare/workers-types@4.20260702.1))
       '@cloudflare/workers-types': 4.20260702.1
       '@hono/oauth-providers': 0.8.7(hono@4.13.2)
       '@napi-rs/keyring': 1.3.0
-      better-auth: 1.6.27(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(kysely@0.29.5)(pg@8.22.0))(pg@8.22.0)(vitest@4.1.11(@types/node@24.13.3)(@vitest/browser-preview@4.1.11)(@voidzero-dev/vite-plus-core@0.0.0-commit.8b5f2064803292e4338ba6ac3b72e57a6585097b(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12)(typescript@7.0.2)))
+      better-auth: 1.6.27(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(kysely@0.29.5)(pg@8.22.0))(pg@8.22.0)(vitest@4.1.11)
       better-sqlite3: 12.11.1
       blake3-jit: 1.1.0
       drizzle-arktype: 0.1.3(arktype@2.2.1)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(kysely@0.29.5)(pg@8.22.0))
