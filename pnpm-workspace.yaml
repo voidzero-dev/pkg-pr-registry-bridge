@@ -1,8 +1,3 @@
-# pnpm 11 reads dependency build-script approvals here (the package.json `pnpm`
-# field is no longer honored). esbuild bundles the publish action; workerd runs
-# the Worker for tests/dev; sharp is a transitive dependency. better-sqlite3 is a
-# transitive of Void's D1/Drizzle layer, which this bridge does not use, so its
-# native build is skipped.
 allowBuilds:
   esbuild: true
   workerd: true
@@ -17,9 +12,9 @@ minimumReleaseAgeExclude:
   - '@voidzero-dev/vite-plus-*'
   - vitest
 catalog:
-  vite: npm:@voidzero-dev/vite-plus-core@0.2.9
-  vitest: 4.1.10
-  vite-plus: 0.2.9
+  vite: npm:@voidzero-dev/vite-plus-core@0.3.0
+  vitest: 4.1.11
+  vite-plus: 0.3.0
 overrides:
   vite@*: 'catalog:'
   vitest@*: 'catalog:'
