@@ -2,10 +2,17 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended", "github>Boshen/renovate"],
   "description": [
-    "The shared preset sets a 3-day minimumReleaseAge for npm and GitHub Actions updates, clearing pnpm 11's 1-day supply-chain cooldown on `pnpm install --frozen-lockfile` (a too-new lockfile entry fails CI with ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION). internalChecksFilter=strict holds such an update until it ages in, instead of opening a red PR. The preset's vite+ group updates vite-plus and @voidzero-dev/vite-plus-* immediately; pnpm-workspace.yaml excludes those packages from the cooldown so their bumps install."
+    "The shared preset sets a 3-day minimumReleaseAge for npm and GitHub Actions updates, clearing pnpm 11's 1-day supply-chain cooldown on `pnpm install --frozen-lockfile` (a too-new lockfile entry fails CI with ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION). internalChecksFilter=strict holds such an update until it ages in, instead of opening a red PR. The local vite+ group updates vite-plus, @voidzero-dev/vite-plus-*, and vitest immediately; pnpm-workspace.yaml excludes those packages from the cooldown so their bumps install."
   ],
   "internalChecksFilter": "strict",
   "packageRules": [
+    {
+      "description": "Group Vite+, its package aliases, and Vitest into a single PR so a Vite+ upgrade cannot omit its required Vitest version. minimumReleaseAge and schedule keep every package on the same immediate-update policy; the preset's generic npm rule would otherwise hold the aliases and Vitest behind a 3-day age gate and a Monday schedule.",
+      "groupName": "vite+",
+      "matchPackageNames": ["vite-plus", "@voidzero-dev/vite-plus-*", "vitest"],
+      "minimumReleaseAge": "0 days",
+      "schedule": ["at any time"]
+    },
     {
       "description": [
         "nanotar (bundled) and vite-plus (whose `vp pack` is the bundler) both shape the committed publish-action bundle (.github/actions/publish-preview/dist). A bump to either can change that bundle, so flag those PRs with `needs-bundle-rebuild`, which triggers the rebuild-bundle workflow to re-run `vp run build:action` and push the refreshed dist; the 'Verify action bundle' CI check is the backstop for anything else."

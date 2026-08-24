@@ -8,14 +8,14 @@ allowBuilds:
   workerd: true
   sharp: true
   better-sqlite3: false
-# vite-plus and the @voidzero-dev/vite-plus-* packages are excluded from
-# pnpm's release-age cooldown:
-# Renovate's vite+ fast lane (github>Boshen/renovate) proposes their bumps
-# immediately, and this repo dogfoods fresh Vite+ releases.
+# vite-plus, the @voidzero-dev/vite-plus-* packages, and vitest are excluded
+# from pnpm's release-age cooldown. The local Renovate vite+ group proposes
+# their bumps together and immediately, and this repo dogfoods fresh releases.
 minimumReleaseAgeExclude:
   - void@0.10.5
   - vite-plus
   - '@voidzero-dev/vite-plus-*'
+  - vitest
 catalog:
   vite: npm:@voidzero-dev/vite-plus-core@0.2.9
   vitest: 4.1.10
