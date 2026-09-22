@@ -7,18 +7,12 @@ import { isWorkspacePackage } from './preview/packages'
 import { parsePreviewVersion, shaToVersion } from './preview/parsePreviewVersion'
 import {
   getConfiguredRefs,
-  getConfiguredRefsWithEtag,
   latestVersionByPr,
   registerRef,
   unregisterRef,
 } from './preview/getConfiguredRefs'
 import { parseConfiguredPreviewRefs } from './preview/parseConfiguredPreviewRefs'
-import {
-  readMetaIndex,
-  removeFromMetaIndex,
-  resolveVersionMeta,
-  upsertMetaIndex,
-} from './preview/metaIndex'
+import { removeFromMetaIndex, resolveVersionMeta, upsertMetaIndex } from './preview/metaIndex'
 import {
   parseNpmTarballPath,
   parsePackagePath,
@@ -27,10 +21,10 @@ import {
   parseTarballPath,
   parseUploadPath,
 } from './registry/parsePackageName'
-import { getNpmPackumentCached, getNpmTimeCached } from './registry/fetchNpmPackument'
+import { getPackumentBody } from './registry/getPackumentBody'
 import { buildVersionMetadata } from './registry/buildVersionMetadata'
 import { redirectToNpm } from './registry/redirectToNpm'
-import { getPreviewMeta, getPreviewTarballBody } from './tarball/getPreviewBuild'
+import { getPreviewTarballBody } from './tarball/getPreviewBuild'
 import type { PreviewMeta } from './tarball/buildPreviewTarball'
 import {
   casKey,
@@ -41,26 +35,9 @@ import {
   tarballKey,
   tarballUrl,
 } from './cache/r2Cache'
-import { kvCachedText } from './cache/kvCache'
 import { describeError } from './util/errors'
 import { assertPrUrlInRepository, requireAdmin, requirePublisher } from './security/auth'
 import { packumentCacheControl, tarballCacheControl } from './cache/headers'
-
-/**
- * Fallback `time` (release date) for a preview registered but not yet published
- * (or a platform binary before CI warms it). A fixed past date: deterministic
- * across requests, and old enough that `minimum-release-age` never filters a
- * pinned preview during that gap.
- */
-const UNPUBLISHED_PREVIEW_TIME = '2020-01-01T00:00:00.000Z'
-
-// Output cache for the assembled packument. Void does not edge-cache the Worker
-// response, so without this the ~440KB packument is re-assembled and re-stringified
-// on every request. Keyed by the refs-index etag, which changes on every ref
-// mutation; a short TTL bounds npm stable-version drift (preview freshness comes
-// from the etag, not the TTL).
-const PACKUMENT_OUT_PREFIX = 'pkgt/'
-const PACKUMENT_OUT_TTL_S = 60
 
 /** Build the packument HTTP response from an already-serialized body. */
 function packumentResponse(body: string): Response {
@@ -466,72 +443,7 @@ app.get('*', async (c) => {
   const { name } = pkgReq
   if (!isWorkspacePackage(name, c.env)) return redirectToNpm(c.env, c.req.raw)
 
-  // Read the refs first: its etag keys the output cache below, and the refs feed
-  // the assembly on a miss. Any ref change rewrites the index → new etag → the
-  // key changes → automatic invalidation (no explicit purge), and R2 is strongly
-  // consistent read-after-write, so a just-published preview shows up on the very
-  // next request.
-  const { refs, etag } = await getConfiguredRefsWithEtag(c.env)
-  const cacheKey = `${PACKUMENT_OUT_PREFIX}${name}/${etag ?? 'none'}`
-
-  const body = await kvCachedText(c.env, cacheKey, PACKUMENT_OUT_TTL_S, async () => {
-    // Miss: the npm packument fetch, the npm `time` fetch, and the per-package
-    // meta aggregate are independent, so overlap them. `time` comes from npm's
-    // FULL packument (the abbreviated form we serve omits it) but is sourced
-    // separately so the served response keeps the compact abbreviated version
-    // docs. `metaIndex` is read ONCE here instead of one key per ref, so this
-    // rebuild's subrequest count stays flat no matter how many refs exist.
-    const [base, npmTime, metaIndex] = await Promise.all([
-      getNpmPackumentCached(c.env, name),
-      getNpmTimeCached(c.env, name),
-      readMetaIndex(c.env, name),
-    ])
-
-    const packument: Record<string, any> = base ?? { name, 'dist-tags': {}, versions: {} }
-
-    packument.name = name
-    packument['dist-tags'] ??= {}
-    packument.versions ??= {}
-
-    // pnpm's time-based resolution (`minimum-release-age`) hard-errors without a
-    // `time` map (ERR_PNPM_MISSING_TIME). Seed it from npm's real publish times;
-    // each injected preview version's entry is its server-stamped publish time
-    // (UNPUBLISHED_PREVIEW_TIME until published), added in the loop below. `npmTime`
-    // is a fresh per-request object (cache parse or fetch), so mutate it in place.
-    const time: Record<string, string> = npmTime
-    packument.time = time
-
-    // Inject each configured ref from the meta aggregate read above. A ref
-    // missing from the aggregate falls back to its per-version key: this covers
-    // both refs published before the aggregate existed (fades as they republish
-    // or expire within REF_TTL_MS) and an absent/corrupt aggregate (readMetaIndex
-    // returns {}), so the fallback is a permanent degraded path, not just a
-    // migration artifact. A failing ref is isolated so it can't break installs of
-    // the package's other versions.
-    await Promise.all(
-      refs.map(async (ref) => {
-        try {
-          const preview = metaIndex[ref.version] ?? (await getPreviewMeta(c.env, name, ref.version))
-          packument.versions[ref.version] = buildVersionMetadata(c.env, name, ref.version, preview)
-          time[ref.version] = preview.publishedAt ?? UNPUBLISHED_PREVIEW_TIME
-        } catch (err) {
-          console.warn(
-            `Failed to inject preview ref ${ref.version} into ${name}:`,
-            describeError(err),
-          )
-        }
-      }),
-    )
-
-    // Mutable `pr-<n>` dist-tags: point each PR at its latest-published commit
-    // version present in this packument, so `<pkg>@pr-<n>` installs the PR's head
-    // build. The per-commit versions stay immutable; only the tag moves.
-    for (const [prNum, version] of latestVersionByPr(refs, (v) => v in packument.versions)) {
-      packument['dist-tags'][`pr-${prNum}`] = version
-    }
-
-    return JSON.stringify(packument)
-  })
+  const body = await getPackumentBody(c.env, name, c.executionCtx)
 
   return packumentResponse(body)
 })

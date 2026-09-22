@@ -316,6 +316,26 @@ platform refuses to mint deploy tokens for pull_request events, which run
 untrusted code. Run the smoke test locally with `pnpm smoke <url>`, and deploy
 staging by hand with `pnpm deploy:staging`.
 
+### Packument latency diagnostics
+
+Packument requests have an 8-second response budget, below Void's 10-second
+dispatch deadline. An npm fetch has a 5-second budget that includes reading the
+response body. A KV cache read that takes more than 500 ms is bypassed; cache
+writes run through `waitUntil` and do not delay the response. Deadline failures
+return HTTP 504 and do not populate the assembled-response cache. Preview
+freshness still comes from reading the R2 refs index on every request.
+
+Each request emits a JSON `packument` log with a `requestId`, package, status,
+total duration, cache hits/misses/bypasses, stage timings, ref count, and
+`fallbackReads`. A nonzero `fallbackReads` means some metadata was absent from
+the package aggregate and needed individual R2 reads. Stages still waiting at
+the deadline have `pending: true`. Failed requests and responses taking at
+least one second use the warning level. Slow or failed background writes emit
+`cache_write` logs with the same `requestId`.
+
+Use `vp exec void project logs --range 1h --filter packument` to inspect response
+timings, or `--filter cache_write` to inspect background writes.
+
 ## License
 
 [MIT](./LICENSE)

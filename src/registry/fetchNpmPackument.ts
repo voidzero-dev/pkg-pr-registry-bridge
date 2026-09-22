@@ -2,6 +2,8 @@ import type { Env } from '../config'
 import { encodeNpmPackageName } from './parsePackageName'
 import { HttpError } from '../httpError'
 import { kvCached } from '../cache/kvCache'
+import type { RequestWork } from '../util/requestTiming'
+import { withTimeout } from '../util/withTimeout'
 
 // Abbreviated packument format. Always request this from npm: it is an order
 // of magnitude smaller than the full packument (which some clients' Accept
@@ -21,21 +23,48 @@ const ABBREVIATED_ACCEPT = 'application/vnd.npm.install-v1+json'
 // reaches a package manager's HTTP/2 client.
 const FULL_ACCEPT = 'application/json'
 
-/** GET a package's metadata from the npm registry with the given Accept header. */
-function npmFetch(env: Env, name: string, accept: string): Promise<Response> {
-  return fetch(`${env.NPM_REGISTRY}/${encodeNpmPackageName(name)}`, {
-    headers: { accept },
-    redirect: 'follow',
-  })
-}
+export const NPM_FETCH_TIMEOUT_MS = 5000
 
 /**
- * Surface an npm upstream failure: throw npm's status + raw body on a non-2xx
- * response. Callers handle 404 themselves first, since "not on npm" is not a
- * failure.
+ * Bound the complete fetch, including the body read. Cancel npm I/O when this
+ * deadline or the enclosing packument budget expires. A timeout is an error,
+ * never a missing package that could be cached as a preview-only packument.
  */
-async function assertNpmOk(res: Response): Promise<void> {
-  if (!res.ok) throw new HttpError(res.status, await res.text())
+async function npmFetchJson(
+  env: Env,
+  name: string,
+  accept: string,
+  signal?: AbortSignal,
+): Promise<Record<string, any> | null> {
+  signal?.throwIfAborted()
+  const controller = new AbortController()
+  const abort = () => controller.abort(signal?.reason)
+  signal?.addEventListener('abort', abort, { once: true })
+  try {
+    return await withTimeout(
+      (async () => {
+        const res = await fetch(`${env.NPM_REGISTRY}/${encodeNpmPackageName(name)}`, {
+          headers: { accept },
+          redirect: 'follow',
+          signal: controller.signal,
+        })
+        if (res.status === 404) {
+          await res.body?.cancel()
+          return null
+        }
+        if (!res.ok) throw new HttpError(res.status, await res.text())
+        return (await res.json()) as Record<string, any>
+      })(),
+      NPM_FETCH_TIMEOUT_MS,
+      () => {
+        const error = new HttpError(504, `npm metadata request timed out for ${name}`)
+        controller.abort(error)
+        return error
+      },
+    )
+  } finally {
+    signal?.removeEventListener('abort', abort)
+  }
 }
 
 /**
@@ -44,16 +73,12 @@ async function assertNpmOk(res: Response): Promise<void> {
  * OTHER non-200 is an upstream failure: throw npm's status + raw body, rather
  * than synthesize a misleading packument that drops the package's real versions.
  */
-export async function fetchNpmPackument(
+export function fetchNpmPackument(
   env: Env,
   name: string,
+  signal?: AbortSignal,
 ): Promise<Record<string, any> | null> {
-  const res = await npmFetch(env, name, ABBREVIATED_ACCEPT)
-
-  if (res.status === 404) return null
-  await assertNpmOk(res)
-
-  return (await res.json()) as Record<string, any>
+  return npmFetchJson(env, name, ABBREVIATED_ACCEPT, signal)
 }
 
 /**
@@ -65,13 +90,12 @@ export async function fetchNpmPackument(
  * null. Kept separate from fetchNpmPackument so the served response carries the
  * compact abbreviated version docs while still preserving npm's real times.
  */
-async function fetchNpmTime(env: Env, name: string): Promise<Record<string, string> | null> {
-  const res = await npmFetch(env, name, FULL_ACCEPT)
-
-  if (res.status === 404) return null
-  await assertNpmOk(res)
-
-  const data = (await res.json()) as Record<string, any>
+async function fetchNpmTime(
+  env: Env,
+  name: string,
+  signal: AbortSignal,
+): Promise<Record<string, string> | null> {
+  const data = await npmFetchJson(env, name, FULL_ACCEPT, signal)
   const time = data?.time
   return time && typeof time === 'object' ? (time as Record<string, string>) : null
 }
@@ -89,7 +113,11 @@ const NPM_TIME_TTL_S = 5 * 60
  * Refs/versions stay fresh (read live), so this adds no publish-visibility lag.
  * KV, not the Cache API, because the Void runtime forbids `caches.default`.
  */
-export async function getNpmTimeCached(env: Env, name: string): Promise<Record<string, string>> {
+export async function getNpmTimeCached(
+  env: Env,
+  name: string,
+  work: RequestWork,
+): Promise<Record<string, string>> {
   // The fetcher returns the small EXTRACTED map (not the multi-MB body), and `{}`
   // for a 404 so a not-on-npm package is cached and not re-fetched in full every
   // request.
@@ -98,7 +126,12 @@ export async function getNpmTimeCached(env: Env, name: string): Promise<Record<s
       env,
       `npm-time/${name}`,
       NPM_TIME_TTL_S,
-      async () => (await fetchNpmTime(env, name)) ?? {},
+      () =>
+        work.timing.measure(
+          'npm.time',
+          async () => (await fetchNpmTime(env, name, work.signal)) ?? {},
+        ),
+      work,
     )) ?? {}
   )
 }
@@ -117,8 +150,16 @@ const NPM_PACKUMENT_TTL_S = 5 * 60
  * to the TTL, which the served `max-age=300` already allows). A 404 (not on npm)
  * returns null and is left uncached so it stays cheap to re-probe.
  */
-export function getNpmPackumentCached(env: Env, name: string): Promise<Record<string, any> | null> {
-  return kvCached(env, `npm-packument/${name}`, NPM_PACKUMENT_TTL_S, () =>
-    fetchNpmPackument(env, name),
+export function getNpmPackumentCached(
+  env: Env,
+  name: string,
+  work: RequestWork,
+): Promise<Record<string, any> | null> {
+  return kvCached(
+    env,
+    `npm-packument/${name}`,
+    NPM_PACKUMENT_TTL_S,
+    () => work.timing.measure('npm.packument', () => fetchNpmPackument(env, name, work.signal)),
+    work,
   )
 }
