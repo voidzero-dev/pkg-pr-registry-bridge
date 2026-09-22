@@ -1,12 +1,12 @@
 import { createExecutionContext, env as bindings, waitOnExecutionContext } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
+import { app } from '../src/app'
 import { KV_READ_TIMEOUT_MS, kvCached, kvCachedText } from '../src/cache/kvCache'
 import { metaIndexKey, metaKey, REFS_INDEX_KEY } from '../src/cache/r2Cache'
+import type { Env } from '../src/config'
 import { fetchNpmPackument, NPM_FETCH_TIMEOUT_MS } from '../src/registry/fetchNpmPackument'
 import { getPackumentBody, PACKUMENT_TIMEOUT_MS } from '../src/registry/getPackumentBody'
 import { RequestTiming, type RequestWork } from '../src/util/requestTiming'
-import type { Env } from '../src/config'
-import { app } from '../src/app'
 
 const env: Env = {
   ...bindings,
@@ -23,7 +23,11 @@ const kv = env.KV as { get: (key: string, type: 'json' | 'text') => Promise<unkn
 const log = vi.fn()
 const warn = vi.fn()
 
-function deferred<T>() {
+function deferred<T>(): {
+  promise: Promise<T>
+  resolve: (value: T) => void
+  reject: (reason: unknown) => void
+} {
   let resolve!: (value: T) => void
   let reject!: (reason: unknown) => void
   const promise = new Promise<T>((res, rej) => {
@@ -33,12 +37,18 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-function requestWork() {
+function requestWork(): RequestWork & { executionCtx: ReturnType<typeof createExecutionContext> } {
   return {
     executionCtx: createExecutionContext(),
     timing: new RequestTiming(),
     signal: new AbortController().signal,
-  } satisfies RequestWork
+  }
+}
+
+function pendingUntilAbort<T>(signal?: AbortSignal): Promise<T> {
+  return new Promise((_, reject) => {
+    signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+  })
 }
 
 beforeEach(() => {
@@ -120,17 +130,10 @@ describe('npm deadlines', () => {
         vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
           signal = init?.signal ?? undefined
           if (phase === 'headers') {
-            return new Promise<Response>((_, reject) => {
-              signal?.addEventListener('abort', () => reject(signal?.reason), { once: true })
-            })
+            return pendingUntilAbort<Response>(signal)
           }
           const response = Response.json({})
-          vi.spyOn(response, 'json').mockImplementation(
-            () =>
-              new Promise((_, reject) => {
-                signal?.addEventListener('abort', () => reject(signal?.reason), { once: true })
-              }),
-          )
+          vi.spyOn(response, 'json').mockImplementation(() => pendingUntilAbort(signal))
           return Promise.resolve(response)
         }),
       )
@@ -152,9 +155,7 @@ describe('npm deadlines', () => {
       'fetch',
       vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
         signal = init?.signal ?? undefined
-        return new Promise<Response>((_, reject) => {
-          signal?.addEventListener('abort', () => reject(signal?.reason), { once: true })
-        })
+        return pendingUntilAbort<Response>(signal)
       }),
     )
     const result = fetchNpmPackument(env, 'vite-plus', controller.signal).catch(
@@ -199,9 +200,7 @@ describe('packument response budget', () => {
         const signal = init!.signal!
         signals.push(signal)
         if (signals.length === 2) started.resolve()
-        return new Promise<Response>((_, reject) => {
-          signal.addEventListener('abort', () => reject(signal.reason), { once: true })
-        })
+        return pendingUntilAbort<Response>(signal)
       }),
     )
     const ctx = createExecutionContext()

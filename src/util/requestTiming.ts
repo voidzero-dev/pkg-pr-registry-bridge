@@ -24,12 +24,13 @@ export class RequestTiming {
 
   log(name: string, status: number): void {
     const now = Date.now()
+    const durationMs = now - this.startedAt
     const message = JSON.stringify({
       event: 'packument',
       requestId: this.requestId,
       package: name,
       status,
-      durationMs: now - this.startedAt,
+      durationMs,
       cache: this.cache,
       refs: this.refs,
       fallbackReads: this.fallbackReads,
@@ -40,7 +41,7 @@ export class RequestTiming {
         failed: stage.failed ?? false,
       })),
     })
-    if (status >= 400 || now - this.startedAt >= 1000) console.warn(message)
+    if (status >= 400 || durationMs >= 1000) console.warn(message)
     else console.log(message)
   }
 }

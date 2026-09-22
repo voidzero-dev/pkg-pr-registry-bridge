@@ -1,9 +1,9 @@
 import type { Env } from '../config'
-import { encodeNpmPackageName } from './parsePackageName'
 import { HttpError } from '../httpError'
 import { kvCached } from '../cache/kvCache'
 import type { RequestWork } from '../util/requestTiming'
 import { withTimeout } from '../util/withTimeout'
+import { encodeNpmPackageName } from './parsePackageName'
 
 // Abbreviated packument format. Always request this from npm: it is an order
 // of magnitude smaller than the full packument (which some clients' Accept
@@ -38,32 +38,32 @@ async function npmFetchJson(
 ): Promise<Record<string, any> | null> {
   signal?.throwIfAborted()
   const controller = new AbortController()
-  const abort = () => controller.abort(signal?.reason)
+  function abort(): void {
+    controller.abort(signal?.reason)
+  }
   signal?.addEventListener('abort', abort, { once: true })
   try {
-    return await withTimeout(
-      (async () => {
-        const res = await fetch(`${env.NPM_REGISTRY}/${encodeNpmPackageName(name)}`, {
-          headers: { accept },
-          redirect: 'follow',
-          signal: controller.signal,
-        })
-        if (res.status === 404) {
-          await res.body?.cancel()
-          return null
-        }
-        if (!res.ok) throw new HttpError(res.status, await res.text())
-        return (await res.json()) as Record<string, any>
-      })(),
-      NPM_FETCH_TIMEOUT_MS,
-      () => {
-        const error = new HttpError(504, `npm metadata request timed out for ${name}`)
-        controller.abort(error)
-        return error
-      },
-    )
+    return await withTimeout(fetchMetadata(), NPM_FETCH_TIMEOUT_MS, () => {
+      const error = new HttpError(504, `npm metadata request timed out for ${name}`)
+      controller.abort(error)
+      return error
+    })
   } finally {
     signal?.removeEventListener('abort', abort)
+  }
+
+  async function fetchMetadata(): Promise<Record<string, any> | null> {
+    const res = await fetch(`${env.NPM_REGISTRY}/${encodeNpmPackageName(name)}`, {
+      headers: { accept },
+      redirect: 'follow',
+      signal: controller.signal,
+    })
+    if (res.status === 404) {
+      await res.body?.cancel()
+      return null
+    }
+    if (!res.ok) throw new HttpError(res.status, await res.text())
+    return (await res.json()) as Record<string, any>
   }
 }
 
@@ -121,19 +121,18 @@ export async function getNpmTimeCached(
   // The fetcher returns the small EXTRACTED map (not the multi-MB body), and `{}`
   // for a 404 so a not-on-npm package is cached and not re-fetched in full every
   // request.
-  return (
-    (await kvCached(
-      env,
-      `npm-time/${name}`,
-      NPM_TIME_TTL_S,
-      () =>
-        work.timing.measure(
-          'npm.time',
-          async () => (await fetchNpmTime(env, name, work.signal)) ?? {},
-        ),
-      work,
-    )) ?? {}
+  const time = await kvCached(
+    env,
+    `npm-time/${name}`,
+    NPM_TIME_TTL_S,
+    () =>
+      work.timing.measure(
+        'npm.time',
+        async () => (await fetchNpmTime(env, name, work.signal)) ?? {},
+      ),
+    work,
   )
+  return time ?? {}
 }
 
 /** Cached abbreviated packument TTL: matches the served `cache-control` window. */

@@ -1,7 +1,7 @@
 import type { Env } from '../config'
+import { describeError } from '../util/errors'
 import type { RequestWork } from '../util/requestTiming'
 import { withTimeout } from '../util/withTimeout'
-import { describeError } from '../util/errors'
 
 // KV is optional acceleration. A slow read must not consume Void's 10s budget.
 export const KV_READ_TIMEOUT_MS = 500
@@ -28,42 +28,43 @@ async function readCache<T>(
 }
 
 /** The string is captured before callers can mutate a cached JSON object. */
-function writeCache(env: Env, key: string, value: string, ttlSeconds: number, work: RequestWork) {
+function scheduleCacheWrite(
+  env: Env,
+  key: string,
+  value: string,
+  ttlSeconds: number,
+  work: RequestWork,
+): void {
   work.signal.throwIfAborted()
-  work.executionCtx.waitUntil(
-    (async () => {
-      const startedAt = Date.now()
-      let error: string | undefined
-      try {
-        await env.KV.put(key, value, { expirationTtl: ttlSeconds })
-      } catch (err) {
-        error = describeError(err)
-      }
-      const durationMs = Date.now() - startedAt
-      if (error || durationMs >= 1000) {
-        console.warn(
-          JSON.stringify({
-            event: 'cache_write',
-            requestId: work.timing.requestId,
-            key,
-            durationMs,
-            error,
-          }),
-        )
-      }
-    })(),
-  )
+  work.executionCtx.waitUntil(putCache(env, key, value, ttlSeconds, work.timing.requestId))
+}
+
+async function putCache(
+  env: Env,
+  key: string,
+  value: string,
+  ttlSeconds: number,
+  requestId: string,
+): Promise<void> {
+  const startedAt = Date.now()
+  let error: string | undefined
+  try {
+    await env.KV.put(key, value, { expirationTtl: ttlSeconds })
+  } catch (err) {
+    error = describeError(err)
+  }
+  const durationMs = Date.now() - startedAt
+  if (error || durationMs >= 1000) {
+    console.warn(JSON.stringify({ event: 'cache_write', requestId, key, durationMs, error }))
+  }
 }
 
 /**
  * Read a JSON value from KV, or compute it and write it back with a TTL.
  *
- * Cache errors and slow reads degrade to a direct compute. Writes run under
- * waitUntil so a slow KV write cannot delay a response. The value is only cached
- * when non-nullish, so the caller controls negative caching by what its fetcher
- * returns: return `{}` to cache a not-found cheaply, or `null` to leave it
- * uncached. `KV.get(..., 'json')` returns a fresh parse each call, so the caller
- * may safely mutate the result without corrupting the cache.
+ * Errors and slow reads bypass the cache; waitUntil keeps writes off the response
+ * path. Return `{}` from the fetcher to cache a not-found, or `null` to leave it
+ * uncached. Each read parses fresh JSON, so callers can safely mutate the result.
  *
  * KV, not the Cache API, because the Void runtime forbids `caches.default`.
  */
@@ -80,17 +81,14 @@ export async function kvCached<T>(
   const value = await fetcher()
   work.signal.throwIfAborted()
   if (value != null) {
-    writeCache(env, key, JSON.stringify(value), ttlSeconds, work)
+    scheduleCacheWrite(env, key, JSON.stringify(value), ttlSeconds, work)
   }
   return value
 }
 
 /**
- * Like {@link kvCached}, but for an already-serialized string body: stores and
- * serves it verbatim (`get(..., 'text')` / `put(value)`), with no JSON parse or
- * re-stringify round-trip. Use when the cached value is the exact bytes to serve
- * (e.g. a large assembled response) and re-encoding it would be wasted work. The
- * fetcher always produces a body, so the result is always cached.
+ * Cache an already-serialized response verbatim, without a JSON round-trip.
+ * The fetcher always returns a body, so every successful result is cached.
  */
 export async function kvCachedText(
   env: Env,
@@ -103,6 +101,6 @@ export async function kvCachedText(
   if (cached !== null) return cached
 
   const value = await fetcher()
-  writeCache(env, key, value, ttlSeconds, work)
+  scheduleCacheWrite(env, key, value, ttlSeconds, work)
   return value
 }
