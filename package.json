@@ -29,7 +29,7 @@
     "vite": "catalog:",
     "vite-plus": "catalog:",
     "vitest": "catalog:",
-    "void": "^0.10.5",
+    "void": "^0.20.0",
     "wrangler": "^4.121.0"
   },
   "devEngines": {
