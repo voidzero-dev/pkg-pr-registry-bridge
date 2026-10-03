@@ -23,7 +23,8 @@
     "nanotar": "^0.3.0"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@cloudflare/vitest-plugin": "https://pkg.pr.new/@cloudflare/vitest-plugin@7b89dc48f3f4b0dfba5df352bcbdf8e2cbcff30e",
+    "@cloudflare/workers-types": "5.20260921.1",
     "@types/node": "^24.13.2",
     "typescript": "^7.0.0",
     "vite": "catalog:",
