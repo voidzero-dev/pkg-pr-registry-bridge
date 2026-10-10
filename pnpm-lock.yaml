@@ -205,6 +205,24 @@ settings:
 
 catalogs:
   default:
+    '@cloudflare/vitest-plugin':
+      specifier: ^1.4.0
+      version: 1.4.0
+    '@cloudflare/workers-types':
+      specifier: 5.20261009.1
+      version: 5.20261009.1
+    '@types/node':
+      specifier: ^24.13.2
+      version: 24.13.3
+    hono:
+      specifier: ^4.12.27
+      version: 4.13.13
+    nanotar:
+      specifier: ^0.3.0
+      version: 0.3.0
+    typescript:
+      specifier: ^7.0.0
+      version: 7.0.2
     vite:
       specifier: npm:@voidzero-dev/vite-plus-core@1.1.0
       version: 1.1.0
@@ -214,6 +232,9 @@ catalogs:
     vitest:
       specifier: 5.0.3
       version: 5.0.3
+    void:
+      specifier: ^0.27.0
+      version: 0.27.0
 
 overrides:
   vite@*: npm:@voidzero-dev/vite-plus-core@1.1.0
@@ -225,26 +246,26 @@ importers:
   .:
     dependencies:
       hono:
-        specifier: ^4.12.27
+        specifier: 'catalog:'
         version: 4.13.13
       nanotar:
-        specifier: ^0.3.0
+        specifier: 'catalog:'
         version: 0.3.0
     devDependencies:
       '@cloudflare/vitest-plugin':
-        specifier: ^1.4.0
+        specifier: 'catalog:'
         version: 1.4.0(@cloudflare/workers-types@5.20261009.1)(@types/node@24.13.3)(vitest@5.0.3)
       '@cloudflare/workers-types':
-        specifier: 5.20261009.1
+        specifier: 'catalog:'
         version: 5.20261009.1
       '@types/node':
-        specifier: ^24.13.2
+        specifier: 'catalog:'
         version: 24.13.3
       node:
         specifier: runtime:24.21.0
         version: runtime:24.21.0
       typescript:
-        specifier: ^7.0.0
+        specifier: 'catalog:'
         version: 7.0.2
       vite:
         specifier: 'catalog:'
@@ -256,7 +277,7 @@ importers:
         specifier: 'catalog:'
         version: 5.0.3(@types/node@24.13.3)(@vitest/browser-preview@5.0.3)(@vitest/ui@5.0.3(vitest@5.0.3))(@voidzero-dev/vite-plus-core@1.1.0(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(typescript@7.0.2))
       void:
-        specifier: ^0.27.0
+        specifier: 'catalog:'
         version: 0.27.0(@types/node@24.13.3)(@voidzero-dev/vite-plus-core@1.1.0(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(typescript@7.0.2))(arktype@2.2.1)(kysely@0.29.5)(valibot@1.4.1(typescript@7.0.2))(vitest@5.0.3)(wrangler@4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@24.13.3))(zod@4.6.5)
 
 packages:
