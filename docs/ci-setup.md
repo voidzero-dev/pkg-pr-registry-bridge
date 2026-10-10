@@ -62,8 +62,9 @@ blind to exactly the case this setup exists for.
 
 ### 1. Configure the bridge
 
-Four vars on the Worker (vars, not secrets: they hold public identifiers, and
-the verification key is GitHub's public JWKS).
+Set these four public identifiers in `config/production.env`, then upload the
+file with `void secret sync config/production.env --project <slug>`. Void stores
+all server values as remote secrets, including these public settings.
 
 ```bash
 OIDC_AUDIENCE=https://registry-bridge.viteplus.dev

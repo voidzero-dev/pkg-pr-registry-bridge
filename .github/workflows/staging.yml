@@ -9,6 +9,9 @@ concurrency:
   group: void-staging
   cancel-in-progress: false
 
+env:
+  VOID_API_URL: ${{ vars.VOID_API_URL || 'https://api.void.cloud' }}
+
 jobs:
   staging:
     runs-on: ubuntu-latest
@@ -24,6 +27,9 @@ jobs:
       - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
         with:
           cache: true
+
+      - name: Connect to Void
+        run: vp exec void connect "$VOID_API_URL" --no-login
 
       # Deploy this PR's code to the shared staging project, then smoke-test the
       # REAL Void runtime. This catches platform-only failures the pool-workers
