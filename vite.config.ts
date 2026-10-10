@@ -2,8 +2,9 @@ import { defineConfig, lazyPlugins } from 'vite-plus'
 import { voidPlugin } from 'void'
 
 // This is a server-only Void app (API routes under `routes/`, no client bundle).
-// `voidPlugin()` infers the Cloudflare bindings, loads `.env*`, and produces the
-// deployable Worker for `void deploy`.
+// `voidPlugin()` infers the Cloudflare bindings and produces the deployable Worker.
+// Local development reads the gitignored `.env`; copy `config/local.env` to create it.
+// `void deploy` uses the project's remote secrets for production values.
 export default defineConfig({
   staged: {
     '*': 'vp check --fix',

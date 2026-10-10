@@ -19,19 +19,18 @@
     "build:action": "vp pack"
   },
   "dependencies": {
-    "hono": "^4.12.27",
-    "nanotar": "^0.3.0"
+    "hono": "catalog:",
+    "nanotar": "catalog:"
   },
   "devDependencies": {
-    "@cloudflare/vitest-plugin": "^1.4.0",
-    "@cloudflare/workers-types": "5.20261009.1",
-    "@types/node": "^24.13.2",
-    "typescript": "^7.0.0",
+    "@cloudflare/vitest-plugin": "catalog:",
+    "@cloudflare/workers-types": "catalog:",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:",
     "vitest": "catalog:",
-    "void": "^0.10.5",
-    "wrangler": "^4.149.0"
+    "void": "catalog:"
   },
   "devEngines": {
     "packageManager": {
@@ -41,7 +40,7 @@
     },
     "runtime": {
       "name": "node",
-      "version": "24.19.0",
+      "version": "24.21.0",
       "onFail": "download"
     }
   }

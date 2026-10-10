@@ -1,9 +1,8 @@
 // Shared helpers for the deploy-time scripts (warm.mjs, e2e-bun.mjs).
-// Reads the bridge origin from the committed `.env` files (Void's source of
-// truth for worker vars), with `.env.production` overriding `.env`. Override at
-// runtime with BRIDGE_URL. Preview refs are no longer static config; they are
-// registered at runtime (CI / admin endpoints), so the scripts discover them
-// from the live bridge instead.
+// Reads the bridge origin from config/production.env, the public settings
+// uploaded to Void's remote secret storage. Override at runtime with BRIDGE_URL.
+// Preview refs are registered at runtime (CI / admin endpoints), so the scripts
+// discover them from the live bridge.
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -33,14 +32,11 @@ function parseEnvFile(file) {
   return out
 }
 
-/** Read PUBLIC_BASE_URL from `.env` + `.env.production`. */
+/** Read PUBLIC_BASE_URL from the public production settings. */
 export function readConfig() {
-  const merged = {
-    ...parseEnvFile(path.join(root, '.env')),
-    ...parseEnvFile(path.join(root, '.env.production')),
-  }
+  const production = parseEnvFile(path.join(root, 'config', 'production.env'))
   return {
-    baseUrl: merged.PUBLIC_BASE_URL || '',
+    baseUrl: production.PUBLIC_BASE_URL || '',
   }
 }
 

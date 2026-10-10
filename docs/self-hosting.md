@@ -29,7 +29,7 @@ background and focuses on the deployment.
   dev dependency via `pnpm exec void`). Void provisions the Worker plus the R2
   and KV bindings with no Cloudflare account. If you would rather run on raw
   Cloudflare Workers, see [Not using Void?](#not-using-void) at the end.
-- **Node 24 and pnpm 11** (this repo's `devEngines`), plus **bun** if you want to
+- **Node 24.21 or newer and pnpm 11** (this repo's `devEngines`), plus **bun** if you want to
   run the `test:e2e` install check.
 
 ## What is project-specific
@@ -39,10 +39,10 @@ point the bridge at a different project.
 
 | Knob                                | Where                                           | vite-plus value                        | Change to                   |
 | ----------------------------------- | ----------------------------------------------- | -------------------------------------- | --------------------------- |
-| `PREVIEW_OWNER`                     | `.env`                                          | `voidzero-dev`                         | your GitHub org/user        |
-| `PREVIEW_REPO`                      | `.env`                                          | `vite-plus`                            | your repo name              |
-| `WORKSPACE_PACKAGES`                | `.env`                                          | `vite-plus,@voidzero-dev/vite-plus-*`  | your package names/prefixes |
-| `PUBLIC_BASE_URL`                   | `.env.production`                               | `https://registry-bridge.viteplus.dev` | your deployed origin        |
+| `PREVIEW_OWNER`                     | `config/production.env`                         | `voidzero-dev`                         | your GitHub org/user        |
+| `PREVIEW_REPO`                      | `config/production.env`                         | `vite-plus`                            | your repo name              |
+| `WORKSPACE_PACKAGES`                | `config/production.env`                         | `vite-plus,@voidzero-dev/vite-plus-*`  | your package names/prefixes |
+| `PUBLIC_BASE_URL`                   | `config/production.env`                         | `https://registry-bridge.viteplus.dev` | your deployed origin        |
 | Void project slug                   | workflows, `package.json`, `.void/`             | `pkg-pr-registry-bridge`               | your project name           |
 | Publish action `packages`           | your upstream CI workflow                       | vite-plus layout                       | your built package dirs     |
 | Publish action `workspace-packages` | your upstream CI workflow                       | `vite-plus,@voidzero-dev/vite-plus-*`  | match `WORKSPACE_PACKAGES`  |
@@ -55,14 +55,16 @@ git clone https://github.com/acme-corp/registry-bridge.git   # your fork
 cd registry-bridge
 curl -fsSL https://vite.plus | bash   # install the vp CLI if you don't have it
 vp install              # also runs `void prepare` (generates .void/ types)
+cp -n config/local.env .env  # initialize the gitignored local environment
 vp check                # format + lint + type-check
 vp test                 # vitest in workerd (Miniflare), no network/secrets
 ```
 
-## 2. Point the bridge at your repo (`.env`)
+## 2. Point the bridge at your repo (`config/production.env`)
 
-`.env` is committed (non-secret) and loaded into the Worker's vars. Edit the
-three project knobs:
+`config/production.env` contains public settings to upload to Void's remote
+secret storage. Edit the three project knobs, and use the same values in your
+local `.env`:
 
 ```ini
 PREVIEW_OWNER=acme-corp
@@ -73,7 +75,7 @@ WORKSPACE_PACKAGES=acme-bundler,@acme/bundler-*
 ```
 
 Leave `NPM_REGISTRY` as it is unless you have a reason to change it.
-`PUBLIC_BASE_URL` in `.env` stays the local dev origin
+`PUBLIC_BASE_URL` in the gitignored `.env` stays the local dev origin
 (`http://localhost:5173`); the production value comes next.
 
 **About `WORKSPACE_PACKAGES`.** This strict allowlist gates the tarball endpoint:
@@ -81,13 +83,16 @@ a name outside it 404s there. Include your main package, the alias/meta package 
 consumer overrides `npm:...` to, and a `prefix*` for the per-platform binary
 packages.
 
-## 3. Set the public origin (`.env.production`)
+## 3. Set the public origin (`config/production.env`)
 
-`.env.production` overrides only the host-specific origin for `void deploy`:
+Set the production origin alongside the other public settings:
 
 ```ini
 PUBLIC_BASE_URL=https://registry-bridge.acme.dev
 ```
+
+Remove the four `OIDC_*` entries inherited from this repository unless you
+replace them with your own publishing identity, as described below.
 
 `PUBLIC_BASE_URL` is baked into every generated `dist.tarball` URL, so it **must**
 match the origin package managers reach the bridge on. If you deploy
@@ -116,15 +121,27 @@ production ships.
 
 ## 5. Deploy to Void
 
+The hosted project must exist before uploading its settings. Create it on your
+Void platform first if needed, then use its slug in the commands below.
+
 ```bash
-# One-time: authenticate and set the admin secret on the project.
-void auth login
-void secret put ADMIN_TOKEN        # guards the admin write endpoints
+# One-time: connect and authenticate with your Void platform.
+vp exec void connect https://api.void.cloud
+# Link the existing project.
+vp exec void project link acme-registry-bridge
+vp exec void secret sync config/production.env --project acme-registry-bridge
+vp exec void secret put ADMIN_TOKEN --project acme-registry-bridge
 
 # Deploy. `pnpm run deploy` also runs the bun e2e check, which asserts
 # vite-plus packages; use deploy:only until you have adapted that check (step 7).
-pnpm run deploy:only               # = void deploy
+VOID_PROJECT=acme-registry-bridge pnpm run deploy:only  # = void deploy
 ```
+
+Repeat the configuration upload and admin-token setup for your staging project.
+Void does not upload local `.env` values during deployment. Upload changes to
+`config/production.env` again before deploying; `secret sync` preserves existing
+secrets that are absent from the file. Never put credentials in the committed
+configuration files.
 
 On the first `void deploy`, Void provisions the Worker and the `STORAGE` (R2)
 and `KV` bindings declared in `void.json`, and writes the project link to
@@ -143,9 +160,9 @@ curl https://<your-slug>.void.app/-/refs      # public read; empty until you pub
 
 The publish endpoints also accept a GitHub Actions OIDC token, so CI can
 publish without holding `ADMIN_TOKEN` at all. This is what lets fork pull
-requests publish, since GitHub withholds secrets from them. Set four **vars**
-(not secrets; all four hold public identifiers, and the verification key is
-GitHub's public JWKS):
+requests publish, since GitHub withholds secrets from them. Set four public
+settings in `config/production.env` and upload them with `void secret sync`.
+Void stores them as remote secrets, although their values are public identifiers:
 
 ```bash
 # The audience CI will request. Set it per environment and never derive it
@@ -182,7 +199,8 @@ mint an OIDC token either. [`ci-setup.md`](./ci-setup.md) has the full wiring
 void domain add registry-bridge.acme.dev
 ```
 
-Then set `PUBLIC_BASE_URL` in `.env.production` to the custom origin and redeploy
+Then set `PUBLIC_BASE_URL` in `config/production.env` to the custom origin,
+upload the file with `void secret sync`, and redeploy
 so generated tarball URLs point at it. The underlying `<slug>.void.app` URL keeps
 working too.
 

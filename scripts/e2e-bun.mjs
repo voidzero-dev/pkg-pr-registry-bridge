@@ -7,7 +7,7 @@
 // bridge can serve). Intended to run after every deploy (`pnpm deploy`).
 //
 // Config (all optional):
-//   BRIDGE_URL         override the bridge origin (default: PUBLIC_BASE_URL from .env)
+//   BRIDGE_URL         override the bridge origin (default: PUBLIC_BASE_URL from config/production.env)
 //   BRIDGE_E2E_REF     preview ref to test, e.g. `commit.<sha>` (default: the
 //                      first ref the bridge currently lists at /-/refs)
 //   BRIDGE_E2E_VERSION explicit synthetic version, e.g. `0.0.0-commit.<sha>`
@@ -34,7 +34,7 @@ async function waitForHealth(base) {
 // The synthetic version to validate: an explicit override, else the first ref
 // the live bridge currently lists. Preview refs are registered at runtime (CI /
 // admin), not static config, so the test discovers one from the deployment
-// rather than reading it from `.env`.
+// rather than reading it from a local configuration file.
 async function resolveVersion(base) {
   if (process.env.BRIDGE_E2E_VERSION) return process.env.BRIDGE_E2E_VERSION
   if (process.env.BRIDGE_E2E_REF) return refToVersion(process.env.BRIDGE_E2E_REF)

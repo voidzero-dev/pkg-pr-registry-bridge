@@ -228,9 +228,11 @@ The action's bundle is committed
 
 ## Configuration
 
-Non-secret values are declared in `env.ts` (typed and validated) and set in
-`.env` (committed), with per-environment overrides in `.env.production`. Secrets
-are uploaded with `void secret put`:
+Values are declared in `env.ts` (typed and validated). Local development reads
+the gitignored `.env`, initialized from `config/local.env`. Void stores all
+production server values remotely, including public configuration. Upload the
+public settings in `config/production.env` with `void secret sync`; upload
+credentials separately with `void secret put`.
 
 | Var                              | Meaning                                                                                                   |
 | -------------------------------- | --------------------------------------------------------------------------------------------------------- |
@@ -249,16 +251,19 @@ Bindings/secrets:
 This is a [Void](https://void.cloud) app: `voidPlugin()` in `vite.config.ts`
 builds the Worker from the `routes/` layer, which forwards every request to the
 Hono registry app in `src/app.ts`. Void infers the `STORAGE` R2 binding and
-loads `.env*` into the Worker's vars.
+loads `.env` for local development.
 
 ```bash
 vp install         # also runs `void prepare` (generates .void/ types)
+cp -n config/local.env .env  # initialize local values without replacing an existing file
 vp check           # format + lint + type-check (oxfmt, oxlint, tsgolint)
 vp test            # vitest, runs the worker in workerd (Miniflare)
 vp dev             # local worker via Miniflare, http://localhost:5173
 ```
 
-For local admin testing, put `ADMIN_TOKEN=…` in `.env.local` (gitignored).
+For local admin testing, put `ADMIN_TOKEN=…` in `.env` (gitignored).
+Void does not support other root dotenv files, including `.env.local`,
+`.env.production`, and `.env.example`.
 
 ## Deploy
 
@@ -268,13 +273,17 @@ needed). To run an independent bridge for another project (fork, configure,
 deploy, wire CI), follow [`docs/self-hosting.md`](./docs/self-hosting.md).
 
 ```bash
-# One-time: authenticate and set the admin secret on the project.
-void auth login
-void secret put ADMIN_TOKEN              # guards the admin write endpoints
+# One-time: connect, authenticate, and upload each project's configuration.
+vp exec void connect https://api.void.cloud
+vp exec void secret sync config/production.env --project pkg-pr-registry-bridge
+vp exec void secret sync config/production.env --project pkg-pr-registry-bridge-staging
+# Set ADMIN_TOKEN separately for each project if it is not already configured.
+vp exec void secret put ADMIN_TOKEN --project pkg-pr-registry-bridge
+vp exec void secret put ADMIN_TOKEN --project pkg-pr-registry-bridge-staging
 
 # Deploy and run the end-to-end bun install check.
 # Use `pnpm run deploy` (not `pnpm deploy`, which is pnpm's built-in command).
-pnpm run deploy                          # void deploy + e2e
+VOID_PROJECT=pkg-pr-registry-bridge pnpm run deploy  # void deploy + e2e
 ```
 
 `pnpm run deploy` runs `void deploy`, then `pnpm test:e2e` (a real
@@ -282,7 +291,13 @@ pnpm run deploy                          # void deploy + e2e
 to the synthetic version, using a ref the bridge already serves). Use
 `pnpm run deploy:only` for `void deploy` alone.
 
-The public origin (`PUBLIC_BASE_URL` in `.env.production`) is the custom domain
+Before the first deployment after upgrading from Void `0.10.x`, upload
+`config/production.env` to both projects with the commands above. This preserves
+the public origin, registry settings, and all four OIDC settings. `secret sync`
+keeps existing secrets absent from the file, including `ADMIN_TOKEN`. Later
+changes to the file also require an upload; `void deploy` never uploads `.env`.
+
+The public origin (`PUBLIC_BASE_URL` in `config/production.env`) is the custom domain
 `https://registry-bridge.viteplus.dev`, attached with `void domain add` (the
 underlying Void platform URL `pkg-pr-registry-bridge.void.app` keeps working
 too).

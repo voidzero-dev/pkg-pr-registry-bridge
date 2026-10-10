@@ -1,8 +1,8 @@
 import { defineEnv, string } from 'void/env'
 
-// Typed, validated worker configuration. Non-secret values live in `.env`
-// (committed) and `.env.production` (committed); secrets are uploaded with
-// `void secret put` for production and read from `.env.local` in dev.
+// Typed, validated worker configuration. Local values live in `.env`
+// (gitignored). All production values use Void's remote secret storage;
+// config/production.env contains the public settings to upload with `void secret sync`.
 export default defineEnv({
   // Public origin of this bridge, baked into generated `dist.tarball` URLs.
   // Must match the deployed route. Overridden per environment.
@@ -15,10 +15,9 @@ export default defineEnv({
   // Allowlist of packages the bridge serves/routes (exact names or `prefix*`).
   WORKSPACE_PACKAGES: string(),
   // Bearer token guarding the admin endpoints. Secret: `void secret put ADMIN_TOKEN`.
-  ADMIN_TOKEN: string().secret().optional(),
-  // GitHub Actions OIDC publishing (RFC 0002). NOT secrets: all four hold
-  // public identifiers, and the verification key is GitHub's public JWKS, so
-  // they live in `.env.production` rather than `void secret put`.
+  ADMIN_TOKEN: string().optional(),
+  // GitHub Actions OIDC publishing (RFC 0002). All four are public identifiers,
+  // but Void stores every server value remotely, including these settings.
   //
   // Optional as a group: leaving all four unset disables the OIDC path and
   // leaves admin-token publishing untouched. Setting only SOME of them is
