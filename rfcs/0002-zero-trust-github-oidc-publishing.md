@@ -710,7 +710,7 @@ org fails closed rather than continuing to publish (5.1). Set both whenever
 1. **Bridge PR**: `oidc.ts`, `requirePublisher()` on the three publish
    endpoints, config vars, the SR-2 `prUrl` binding, pool-workers tests with
    a locally-signed JWKS fixture. Negative tests are the point here: `alg:
-none`, an HMAC-signed token, a wrong `aud`, an unlisted `workflow_ref`, a
+   none`, an HMAC-signed token, a wrong `aud`, an unlisted `workflow_ref`, a
    correct `workflow_ref` with a mismatched `repository_id` or
    `repository_owner_id` (SR-7), an oversized and a two-segment token
    (SR-3), an expired token, and a `prUrl` bound to another commit must each
