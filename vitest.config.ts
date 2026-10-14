@@ -28,6 +28,9 @@ export default defineConfig({
         ],
         test: {
           name: 'worker',
+          // vitest 5.0.4's persistent module cache breaks the workers pool
+          // ("no such file or directory, readAll" on .vitest-cache entries).
+          fsModuleCache: false,
           include: ['test/*.test.ts'],
         },
       },
