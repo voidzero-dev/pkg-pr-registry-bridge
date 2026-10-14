@@ -23,9 +23,9 @@ catalog:
   hono: ^4.12.27
   nanotar: ^0.3.0
   typescript: ^7.0.0
-  vite: npm:@voidzero-dev/vite-plus-core@1.1.0
-  vite-plus: 1.1.0
-  vitest: 5.0.3
+  vite: npm:@voidzero-dev/vite-plus-core@1.2.0
+  vite-plus: 1.2.0
+  vitest: 5.0.4
   # Keep the managed-deploy vars patch until an upstream release includes it.
   void: 0.28.0
 overrides:
