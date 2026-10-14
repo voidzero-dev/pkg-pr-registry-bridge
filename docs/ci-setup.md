@@ -62,9 +62,9 @@ blind to exactly the case this setup exists for.
 
 ### 1. Configure the bridge
 
-Set these four public identifiers in `config/production.env`, then upload the
-file with `void secret sync config/production.env --project <slug>`. Void stores
-all server values as remote secrets, including these public settings.
+Set these four public identifiers in `config/production.env`, then deploy the
+bridge. `void.config.ts` includes them as public Worker variables; no secret
+upload is required.
 
 ```bash
 OIDC_AUDIENCE=https://registry-bridge.viteplus.dev

@@ -39,6 +39,10 @@ jobs:
       - name: Check
         run: vp check
 
+      # Public settings must reach the emitted Worker as plaintext variables.
+      - name: Build Worker and check configuration
+        run: vp run build
+
       # The publish action bundles the Worker's own modules; re-bundle and fail
       # if the committed dist drifts (or an import it pulls in broke).
       - name: Verify action bundle is up to date

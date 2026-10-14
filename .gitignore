@@ -2,6 +2,7 @@ node_modules/
 dist/
 # Void-generated artifacts (types, local dev state).
 .void/
+.void-wrangler.jsonc
 # Local environment values, including secrets (ADMIN_TOKEN, etc.).
 .env
 .env.local

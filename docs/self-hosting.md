@@ -62,9 +62,9 @@ vp test                 # vitest in workerd (Miniflare), no network/secrets
 
 ## 2. Point the bridge at your repo (`config/production.env`)
 
-`config/production.env` contains public settings to upload to Void's remote
-secret storage. Edit the three project knobs, and use the same values in your
-local `.env`:
+`void.config.ts` loads `config/production.env` as plaintext `worker.vars` for
+each deployment. Edit the three project knobs, and use the same values in
+your local `.env`:
 
 ```ini
 PREVIEW_OWNER=acme-corp
@@ -121,15 +121,14 @@ production ships.
 
 ## 5. Deploy to Void
 
-The hosted project must exist before uploading its settings. Create it on your
-Void platform first if needed, then use its slug in the commands below.
+Create the hosted project on your Void platform first if needed, then use its
+slug in the commands below.
 
 ```bash
 # One-time: connect and authenticate with your Void platform.
 vp exec void connect https://api.void.cloud
 # Link the existing project.
 vp exec void project link acme-registry-bridge
-vp exec void secret sync config/production.env --project acme-registry-bridge
 vp exec void secret put ADMIN_TOKEN --project acme-registry-bridge
 
 # Deploy. `pnpm run deploy` also runs the bun e2e check, which asserts
@@ -137,14 +136,17 @@ vp exec void secret put ADMIN_TOKEN --project acme-registry-bridge
 VOID_PROJECT=acme-registry-bridge pnpm run deploy:only  # = void deploy
 ```
 
-Repeat the configuration upload and admin-token setup for your staging project.
-Void does not upload local `.env` values during deployment. Upload changes to
-`config/production.env` again before deploying; `secret sync` preserves existing
-secrets that are absent from the file. Never put credentials in the committed
-configuration files.
+Set `ADMIN_TOKEN` separately for your staging project. Every deployment includes
+`config/production.env`; no configuration upload is required. Void does not
+upload local `.env` values during deployment. Never put credentials in the
+committed configuration files.
+
+If your projects previously stored public settings as remote secrets, follow
+the [migration instructions](../README.md#deploy) before adopting `worker.vars`.
+Existing secrets with matching names override the deployed variables.
 
 On the first `void deploy`, Void provisions the Worker and the `STORAGE` (R2)
-and `KV` bindings declared in `void.json`, and writes the project link to
+and `KV` bindings declared in `void.config.ts`, and writes the project link to
 `.void/`. Generate a strong random `ADMIN_TOKEN` (for example
 `openssl rand -hex 32`) and keep it in a password manager; you will also add it
 to your upstream repo's CI secrets in step 8.
@@ -161,8 +163,8 @@ curl https://<your-slug>.void.app/-/refs      # public read; empty until you pub
 The publish endpoints also accept a GitHub Actions OIDC token, so CI can
 publish without holding `ADMIN_TOKEN` at all. This is what lets fork pull
 requests publish, since GitHub withholds secrets from them. Set four public
-settings in `config/production.env` and upload them with `void secret sync`.
-Void stores them as remote secrets, although their values are public identifiers:
+settings in `config/production.env` and redeploy. They travel as public Worker
+variables with the application:
 
 ```bash
 # The audience CI will request. Set it per environment and never derive it
@@ -199,8 +201,7 @@ mint an OIDC token either. [`ci-setup.md`](./ci-setup.md) has the full wiring
 void domain add registry-bridge.acme.dev
 ```
 
-Then set `PUBLIC_BASE_URL` in `config/production.env` to the custom origin,
-upload the file with `void secret sync`, and redeploy
+Then set `PUBLIC_BASE_URL` in `config/production.env` to the custom origin and redeploy
 so generated tarball URLs point at it. The underlying `<slug>.void.app` URL keeps
 working too.
 
@@ -311,9 +312,14 @@ renaming the slugs:
 - **`.github/workflows/void-deploy.yml`** (push to `main`): re-runs staging as a
   gate, then deploys production and smoke-tests it.
 
-Two authentication paths:
+Both workflows include `config/production.env` as Worker variables in each
+deployment. Public configuration requires no separate upload or secret-write
+permission. Set `ADMIN_TOKEN` independently in each project's remote secret
+storage.
 
-- **Push to main uses GitHub OIDC**, no long-lived token. Connect the repo once
+Deployment authentication uses two paths:
+
+- **Push to main deploys with GitHub OIDC.** Connect the repo once
   per project so the platform will exchange an OIDC token for a short-lived,
   project-scoped deploy token:
 

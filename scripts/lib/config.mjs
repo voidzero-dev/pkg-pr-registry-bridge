@@ -1,6 +1,6 @@
 // Shared helpers for the deploy-time scripts (warm.mjs, e2e-bun.mjs).
 // Reads the bridge origin from config/production.env, the public settings
-// uploaded to Void's remote secret storage. Override at runtime with BRIDGE_URL.
+// deployed as worker.vars. Override at runtime with BRIDGE_URL.
 // Preview refs are registered at runtime (CI / admin endpoints), so the scripts
 // discover them from the live bridge.
 import fs from 'node:fs'
