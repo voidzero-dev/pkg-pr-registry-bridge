@@ -311,9 +311,16 @@ renaming the slugs:
 - **`.github/workflows/void-deploy.yml`** (push to `main`): re-runs staging as a
   gate, then deploys production and smoke-tests it.
 
-Two authentication paths:
+Both workflows sync `config/production.env` before deploying each project,
+using `scripts/sync-config.mjs`. Set the `VOID_TOKEN` repository secret with
+access to both projects for these configuration writes. Keys absent from the
+file, including `ADMIN_TOKEN`, are preserved. Production sync runs only after
+staging passes, and a sync failure stops deployment. The shared concurrency
+group prevents overlapping syncs and deployments.
 
-- **Push to main uses GitHub OIDC**, no long-lived token. Connect the repo once
+Deployment authentication uses two paths:
+
+- **Push to main deploys with GitHub OIDC.** Connect the repo once
   per project so the platform will exchange an OIDC token for a short-lived,
   project-scoped deploy token:
 

@@ -291,11 +291,17 @@ VOID_PROJECT=pkg-pr-registry-bridge pnpm run deploy  # void deploy + e2e
 to the synthetic version, using a ref the bridge already serves). Use
 `pnpm run deploy:only` for `void deploy` alone.
 
-Before the first deployment after upgrading from Void `0.10.x`, upload
-`config/production.env` to both projects with the commands above. This preserves
-the public origin, registry settings, and all four OIDC settings. `secret sync`
-keeps existing secrets absent from the file, including `ADMIN_TOKEN`. Later
-changes to the file also require an upload; `void deploy` never uploads `.env`.
+CI syncs `config/production.env` before each staging and production deployment.
+The file is the source of truth for those keys; each sync overwrites remote
+changes to them and preserves other secrets, including `ADMIN_TOKEN`.
+`scripts/sync-config.mjs` uses noninteractive `void secret put` calls because
+`void secret sync` prompts for confirmation. A failed sync stops deployment;
+rerunning applies the full file again. Production sync starts only after the
+staging smoke test passes. Both workflows share a concurrency group so their
+configuration writes and deployments cannot overlap.
+
+For manual deploys, upload the file with the commands above whenever it changes;
+`void deploy` never uploads `.env`.
 
 The public origin (`PUBLIC_BASE_URL` in `config/production.env`) is the custom domain
 `https://registry-bridge.viteplus.dev`, attached with `void domain add` (the
@@ -320,13 +326,15 @@ CI deploys in two stages, both smoke-testing the REAL Void runtime, which the
 The smoke test hits `/_health`, the `/vite-plus` packument (200 with `time`),
 `/-/refs`, and a download redirect.
 
-The push-to-`main` workflow authenticates with GitHub OIDC: `void deploy`
-exchanges a short-lived OIDC token for a project-scoped deploy token, so no
-secret is involved. This requires the repo to be connected once per project
+The push-to-`main` deployment authenticates with GitHub OIDC: `void deploy`
+exchanges a short-lived OIDC token for a project-scoped deploy token. This
+requires the repo to be connected once per project
 (`void github connect <project> --repo voidzero-dev/pkg-pr-registry-bridge
 --branch main --executor github_actions`) and the workflow file to be named
-exactly `void-deploy.yml`. The PR staging deploy still needs a `VOID_TOKEN`
-repository secret (`void auth token` copies one to your clipboard): the
+exactly `void-deploy.yml`. Configuration sync in both workflows requires the
+`VOID_TOKEN` repository secret with access to both projects; deployment OIDC
+cannot write secrets. The PR staging deploy also uses `VOID_TOKEN`
+(`void auth token` copies one to your clipboard): the
 platform refuses to mint deploy tokens for pull_request events, which run
 untrusted code. Run the smoke test locally with `pnpm smoke <url>`, and deploy
 staging by hand with `pnpm deploy:staging`.
