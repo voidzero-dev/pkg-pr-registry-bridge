@@ -32,11 +32,15 @@ function parseEnvFile(file) {
   return out
 }
 
-/** Read PUBLIC_BASE_URL from the public production settings. */
+/** Read public production settings used by the deployment checks. */
 export function readConfig() {
   const production = parseEnvFile(path.join(root, 'config', 'production.env'))
   return {
     baseUrl: production.PUBLIC_BASE_URL || '',
+    workspacePackages: (production.WORKSPACE_PACKAGES || '')
+      .split(',')
+      .map((name) => name.trim())
+      .filter(Boolean),
   }
 }
 

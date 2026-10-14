@@ -192,13 +192,16 @@ catalogs:
       specifier: 5.0.3
       version: 5.0.3
     void:
-      specifier: ^0.27.0
+      specifier: 0.27.0
       version: 0.27.0
 
 overrides:
   vite@*: npm:@voidzero-dev/vite-plus-core@1.1.0
   vitest@*: 5.0.3
   '@cloudflare/workers-types@*': 5.20261009.1
+
+patchedDependencies:
+  void@0.27.0: 5a805b1f98e9c6a44072e491c58812a43a523955e508a020b07f38825fd41fb5
 
 importers:
 
@@ -237,7 +240,7 @@ importers:
         version: 5.0.3(@types/node@24.13.3)(@vitest/browser-preview@5.0.3)(@vitest/ui@5.0.3)(@voidzero-dev/vite-plus-core@1.1.0(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(typescript@7.0.2))
       void:
         specifier: 'catalog:'
-        version: 0.27.0(@types/node@24.13.3)(@voidzero-dev/vite-plus-core@1.1.0(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(typescript@7.0.2))(arktype@2.2.1)(kysely@0.29.5)(valibot@1.4.1(typescript@7.0.2))(vitest@5.0.3)(wrangler@4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@24.13.3))(zod@4.6.5)
+        version: 0.27.0(patch_hash=5a805b1f98e9c6a44072e491c58812a43a523955e508a020b07f38825fd41fb5)(@types/node@24.13.3)(@voidzero-dev/vite-plus-core@1.1.0(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(typescript@7.0.2))(arktype@2.2.1)(kysely@0.29.5)(valibot@1.4.1(typescript@7.0.2))(vitest@5.0.3)(wrangler@4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@24.13.3))(zod@4.6.5)
 
 packages:
 
@@ -4756,7 +4759,7 @@ snapshots:
     transitivePeerDependencies:
       - msw
 
-  void@0.27.0(@types/node@24.13.3)(@voidzero-dev/vite-plus-core@1.1.0(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(typescript@7.0.2))(arktype@2.2.1)(kysely@0.29.5)(valibot@1.4.1(typescript@7.0.2))(vitest@5.0.3)(wrangler@4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@24.13.3))(zod@4.6.5):
+  void@0.27.0(patch_hash=5a805b1f98e9c6a44072e491c58812a43a523955e508a020b07f38825fd41fb5)(@types/node@24.13.3)(@voidzero-dev/vite-plus-core@1.1.0(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(typescript@7.0.2))(arktype@2.2.1)(kysely@0.29.5)(valibot@1.4.1(typescript@7.0.2))(vitest@5.0.3)(wrangler@4.149.0(@cloudflare/workers-types@5.20261009.1)(@types/node@24.13.3))(zod@4.6.5):
     dependencies:
       '@cloudflare/build-output-utils': 0.9.0
       '@cloudflare/codemods': 0.4.2
