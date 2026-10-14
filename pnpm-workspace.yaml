@@ -26,7 +26,8 @@ catalog:
   vite: npm:@voidzero-dev/vite-plus-core@1.1.0
   vite-plus: 1.1.0
   vitest: 5.0.3
-  void: ^0.27.0
+  # Keep the managed-deploy vars patch until an upstream release includes it.
+  void: 0.27.0
 overrides:
   vite@*: 'catalog:'
   vitest@*: 'catalog:'
@@ -38,3 +39,5 @@ peerDependencyRules:
   allowedVersions:
     vite: '*'
     vitest: '*'
+patchedDependencies:
+  void@0.27.0: patches/void@0.27.0.patch

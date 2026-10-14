@@ -21,7 +21,7 @@
 
 import { createTarGzip } from 'nanotar'
 import { createHash } from 'node:crypto'
-import { refToVersion } from './lib/config.mjs'
+import { readConfig, refToVersion } from './lib/config.mjs'
 
 const args = process.argv.slice(2)
 const WRITE = args.includes('--write')
@@ -232,6 +232,27 @@ const checks = [
     },
   },
 ]
+
+// An invalid version reaches the allowlist check without reading or writing R2.
+// Probe every configured pattern so stale remote settings cannot hide new names.
+const { workspacePackages } = readConfig()
+assert(workspacePackages.length > 0, 'WORKSPACE_PACKAGES must contain at least one package pattern')
+for (const pattern of workspacePackages) {
+  const name = pattern.endsWith('*') ? `${pattern.slice(0, -1)}smoke-config-check` : pattern
+  checks.push({
+    name: `workspace allowlist accepts ${name}`,
+    async run() {
+      const res = await fetch(`${base}/tarballs/${encodeURIComponent(name)}/invalid-version.tgz`)
+      const body = await res.text()
+      console.log(`    ${res.status} ${truncate(body)}`)
+      assert(res.status === 400, `status ${res.status}: ${truncate(body)}`)
+      assert(
+        JSON.parse(body)?.error === 'Invalid preview version: invalid-version',
+        'unexpected error',
+      )
+    },
+  })
+}
 
 if (WRITE) {
   // Not retried (`retry: false`): a retry after a partial run would false-fail
