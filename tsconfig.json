@@ -14,7 +14,16 @@
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src", "routes", "crons", "env.ts", "test", "vite.config.ts", "vitest.config.ts"],
+  "include": [
+    "src",
+    "routes",
+    "crons",
+    "env.ts",
+    "test",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "void.config.ts"
+  ],
   // The action tests run in Node, not the Worker: tsconfig.action.json checks
   // them (and the action source) against Node types.
   "exclude": ["test/action"]

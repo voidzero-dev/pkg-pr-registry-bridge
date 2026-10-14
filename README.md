@@ -228,11 +228,12 @@ The action's bundle is committed
 
 ## Configuration
 
-Values are declared in `env.ts` (typed and validated). Local development reads
-the gitignored `.env`, initialized from `config/local.env`. Void stores all
-production server values remotely, including public configuration. Upload the
-public settings in `config/production.env` with `void secret sync`; upload
-credentials separately with `void secret put`.
+`void.config.ts` loads public settings from `config/production.env` into
+`worker.vars`. Each deployment includes these values, so changing the file and
+deploying updates the configuration without a separate upload. Local development
+reads the gitignored `.env`, initialized from `config/local.env`, which overrides
+the public settings locally. Only credentials belong in `env.ts` and Void's
+remote secret storage; set them with `void secret put`.
 
 | Var                              | Meaning                                                                                                   |
 | -------------------------------- | --------------------------------------------------------------------------------------------------------- |
@@ -243,7 +244,7 @@ credentials separately with `void secret put`.
 
 Bindings/secrets:
 
-- `STORAGE` (R2) - generated tarballs, rewritten metadata (incl. integrity), and the runtime-registered refs index. Auto-provisioned by Void on deploy (no manual bucket creation); the binding is declared in `void.json` (`inference.bindings.storage`). The runtime refs index self-expires after 90 days (in-code TTL), and a daily Void cron (`crons/cleanup-expired.ts`) sweeps the per-version meta/tarball objects once their ref TTL lapses, so R2 storage stays bounded to the active-ref window.
+- `STORAGE` (R2) - generated tarballs, rewritten metadata (incl. integrity), and the runtime-registered refs index. Auto-provisioned by Void on deploy (no manual bucket creation); the binding is declared in `void.config.ts` (`inference.bindings.storage`). The runtime refs index self-expires after 90 days (in-code TTL), and a daily Void cron (`crons/cleanup-expired.ts`) sweeps the per-version meta/tarball objects once their ref TTL lapses, so R2 storage stays bounded to the active-ref window.
 - `ADMIN_TOKEN` (secret) - guards the admin endpoints. Set with `void secret put ADMIN_TOKEN`.
 
 ## Develop
@@ -273,10 +274,8 @@ needed). To run an independent bridge for another project (fork, configure,
 deploy, wire CI), follow [`docs/self-hosting.md`](./docs/self-hosting.md).
 
 ```bash
-# One-time: connect, authenticate, and upload each project's configuration.
+# One-time: connect and authenticate.
 vp exec void connect https://api.void.cloud
-vp exec void secret sync config/production.env --project pkg-pr-registry-bridge
-vp exec void secret sync config/production.env --project pkg-pr-registry-bridge-staging
 # Set ADMIN_TOKEN separately for each project if it is not already configured.
 vp exec void secret put ADMIN_TOKEN --project pkg-pr-registry-bridge
 vp exec void secret put ADMIN_TOKEN --project pkg-pr-registry-bridge-staging
@@ -291,17 +290,19 @@ VOID_PROJECT=pkg-pr-registry-bridge pnpm run deploy  # void deploy + e2e
 to the synthetic version, using a ref the bridge already serves). Use
 `pnpm run deploy:only` for `void deploy` alone.
 
-CI syncs `config/production.env` before each staging and production deployment.
-The file is the source of truth for those keys; each sync overwrites remote
-changes to them and preserves other secrets, including `ADMIN_TOKEN`.
-`scripts/sync-config.mjs` uses noninteractive `void secret put` calls because
-`void secret sync` prompts for confirmation. A failed sync stops deployment;
-rerunning applies the full file again. Production sync starts only after the
-staging smoke test passes. Both workflows share a concurrency group so their
-configuration writes and deployments cannot overlap.
+Both CI and manual deployments include `config/production.env` through
+`worker.vars`. Production deployment starts only after staging passes.
+`void deploy` never uploads the local `.env`.
 
-For manual deploys, upload the file with the commands above whenever it changes;
-`void deploy` never uploads `.env`.
+**Migration for existing projects:** remove the public keys previously uploaded
+to remote secret storage in both production and staging. A remote secret with
+the same name takes precedence over `worker.vars`, so leaving those entries
+would keep the old settings active. Keep `ADMIN_TOKEN` and any other credentials.
+Use `void secret list --project <slug>` to inspect names and
+`void secret delete <name> --project <slug>` for each public key in
+`config/production.env`. Secret deletion changes the running Worker immediately;
+perform this cleanup and the first deployment during a maintenance window.
+New projects do not need this migration.
 
 The public origin (`PUBLIC_BASE_URL` in `config/production.env`) is the custom domain
 `https://registry-bridge.viteplus.dev`, attached with `void domain add` (the
@@ -331,10 +332,10 @@ exchanges a short-lived OIDC token for a project-scoped deploy token. This
 requires the repo to be connected once per project
 (`void github connect <project> --repo voidzero-dev/pkg-pr-registry-bridge
 --branch main --executor github_actions`) and the workflow file to be named
-exactly `void-deploy.yml`. Configuration sync in both workflows requires the
-`VOID_TOKEN` repository secret with access to both projects; deployment OIDC
-cannot write secrets. The PR staging deploy also uses `VOID_TOKEN`
-(`void auth token` copies one to your clipboard): the
+exactly `void-deploy.yml`. Public configuration uses the same deployment
+credentials; it does not need secret-write access. The PR staging deploy still
+needs a `VOID_TOKEN` repository secret (`void auth token` copies one to your
+clipboard): the
 platform refuses to mint deploy tokens for pull_request events, which run
 untrusted code. Run the smoke test locally with `pnpm smoke <url>`, and deploy
 staging by hand with `pnpm deploy:staging`.

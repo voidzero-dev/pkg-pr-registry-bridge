@@ -4,18 +4,16 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Share the staging lock with staging.yml. Configuration writes must not
-# overlap another deployment, and a running sync/deploy must finish.
+# A newer push cancels an in-flight deploy for the same branch.
 concurrency:
-  group: void-staging
-  cancel-in-progress: false
-  queue: max
+  group: void-deploy-${{ github.ref }}
+  cancel-in-progress: true
 
-# `void deploy` uses GitHub OIDC: the CLI exchanges an OIDC token for a
-# short-lived project-scoped deploy token. The Void
+# `void deploy` authenticates via GitHub OIDC, so there is no long-lived
+# VOID_TOKEN secret here: id-token lets the job mint an OIDC token that the
+# CLI exchanges for a short-lived project-scoped deploy token. The Void
 # platform only honors the exchange from `.github/workflows/void-deploy.yml`
 # on a push to the connected branch, so this file must keep exactly that name.
-# Configuration writes require VOID_TOKEN, scoped to the sync steps below.
 permissions:
   id-token: write
   contents: read
@@ -40,11 +38,6 @@ jobs:
       - name: Connect to Void
         run: vp exec void connect "$VOID_API_URL" --no-login
 
-      - name: Sync staging configuration
-        run: node scripts/sync-config.mjs pkg-pr-registry-bridge-staging
-        env:
-          VOID_TOKEN: ${{ secrets.VOID_TOKEN }}
-
       # Staging-first gate, even though PRs already smoke-test staging
       # (staging.yml), a change can still reach main without that check: a fork
       # PR can't read VOID_TOKEN, and direct pushes skip PR CI. So re-run the
@@ -60,11 +53,6 @@ jobs:
           SMOKE_ADMIN_TOKEN: ${{ secrets.STAGING_ADMIN_TOKEN }}
 
       # Only reached when the staging smoke test passed.
-      - name: Sync production configuration
-        run: node scripts/sync-config.mjs pkg-pr-registry-bridge
-        env:
-          VOID_TOKEN: ${{ secrets.VOID_TOKEN }}
-
       - name: Deploy to production
         run: vp run deploy:only
         env:

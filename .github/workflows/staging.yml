@@ -3,12 +3,11 @@ on:
   pull_request:
     branches: [main]
 
-# Share the staging lock with void-deploy.yml so configuration writes and
-# deployments cannot overlap. Never cancel a run mid-flight.
+# One shared staging environment, so serialize across PRs: queue rather than
+# clobber another PR's deploy+smoke, and never cancel a run mid-flight.
 concurrency:
   group: void-staging
   cancel-in-progress: false
-  queue: max
 
 env:
   VOID_API_URL: ${{ vars.VOID_API_URL || 'https://api.void.cloud' }}
@@ -31,11 +30,6 @@ jobs:
 
       - name: Connect to Void
         run: vp exec void connect "$VOID_API_URL" --no-login
-
-      - name: Sync staging configuration
-        run: node scripts/sync-config.mjs pkg-pr-registry-bridge-staging
-        env:
-          VOID_TOKEN: ${{ secrets.VOID_TOKEN }}
 
       # Deploy this PR's code to the shared staging project, then smoke-test the
       # REAL Void runtime. This catches platform-only failures the pool-workers
