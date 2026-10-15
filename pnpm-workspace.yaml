@@ -6,23 +6,17 @@ allowBuilds:
 # vite-plus, the @voidzero-dev/vite-plus-* packages, and vitest are excluded
 # from pnpm's release-age cooldown. The local Renovate vite+ group proposes
 # their bumps together and immediately, and this repo dogfoods fresh releases.
-# Void and its internal packages can also update together without the cooldown.
+# Void and its Cloudflare dependencies can also update without the cooldown.
 minimumReleaseAgeExclude:
   - void
   - '@void/*'
   - vite-plus
   - '@voidzero-dev/vite-plus-*'
   - vitest
-  - '@cloudflare/vitest-plugin@1.4.0'
-  - '@cloudflare/workers-types@5.20261009.1'
-  - cf@1.0.0-beta.14 || 1.0.0-beta.17
-  - '@cloudflare/build-output-utils@0.9.2'
-  - '@cloudflare/codemods@0.5.0'
-  - '@cloudflare/config@0.26.0'
-  - '@cloudflare/runtime-types@0.1.11'
-  - '@cloudflare/vite-plugin@1.64.0'
-  - miniflare@5.20261012.0-beta
-  - wrangler@4.151.0
+  - '@cloudflare/*'
+  - cf
+  - miniflare
+  - wrangler
 catalog:
   '@cloudflare/vitest-plugin': ^1.4.0
   '@cloudflare/workers-types': 5.20261009.1
