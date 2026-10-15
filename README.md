@@ -294,11 +294,8 @@ Both CI and manual deployments include `config/production.env` through
 `worker.vars`. Production deployment starts only after staging passes.
 `void deploy` never uploads the local `.env`.
 
-The pinned `void@0.28.0` dependency has a patch in `patches/` because its managed
-deployment code otherwise discards `worker.vars`. The patch includes these values
-in the deployment manifest. Keep it until a release includes the fix in
-[Void PR #423](https://github.com/voidzero-dev/void/pull/423). The deployment smoke
-check probes each configured package pattern against the running Worker.
+The deployment smoke check probes each configured package pattern against the
+running Worker.
 
 **Migration for existing projects:** remove the public keys previously uploaded
 to remote secret storage in both production and staging. A remote secret with
