@@ -3,7 +3,7 @@ allowBuilds:
   workerd: true
   sharp: true
   better-sqlite3: false
-# vite-plus, the @voidzero-dev/vite-plus-* packages, and vitest are excluded
+# vite-plus, the @voidzero-dev/vite-plus-* packages, vitest, and the @vitest/* packages are excluded
 # from pnpm's release-age cooldown. The local Renovate vite+ group proposes
 # their bumps together and immediately, and this repo dogfoods fresh releases.
 # Void and its Cloudflare dependencies can also update without the cooldown.
@@ -13,6 +13,7 @@ minimumReleaseAgeExclude:
   - vite-plus
   - '@voidzero-dev/vite-plus-*'
   - vitest
+  - '@vitest/*'
   - '@cloudflare/*'
   - cf
   - miniflare
@@ -24,9 +25,9 @@ catalog:
   hono: ^4.12.27
   nanotar: ^0.3.0
   typescript: ^7.0.0
-  vite: npm:@voidzero-dev/vite-plus-core@1.2.0
-  vite-plus: 1.2.0
-  vitest: 5.0.4
+  vite: npm:@voidzero-dev/vite-plus-core@1.3.0
+  vite-plus: 1.3.0
+  vitest: 5.0.5
   void: 1.1.0
 overrides:
   vite@*: 'catalog:'
