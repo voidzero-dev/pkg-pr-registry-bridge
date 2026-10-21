@@ -24,10 +24,10 @@ bun install
 
 ```bash
 node -p "require('./node_modules/vite/package.json').name"            # @voidzero-dev/vite-plus-core
-node -p "require('./node_modules/vite/package.json').version"         # 0.0.0-commit.6acea1aa818e96365b5811d47360367ba18a3a05
+node -p "require('./node_modules/vite/package.json').version"         # 1.3.0
 node -p "require('./node_modules/vite-plus/package.json').name"       # vite-plus
-node -p "require('./node_modules/vite-plus/package.json').version"    # 0.0.0-commit.6acea1aa818e96365b5811d47360367ba18a3a05
-node -p "require('./node_modules/@voidzero-dev/vite-plus-core/package.json').version"  # 0.0.0-commit.6acea1aa818e96365b5811d47360367ba18a3a05
+node -p "require('./node_modules/vite-plus/package.json').version"    # 1.3.0
+node -p "require('./node_modules/@voidzero-dev/vite-plus-core/package.json').version"  # 1.3.0
 
 bunx vp --version
 ```
